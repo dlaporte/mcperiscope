@@ -1,0 +1,129 @@
+import { useState } from "react";
+import Markdown from "react-markdown";
+
+interface Props {
+  data: unknown;
+}
+
+function extractTextContent(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+
+  const obj = data as Record<string, unknown>;
+
+  // MCP resource result: { contents: [{ text, mimeType }] }
+  if (Array.isArray(obj.contents)) {
+    const texts = obj.contents
+      .filter((c: any) => typeof c?.text === "string")
+      .map((c: any) => c.text as string);
+    if (texts.length > 0) return texts.join("\n\n");
+  }
+
+  // MCP tool result: { content: [{ type: "text", text }] }
+  if (Array.isArray(obj.content)) {
+    const texts = obj.content
+      .filter((c: any) => c?.type === "text" && typeof c?.text === "string")
+      .map((c: any) => c.text as string);
+    if (texts.length > 0) return texts.join("\n\n");
+  }
+
+  // MCP prompt result: { messages: [{ content: { type: "text", text } }] }
+  if (Array.isArray(obj.messages)) {
+    const texts = obj.messages
+      .filter((m: any) => typeof m?.content?.text === "string")
+      .map((m: any) => m.content.text as string);
+    if (texts.length > 0) return texts.join("\n\n");
+  }
+
+  return null;
+}
+
+/**
+ * Deep-clone a value, parsing any string that looks like JSON into
+ * its parsed form so that JSON.stringify renders it inline instead
+ * of showing escaped quotes.
+ */
+function deepParseJsonStrings(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return deepParseJsonStrings(JSON.parse(trimmed));
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(deepParseJsonStrings);
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = deepParseJsonStrings(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Pretty-print JSON with multiline strings rendered as actual newlines
+ * instead of \n escapes. Long strings are indented to their context level.
+ */
+function prettyPrintJson(data: unknown): string {
+  const raw = JSON.stringify(data, null, 2);
+  // Replace JSON-escaped strings that contain \n with block-indented text.
+  // Match: "<content with \n>" sitting at some indentation level.
+  return raw.replace(/^( *)"((?:[^"\\]|\\.)*)"/gm, (_match, indent: string, content: string) => {
+    // Only process strings that actually contain escaped newlines
+    if (!content.includes("\\n")) return _match;
+    // Unescape the JSON string content
+    const unescaped = content
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
+    // If it's a single line after unescape, keep it inline
+    if (!unescaped.includes("\n")) return `${indent}"${unescaped}"`;
+    // Indent each continuation line to align with the opening quote
+    const pad = indent + "  ";
+    const lines = unescaped.split("\n");
+    return `${indent}"${lines.join("\n" + pad)}"`;
+  });
+}
+
+export function JsonViewer({ data }: Props) {
+  const [formatted, setFormatted] = useState(false);
+  const textContent = extractTextContent(data);
+  const prettyData = deepParseJsonStrings(data);
+
+  return (
+    <div>
+      {textContent && (
+        <div className="mb-2">
+          <button
+            type="button"
+            onClick={() => setFormatted(!formatted)}
+            className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 transition-colors"
+          >
+            {formatted ? "Show JSON" : "Show Formatted"}
+          </button>
+        </div>
+      )}
+
+      {formatted && textContent ? (
+        <div className="bg-gray-900 p-4 rounded-lg overflow-auto text-sm max-h-[600px] prose prose-invert prose-sm max-w-none">
+          <Markdown>{textContent}</Markdown>
+        </div>
+      ) : (
+        <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto text-sm max-h-[600px]">
+          {prettyPrintJson(prettyData)}
+        </pre>
+      )}
+    </div>
+  );
+}
