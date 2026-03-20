@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Markdown from "react-markdown";
 import { useStore } from "../../store";
 
 interface ToolChainStep {
@@ -8,6 +9,38 @@ interface ToolChainStep {
   output: string;
   duration: number;
   error: string | null;
+}
+
+function syntaxHighlight(json: string): string {
+  return json.replace(
+    /("(?:\\.|[^"\\])*")\s*:/g,
+    '<span style="color:#93c5fd">$1</span>:'
+  ).replace(
+    /:\s*("(?:\\.|[^"\\])*")/g,
+    ': <span style="color:#86efac">$1</span>'
+  ).replace(
+    /:\s*(true|false)/g,
+    ': <span style="color:#fbbf24">$1</span>'
+  ).replace(
+    /:\s*(\d+\.?\d*)/g,
+    ': <span style="color:#c4b5fd">$1</span>'
+  ).replace(
+    /:\s*(null)/g,
+    ': <span style="color:#6b7280">$1</span>'
+  );
+}
+
+function formatData(data: unknown): string {
+  if (typeof data === "string") {
+    // Try to parse as JSON and pretty-print
+    try {
+      const parsed = JSON.parse(data);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return data;
+    }
+  }
+  return JSON.stringify(data, null, 2);
 }
 
 function CollapsibleJson({
@@ -20,7 +53,7 @@ function CollapsibleJson({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  const text = formatData(data);
   const isLong = text.length > 200;
 
   return (
@@ -46,9 +79,10 @@ function CollapsibleJson({
         )}
       </button>
       {open && (
-        <pre className="mt-1 p-2 bg-gray-950 rounded text-xs text-gray-300 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-words">
-          {text}
-        </pre>
+        <pre
+          className="mt-1 p-2 bg-gray-950 rounded text-xs text-green-300 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono"
+          dangerouslySetInnerHTML={{ __html: syntaxHighlight(text) }}
+        />
       )}
     </div>
   );
@@ -56,6 +90,7 @@ function CollapsibleJson({
 
 function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
   const hasError = !!step.error;
+  const isLoading = step.output === "Calling...";
 
   return (
     <div className="flex gap-3">
@@ -84,15 +119,19 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
               {step.tool}
             </span>
           </div>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full ${
-              step.duration > 2
-                ? "bg-yellow-900 text-yellow-300"
-                : "bg-gray-700 text-gray-300"
-            }`}
-          >
-            {step.duration}s
-          </span>
+          {isLoading ? (
+            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full ${
+                step.duration > 2
+                  ? "bg-yellow-900 text-yellow-300"
+                  : "bg-gray-700 text-gray-300"
+              }`}
+            >
+              {step.duration}s
+            </span>
+          )}
         </div>
 
         {hasError && (
@@ -149,14 +188,21 @@ export function ToolChainViewer() {
       )}
 
       {/* Final answer */}
-      <div className="p-4 rounded-lg border-2 border-green-800 bg-green-950/20">
-        <span className="text-xs text-green-400 uppercase tracking-wider font-medium">
-          Final Answer
-        </span>
-        <div className="mt-2 text-sm text-gray-200 whitespace-pre-wrap">
-          {evalResult.answer}
+      {evalResult.answer ? (
+        <div className="p-4 rounded-lg border-2 border-green-800 bg-green-950/20">
+          <span className="text-xs text-green-400 uppercase tracking-wider font-medium">
+            Final Answer
+          </span>
+          <div className="mt-2 text-sm text-gray-200 prose prose-sm prose-invert max-w-none">
+            <Markdown>{evalResult.answer}</Markdown>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="p-4 rounded-lg border-2 border-gray-700 bg-gray-800/50 flex items-center gap-3">
+          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-gray-400">LLM is working...</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,6 +16,16 @@ export function OptimizeTab() {
     <div className="h-full flex relative">
       {/* Left panel: prompt input + eval history */}
       <div className="w-1/3 border-r border-gray-700 flex flex-col min-h-0">
+        {/* Explanation */}
+        <div className="px-4 pt-4 pb-2">
+          <p className="text-xs text-gray-400 leading-relaxed">
+            Test how well an LLM uses this MCP's tools by entering real questions below.
+            The LLM will chain tool calls to answer each prompt. Rate the responses for correctness,
+            then click <strong className="text-purple-400">Optimize</strong> to analyze tool usage
+            patterns and generate recommendations for reducing token waste, consolidating tools, and
+            improving accuracy.
+          </p>
+        </div>
         <PromptInput />
         <EvalHistory />
       </div>

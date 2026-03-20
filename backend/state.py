@@ -8,13 +8,18 @@ from mcp_optimizer.connections import MCPConnection
 
 
 MODEL_CONTEXT_WINDOWS = {
-    "claude-sonnet-4-20250514": 200_000,
-    "claude-opus-4-20250514": 200_000,
+    # Anthropic — Claude 4.6
+    "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
+    # Anthropic — Claude 4.5
     "claude-haiku-4-5-20251001": 200_000,
+    # OpenAI — GPT-5.x
+    "gpt-5.4": 1_000_000,
+    "gpt-5.4-mini": 400_000,
+    "gpt-5.2": 400_000,
+    # OpenAI — GPT-4o
     "gpt-4o": 128_000,
-    "gpt-4-turbo": 128_000,
-    "gpt-4": 8_192,
-    "gpt-3.5-turbo": 16_384,
+    "gpt-4o-mini": 128_000,
 }
 
 
@@ -28,7 +33,7 @@ class Session:
     analysis: dict | None = None
     recommendations: list[dict] = field(default_factory=list)
     prompts: list[str] = field(default_factory=list)
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     api_key: str = ""
     eval_results: list[dict] = field(default_factory=list)
     comparison: dict | None = None

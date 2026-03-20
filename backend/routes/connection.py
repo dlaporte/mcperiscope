@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
+
 from backend.models import ConnectRequest
 from backend import mcp_manager
 from backend.state import session
@@ -9,11 +12,10 @@ router = APIRouter()
 async def _validate_api_key(api_key: str) -> None:
     """Validate the Anthropic API key by making a lightweight API call."""
     if not api_key:
-        return  # Optional — user may not need the Optimize tab
+        return
     import anthropic
     try:
         client = anthropic.Anthropic(api_key=api_key)
-        # Use a minimal call to validate the key
         client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1,

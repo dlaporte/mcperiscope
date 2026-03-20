@@ -23,6 +23,7 @@ interface AppState {
   headerName: string;
   headerValue: string;
   oauthPending: boolean;
+  connectProgress: string | null;
 
   // Model config
   model: string;
@@ -158,6 +159,66 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
   });
 }
 
+async function consumeConnectSSE(
+  response: Response,
+  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void,
+  get: () => AppState,
+) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    let currentEvent = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ") && currentEvent) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (currentEvent === "progress") {
+            set({ connectProgress: data.message });
+          } else if (currentEvent === "oauth_redirect") {
+            set({ connecting: false, oauthPending: true, connectProgress: null });
+            window.location.href = data.authorizationUrl;
+            return;
+          } else if (currentEvent === "done") {
+            set({
+              connected: true,
+              connecting: false,
+              oauthPending: false,
+              serverInfo: data.serverInfo,
+              connectProgress: null,
+            });
+            await fetchCapabilities(set);
+          } else if (currentEvent === "error") {
+            set({
+              connecting: false,
+              oauthPending: false,
+              error: data.message,
+              connectProgress: null,
+            });
+          }
+        } catch { /* skip unparseable */ }
+        currentEvent = "";
+      }
+    }
+  }
+
+  if (get().connecting) {
+    set({ connecting: false, connectProgress: null });
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   connected: false,
   connecting: false,
@@ -168,7 +229,8 @@ export const useStore = create<AppState>((set, get) => ({
   headerName: lsGet("headerName"),
   headerValue: lsGet("headerValue"),
   oauthPending: false,
-  model: lsGet("model") || "claude-sonnet-4-20250514",
+  connectProgress: null,
+  model: lsGet("model") || "claude-sonnet-4-6",
   apiKey: lsGet("apiKey"),
   tools: [],
   resources: [],
@@ -235,7 +297,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   connect: async (url: string) => {
-    set({ connecting: true, error: null, oauthPending: false });
+    set({ connecting: true, error: null, oauthPending: false, connectProgress: null });
     try {
       const state = get();
       const authConfig = buildAuthConfig(state);
@@ -247,31 +309,37 @@ export const useStore = create<AppState>((set, get) => ({
         return;
       }
 
-      set({ connected: true, connecting: false, serverInfo: res.serverInfo });
+      set({ connected: true, connecting: false, serverInfo: res.serverInfo, connectProgress: null });
       await fetchCapabilities(set);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ connecting: false, error: message });
+      set({ connecting: false, error: message, connectProgress: null });
     }
   },
 
   completeOAuth: async (callbackUrl: string) => {
-    set({ connecting: true, error: null });
+    set({ connecting: true, error: null, connectProgress: "Starting authentication..." });
     try {
       const state = get();
-      const res = await api.authCallback(callbackUrl, state.model, state.apiKey);
-      if (res.status === "connected") {
-        set({
-          connected: true,
-          connecting: false,
-          oauthPending: false,
-          serverInfo: res.serverInfo,
-        });
-        await fetchCapabilities(set);
+      const response = await fetch("/api/auth/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callback_url: callbackUrl,
+          model: state.model || undefined,
+          api_key: state.apiKey || undefined,
+        }),
+      });
+
+      if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
+        const err = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(err.detail || response.statusText);
       }
+
+      await consumeConnectSSE(response, set, get);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ connecting: false, oauthPending: false, error: message });
+      set({ connecting: false, oauthPending: false, error: message, connectProgress: null });
     }
   },
 
@@ -398,44 +466,120 @@ export const useStore = create<AppState>((set, get) => ({
 
   // Optimize actions
   evaluate: async (prompt) => {
-    set({ evalLoading: true });
+    // Add a placeholder entry immediately and select it
+    const placeholderIndex = get().evalResults.length;
+    set((state) => ({
+      evalLoading: true,
+      evalResults: [
+        ...state.evalResults,
+        { prompt, answer: "", toolChain: [], traceEvents: [] },
+      ],
+      selectedEvalIndex: placeholderIndex,
+    }));
+
     try {
-      const result = await api.evaluate(prompt);
-      const typed = result as {
-        prompt: string;
-        answer: string;
-        toolChain: any[];
-        traceEvents: any[];
-        index: number;
-      };
-      set((state) => ({
-        evalResults: [
-          ...state.evalResults,
-          {
-            prompt: typed.prompt,
-            answer: typed.answer,
-            toolChain: typed.toolChain,
-            traceEvents: typed.traceEvents,
-          },
-        ],
-        selectedEvalIndex: state.evalResults.length,
-        evalLoading: false,
-      }));
+      const response = await fetch("/api/optimize/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(err.detail || response.statusText);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "tool_calling") {
+                // Add an in-progress step to the tool chain
+                set((state) => {
+                  const evalResults = [...state.evalResults];
+                  const entry = { ...evalResults[placeholderIndex] };
+                  entry.toolChain = [
+                    ...entry.toolChain,
+                    { step: data.step, tool: data.tool, input: data.input, output: "Calling...", duration: 0, error: null },
+                  ];
+                  evalResults[placeholderIndex] = entry;
+                  return { evalResults };
+                });
+              } else if (currentEvent === "tool_result") {
+                // Update the last step with the result
+                set((state) => {
+                  const evalResults = [...state.evalResults];
+                  const entry = { ...evalResults[placeholderIndex] };
+                  const chain = [...entry.toolChain];
+                  const lastIdx = chain.findIndex((s) => s.step === data.step);
+                  if (lastIdx >= 0) {
+                    chain[lastIdx] = data;
+                  } else {
+                    chain.push(data);
+                  }
+                  entry.toolChain = chain;
+                  evalResults[placeholderIndex] = entry;
+                  return { evalResults };
+                });
+              } else if (currentEvent === "done") {
+                // Final result
+                set((state) => {
+                  const evalResults = [...state.evalResults];
+                  evalResults[placeholderIndex] = {
+                    prompt: data.prompt,
+                    answer: data.answer,
+                    toolChain: data.toolChain,
+                    traceEvents: data.traceEvents,
+                  };
+                  return { evalResults, evalLoading: false };
+                });
+              } else if (currentEvent === "error") {
+                set((state) => {
+                  const evalResults = [...state.evalResults];
+                  evalResults[placeholderIndex] = {
+                    ...evalResults[placeholderIndex],
+                    answer: `Error: ${data.message}`,
+                  };
+                  return { evalResults, evalLoading: false };
+                });
+              }
+            } catch {
+              // Skip unparseable SSE data
+            }
+            currentEvent = "";
+          }
+        }
+      }
+
+      // Ensure loading is cleared
+      set({ evalLoading: false });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set((state) => ({
-        evalResults: [
-          ...state.evalResults,
-          {
-            prompt,
-            answer: `Error: ${message}`,
-            toolChain: [],
-            traceEvents: [],
-          },
-        ],
-        selectedEvalIndex: state.evalResults.length,
-        evalLoading: false,
-      }));
+      set((state) => {
+        const evalResults = [...state.evalResults];
+        evalResults[placeholderIndex] = {
+          ...evalResults[placeholderIndex],
+          answer: `Error: ${message}`,
+        };
+        return { evalResults, evalLoading: false };
+      });
     }
   },
 

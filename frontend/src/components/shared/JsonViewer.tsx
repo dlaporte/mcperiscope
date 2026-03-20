@@ -5,17 +5,28 @@ interface Props {
   data: unknown;
 }
 
-function extractTextContent(data: unknown): string | null {
+interface ExtractedText {
+  text: string;
+  isMarkdown: boolean;
+}
+
+function extractTextContent(data: unknown): ExtractedText | null {
   if (!data || typeof data !== "object") return null;
 
   const obj = data as Record<string, unknown>;
 
-  // MCP resource result: { contents: [{ text, mimeType }] }
+  // MCP resource result: { contents: [{ text, mimeType, uri }] }
   if (Array.isArray(obj.contents)) {
-    const texts = obj.contents
-      .filter((c: any) => typeof c?.text === "string")
-      .map((c: any) => c.text as string);
-    if (texts.length > 0) return texts.join("\n\n");
+    const items = obj.contents.filter((c: any) => typeof c?.text === "string");
+    if (items.length > 0) {
+      const text = items.map((c: any) => c.text as string).join("\n\n");
+      const isMarkdown = items.some(
+        (c: any) =>
+          c?.mimeType === "text/markdown" ||
+          (typeof c?.uri === "string" && c.uri.endsWith(".md"))
+      );
+      return { text, isMarkdown };
+    }
   }
 
   // MCP tool result: { content: [{ type: "text", text }] }
@@ -23,7 +34,7 @@ function extractTextContent(data: unknown): string | null {
     const texts = obj.content
       .filter((c: any) => c?.type === "text" && typeof c?.text === "string")
       .map((c: any) => c.text as string);
-    if (texts.length > 0) return texts.join("\n\n");
+    if (texts.length > 0) return { text: texts.join("\n\n"), isMarkdown: false };
   }
 
   // MCP prompt result: { messages: [{ content: { type: "text", text } }] }
@@ -31,7 +42,7 @@ function extractTextContent(data: unknown): string | null {
     const texts = obj.messages
       .filter((m: any) => typeof m?.content?.text === "string")
       .map((m: any) => m.content.text as string);
-    if (texts.length > 0) return texts.join("\n\n");
+    if (texts.length > 0) return { text: texts.join("\n\n"), isMarkdown: false };
   }
 
   return null;
@@ -98,12 +109,13 @@ function prettyPrintJson(data: unknown): string {
 
 export function JsonViewer({ data }: Props) {
   const [formatted, setFormatted] = useState(false);
-  const textContent = extractTextContent(data);
+  const extracted = extractTextContent(data);
   const prettyData = deepParseJsonStrings(data);
+  const showToggle = extracted?.isMarkdown ?? false;
 
   return (
     <div>
-      {textContent && (
+      {showToggle && (
         <div className="mb-2">
           <button
             type="button"
@@ -115,9 +127,9 @@ export function JsonViewer({ data }: Props) {
         </div>
       )}
 
-      {formatted && textContent ? (
+      {formatted && extracted ? (
         <div className="bg-gray-900 p-4 rounded-lg overflow-auto text-sm max-h-[600px] prose prose-invert prose-sm max-w-none">
-          <Markdown>{textContent}</Markdown>
+          <Markdown>{extracted.text}</Markdown>
         </div>
       ) : (
         <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto text-sm max-h-[600px]">

@@ -1,13 +1,18 @@
 import { useStore } from "../../store";
 
 const MODELS = [
-  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", context: 200000, provider: "anthropic" },
-  { id: "claude-opus-4-20250514", label: "Claude Opus 4", context: 200000, provider: "anthropic" },
+  // Anthropic — Claude 4.6 family (latest)
+  { id: "claude-opus-4-6", label: "Claude Opus 4.6", context: 1000000, provider: "anthropic" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", context: 1000000, provider: "anthropic" },
+  // Anthropic — Claude 4.5
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", context: 200000, provider: "anthropic" },
+  // OpenAI — GPT-5.x family
+  { id: "gpt-5.4", label: "GPT-5.4", context: 1000000, provider: "openai" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", context: 400000, provider: "openai" },
+  { id: "gpt-5.2", label: "GPT-5.2", context: 400000, provider: "openai" },
+  // OpenAI — GPT-4o family
   { id: "gpt-4o", label: "GPT-4o", context: 128000, provider: "openai" },
-  { id: "gpt-4-turbo", label: "GPT-4 Turbo", context: 128000, provider: "openai" },
-  { id: "gpt-4", label: "GPT-4", context: 8192, provider: "openai" },
-  { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo", context: 16384, provider: "openai" },
+  { id: "gpt-4o-mini", label: "GPT-4o Mini", context: 128000, provider: "openai" },
 ];
 
 function formatContext(n: number): string {

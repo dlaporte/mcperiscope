@@ -12,14 +12,48 @@ router = APIRouter()
 async def get_inventory():
     if not session.inventory:
         raise HTTPException(status_code=400, detail="Not connected or no inventory")
-    # Add context window info
+
     ctx_window = MODEL_CONTEXT_WINDOWS.get(session.model, 200_000)
-    budget = session.inventory.get("total_budget_tokens", 0)
+    tool_budget = session.inventory.get("total_budget_tokens", 0)
+
+    # Estimate resource and prompt definition tokens
+    resource_tokens = 0
+    prompt_tokens = 0
+    if session.connection and session.connection.connected:
+        try:
+            resources = await session.connection._client.list_resources()
+            items = resources if isinstance(resources, list) else getattr(resources, "resources", [])
+            for r in items:
+                name = getattr(r, "name", "") or ""
+                uri = str(getattr(r, "uri", ""))
+                desc = getattr(r, "description", "") or ""
+                resource_tokens += max(1, len(f"{name}: {desc} ({uri})") // 4)
+        except Exception:
+            pass
+
+        try:
+            prompts = await session.connection._client.list_prompts()
+            items = prompts if isinstance(prompts, list) else getattr(prompts, "prompts", [])
+            for p in items:
+                name = getattr(p, "name", "") or ""
+                desc = getattr(p, "description", "") or ""
+                args = getattr(p, "arguments", []) or []
+                args_text = ", ".join(getattr(a, "name", "") for a in args)
+                prompt_tokens += max(1, len(f"{name}({args_text}): {desc}") // 4)
+        except Exception:
+            pass
+
+    total_budget = tool_budget + resource_tokens + prompt_tokens
+
     return {
         **session.inventory,
+        "total_budget_tokens": total_budget,
+        "tool_tokens": tool_budget,
+        "resource_tokens": resource_tokens,
+        "prompt_tokens": prompt_tokens,
         "model": session.model,
         "context_window": ctx_window,
-        "context_pct": round(budget / ctx_window * 100, 2) if ctx_window else 0,
+        "context_pct": round(total_budget / ctx_window * 100, 2) if ctx_window else 0,
     }
 
 

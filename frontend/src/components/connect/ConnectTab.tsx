@@ -67,6 +67,7 @@ function getCachedAuth(url: string): CachedAuth | undefined {
 export function ConnectTab() {
   const {
     connected, connecting, error, connect, disconnect, serverInfo, oauthPending,
+    connectProgress,
     authMethod, authToken, headerName, headerValue,
     setAuthMethod, setAuthToken, setHeaderName, setHeaderValue,
     checkStatus,
@@ -86,10 +87,18 @@ export function ConnectTab() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Check backend status on mount
+  const { completeOAuth } = useStore();
+
+  // Check backend status on mount, and resume pending OAuth if needed
   useEffect(() => {
     checkStatus();
-  }, [checkStatus]);
+
+    const pendingCallback = localStorage.getItem("mcperiscope:pending-oauth-callback");
+    if (pendingCallback) {
+      localStorage.removeItem("mcperiscope:pending-oauth-callback");
+      completeOAuth(pendingCallback);
+    }
+  }, [checkStatus, completeOAuth]);
 
   const history = loadHistory();
   // Force re-read when historyVersion changes
@@ -297,6 +306,14 @@ export function ConnectTab() {
           {/* Error Display */}
           {error && (
             <p className="text-red-400 text-sm mt-4">{error}</p>
+          )}
+
+          {/* Connection Progress */}
+          {connecting && connectProgress && (
+            <div className="mt-4 p-3 bg-gray-900 rounded-lg flex items-center gap-3">
+              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <span className="text-sm text-gray-400">{connectProgress}</span>
+            </div>
           )}
 
           {/* Connection Info */}
