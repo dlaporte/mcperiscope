@@ -8,22 +8,17 @@ interface DownloadButton {
 
 const DOWNLOADS: DownloadButton[] = [
   {
-    label: "Download Plan (.md)",
+    label: "Download Plan",
     endpoint: "/api/results/plan",
     filename: "optimization-plan.md",
   },
   {
-    label: "Download Report (.md)",
-    endpoint: "/api/results/report/md",
-    filename: "optimization-report.md",
-  },
-  {
-    label: "Download Report (.html)",
+    label: "Download Report",
     endpoint: "/api/results/report/html",
     filename: "optimization-report.html",
   },
   {
-    label: "Download Proxy (.py)",
+    label: "Download Proxy",
     endpoint: "/api/results/proxy",
     filename: "proxy_server.py",
   },

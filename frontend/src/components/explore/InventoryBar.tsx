@@ -1,13 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../../store";
 import { ContextGauge } from "./ContextGauge";
-
-interface QuickWin {
-  type: string;
-  description: string;
-  tools: string[];
-  estimated_savings?: number;
-}
 
 interface InventoryData {
   tool_count: number;
@@ -18,66 +11,6 @@ interface InventoryData {
   context_window: number;
   context_pct: number;
   model: string;
-  quick_wins?: QuickWin[];
-}
-
-function QuickWinCard({ win }: { win: QuickWin }) {
-  const [expanded, setExpanded] = useState(false);
-  const typeStyles: Record<string, React.CSSProperties> = {
-    high_tool_count: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-    high_context_usage: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-    moderate_context_usage: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-    consolidation: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
-    duplicate: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-    oversized_schema: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-    missing_description: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-    terse_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-    no_return_info: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
-    duplicate_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-  };
-  const badgeStyle = typeStyles[win.type] || { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' };
-
-  return (
-    <div className="panel-riveted rounded-lg p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={badgeStyle}>
-              {win.type}
-            </span>
-            {win.estimated_savings != null && win.estimated_savings > 0 && (
-              <span className="phosphor-text text-[10px]">
-                ~{win.estimated_savings.toLocaleString()} tokens saved
-              </span>
-            )}
-          </div>
-          <p className="text-xs leading-relaxed" style={{ color: 'var(--sub-text)' }}>{win.description}</p>
-        </div>
-        {win.tools.length > 0 && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-[10px] shrink-0 mt-0.5"
-            style={{ color: 'var(--sub-text-dim)' }}
-          >
-            {expanded ? "hide" : `${win.tools.length} tools`}
-          </button>
-        )}
-      </div>
-      {expanded && win.tools.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {win.tools.map((t) => (
-            <span
-              key={t}
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded"
-              style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text-dim)' }}
-            >
-              {t}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 const MODEL_CONTEXT: Record<string, number> = {
@@ -92,11 +25,9 @@ const MODEL_CONTEXT: Record<string, number> = {
 };
 
 export function InventoryBar() {
-  const { tools, model } = useStore();
+  const { tools, model, customContextWindow } = useStore();
   const [inventory, setInventory] = useState<InventoryData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showQuickWins, setShowQuickWins] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (tools.length === 0) {
@@ -124,29 +55,14 @@ export function InventoryBar() {
     };
   }, [tools.length]);
 
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-      setShowQuickWins(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (showQuickWins) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [showQuickWins, handleClickOutside]);
-
   const totalTokens = inventory?.total_budget_tokens ?? 0;
-  const contextWindow = MODEL_CONTEXT[model] ?? 200_000;
-  const quickWinsList = Array.isArray(inventory?.quick_wins) ? inventory.quick_wins : [];
+  const contextWindow = inventory?.context_window ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
 
   return (
     <div
       className="relative flex items-center gap-4 px-4 py-2 text-sm"
       style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
     >
-      {/* Context budget */}
       <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Session usage</span>
       {!loading && inventory && (
         <div className="flex-1 min-w-0">
@@ -156,49 +72,6 @@ export function InventoryBar() {
       {loading && (
         <div className="flex-1 text-xs animate-pulse" style={{ color: 'var(--sub-text-dim)' }}>
           Calculating token budget...
-        </div>
-      )}
-
-      {/* Quick wins */}
-      {quickWinsList.length > 0 && (
-        <div className="relative" ref={panelRef}>
-          <button
-            onClick={() => setShowQuickWins(!showQuickWins)}
-            className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
-          >
-            <span className="phosphor-text text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(51,255,51,0.15)' }}>
-              {quickWinsList.length}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>quick wins</span>
-          </button>
-
-          {/* Quick wins dropdown */}
-          {showQuickWins && (
-            <div
-              className="absolute right-0 top-full mt-2 w-[480px] max-h-[400px] overflow-y-auto rounded-xl shadow-2xl z-50 p-4"
-              style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>Quick Wins</h3>
-                <button
-                  onClick={() => setShowQuickWins(false)}
-                  className="text-xs"
-                  style={{ color: 'var(--sub-text-dim)' }}
-                >
-                  Close
-                </button>
-              </div>
-              <p className="text-xs mb-3" style={{ color: 'var(--sub-text-dim)' }}>
-                Optimization opportunities detected from tool inventory analysis.
-                These can be addressed on the Optimize tab.
-              </p>
-              <div className="space-y-2">
-                {quickWinsList.map((win, i) => (
-                  <QuickWinCard key={i} win={win} />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

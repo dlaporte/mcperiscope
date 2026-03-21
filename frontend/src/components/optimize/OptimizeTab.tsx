@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
 import { PromptInput } from "./PromptInput";
+import { ResourcePicker } from "./ResourcePicker";
 import { EvalHistory } from "./EvalHistory";
 import { ToolChainViewer } from "./ToolChainViewer";
 import { ContextModal } from "./ContextModal";
@@ -24,6 +25,10 @@ export function OptimizeTab() {
   const runOptimize = useStore((s) => s.runOptimize);
   const inventory = useStore((s) => s.inventory);
   const model = useStore((s) => s.model);
+  const customContextWindow = useStore((s) => s.customContextWindow);
+  const evalLoading = useStore((s) => s.evalLoading);
+  const liveContextTokens = useStore((s) => s.liveContextTokens);
+  const loadedResources = useStore((s) => s.loadedResources);
 
   const evalIncluded = useStore((s) => s.evalIncluded);
 
@@ -33,8 +38,19 @@ export function OptimizeTab() {
   const canOptimize = includedCount > 0 && !optimizeRunning;
   const latestEvalIndex = evalResults.length > 0 ? evalResults.length - 1 : null;
 
-  // Compute context window usage — use peak_context_tokens from the most recent eval
+  // Token cost of loaded resources
+  const loadedResourceTokens = useMemo(
+    () => loadedResources.reduce((sum, r) => sum + r.tokens, 0),
+    [loadedResources]
+  );
+
+  // Compute context window usage — live estimate while loading, API-reported when done
   const tokenUsage = useMemo(() => {
+    // While eval is in progress, use the live streaming estimate
+    if (evalLoading && liveContextTokens > 0) {
+      return { total: liveContextTokens };
+    }
+
     // Find the most recent eval with API usage data
     let peakContext = 0;
     for (let i = evalResults.length - 1; i >= 0; i--) {
@@ -50,10 +66,10 @@ export function OptimizeTab() {
     }
 
     const toolDefTokens = inventory?.total_budget_tokens ?? 0;
-    return { total: toolDefTokens };
-  }, [evalResults, inventory]);
+    return { total: toolDefTokens + loadedResourceTokens };
+  }, [evalResults, inventory, evalLoading, liveContextTokens, loadedResourceTokens]);
 
-  const contextWindow = MODEL_CONTEXT[model] ?? 200_000;
+  const contextWindow = inventory?.context_window ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
 
   return (
     <div className="h-full flex flex-col relative">
@@ -81,6 +97,7 @@ export function OptimizeTab() {
               improving accuracy.
             </p>
           </div>
+          <ResourcePicker />
           <PromptInput />
           <EvalHistory />
         </div>

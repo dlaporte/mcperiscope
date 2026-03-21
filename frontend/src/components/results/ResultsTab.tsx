@@ -1,21 +1,28 @@
 import { useEffect } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useStore } from "../../store";
 import { ComparisonTable } from "./ComparisonTable";
 import { JudgeResults } from "./JudgeResults";
 import { RecommendationCards } from "./RecommendationCards";
 import { ExportPanel } from "./ExportPanel";
+import { QuickWinCard } from "../shared/QuickWinCard";
 
 export function ResultsTab() {
   const comparison = useStore((s) => s.comparison);
   const recommendations = useStore((s) => s.recommendations);
+  const quickWins = useStore((s) => s.quickWins);
+  const planMarkdown = useStore((s) => s.planMarkdown);
   const resultsLoading = useStore((s) => s.resultsLoading);
   const fetchComparison = useStore((s) => s.fetchComparison);
   const fetchRecommendations = useStore((s) => s.fetchRecommendations);
+  const fetchPlan = useStore((s) => s.fetchPlan);
 
   useEffect(() => {
     fetchComparison();
     fetchRecommendations();
-  }, [fetchComparison, fetchRecommendations]);
+    fetchPlan();
+  }, [fetchComparison, fetchRecommendations, fetchPlan]);
 
   if (resultsLoading) {
     return (
@@ -46,7 +53,7 @@ export function ResultsTab() {
     );
   }
 
-  const hasData = comparison || recommendations.length > 0;
+  const hasData = comparison || recommendations.length > 0 || quickWins.length > 0 || planMarkdown;
 
   if (!hasData) {
     return (
@@ -88,6 +95,34 @@ export function ResultsTab() {
 
         {recommendations.length > 0 && (
           <RecommendationCards recommendations={recommendations} />
+        )}
+
+        {quickWins.length > 0 && (
+          <div className="panel-riveted rounded-lg overflow-hidden">
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
+              <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
+                Inventory Analysis ({quickWins.length})
+              </h3>
+            </div>
+            <div className="p-4 space-y-2">
+              {quickWins.map((win, i) => (
+                <QuickWinCard key={i} win={win} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {planMarkdown && (
+          <div className="panel-riveted rounded-lg overflow-hidden">
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
+              <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
+                Optimization Plan
+              </h3>
+            </div>
+            <div className="p-4 prose prose-sm prose-invert max-w-none" style={{ color: 'var(--sub-text)' }}>
+              <Markdown remarkPlugins={[remarkGfm]}>{planMarkdown}</Markdown>
+            </div>
+          </div>
         )}
 
         <ExportPanel />

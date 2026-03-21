@@ -6,6 +6,8 @@ interface JudgeResult {
   prompt: string;
   verdict: "equivalent" | "partial" | "different" | "contradictory" | "error";
   explanation: string;
+  baseline_answer?: string;
+  proxy_answer?: string;
 }
 
 interface Props {
@@ -78,12 +80,45 @@ export function JudgeResults({ results }: Props) {
                   {result.prompt}
                 </span>
                 <span className="text-xs shrink-0 ml-auto" style={{ color: "var(--sub-text-dim)" }}>
-                  {isExpanded ? "▾" : "▸"}
+                  {isExpanded ? "\u25BE" : "\u25B8"}
                 </span>
               </button>
-              {isExpanded && result.explanation && (
-                <div className="px-4 pb-3 pl-12 prose prose-sm prose-invert max-w-none text-xs" style={{ color: "var(--sub-text)" }}>
-                  <Markdown remarkPlugins={[remarkGfm]}>{result.explanation}</Markdown>
+              {isExpanded && (
+                <div className="px-4 pb-4 space-y-3">
+                  {/* Judge explanation */}
+                  {result.explanation && (
+                    <div className="pl-8 text-xs" style={{ color: "var(--sub-text-dim)" }}>
+                      <Markdown remarkPlugins={[remarkGfm]}>{result.explanation}</Markdown>
+                    </div>
+                  )}
+
+                  {/* Before/After answers */}
+                  {(result.baseline_answer || result.proxy_answer) && (
+                    <div className="grid grid-cols-2 gap-3 pl-8">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--sub-text-dim)" }}>
+                          Baseline
+                        </div>
+                        <div
+                          className="p-3 rounded text-xs overflow-auto max-h-64 prose prose-sm prose-invert max-w-none"
+                          style={{ backgroundColor: "var(--sub-hull)", border: "1px solid var(--sub-rivet)" }}
+                        >
+                          <Markdown remarkPlugins={[remarkGfm]}>{result.baseline_answer || "No response"}</Markdown>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--sub-text-dim)" }}>
+                          Optimized
+                        </div>
+                        <div
+                          className="p-3 rounded text-xs overflow-auto max-h-64 prose prose-sm prose-invert max-w-none"
+                          style={{ backgroundColor: "var(--sub-hull)", border: "1px solid var(--sub-rivet)" }}
+                        >
+                          <Markdown remarkPlugins={[remarkGfm]}>{result.proxy_answer || "No response"}</Markdown>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

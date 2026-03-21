@@ -32,8 +32,13 @@ async def connect(req: ConnectRequest, request: Request):
     if req.model:
         session.model = req.model
     if req.api_key:
-        await _validate_api_key(req.api_key)
+        if not req.custom_endpoint:
+            await _validate_api_key(req.api_key)
         session.api_key = req.api_key
+    if req.custom_endpoint:
+        session.custom_endpoint = req.custom_endpoint
+    if req.custom_context_window:
+        session.custom_context_window = req.custom_context_window
     try:
         # Pass the request origin so OAuth redirect goes to the right host
         origin = request.headers.get("origin")

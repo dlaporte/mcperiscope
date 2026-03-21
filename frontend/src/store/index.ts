@@ -42,6 +42,8 @@ interface AppState {
   // Model config
   model: string;
   apiKey: string;
+  customEndpoint: string;
+  customContextWindow: number;
 
   // Explore data
   tools: any[];
@@ -60,6 +62,9 @@ interface AppState {
   parameterStore: Record<string, ParamEntry[]>;
   parameterAliases: Record<string, string>; // field name → store key
   removedAliases: Set<string>; // field names where user explicitly removed an auto-alias
+
+  // Loaded resources for evaluation context
+  loadedResources: Array<{ uri: string; name: string; tokens: number }>;
 
   // Optimize
   evalResults: Array<{
@@ -80,17 +85,21 @@ interface AppState {
   evalIncluded: Set<number>;
   toggleEvalIncluded: (index: number) => void;
   evalLoading: boolean;
+  liveContextTokens: number;
   optimizeRunning: boolean;
   optimizeProgress: string | null;
 
   // Results
   comparison: any;
   recommendations: any[];
+  quickWins: any[];
+  planMarkdown: string;
   resultsLoading: boolean;
 
   // Actions
   fetchComparison: () => Promise<void>;
   fetchRecommendations: () => Promise<void>;
+  fetchPlan: () => Promise<void>;
   checkStatus: () => Promise<void>;
   setAuthMethod: (method: AuthMethod) => void;
   setAuthToken: (token: string) => void;
@@ -98,6 +107,8 @@ interface AppState {
   setHeaderValue: (value: string) => void;
   setModel: (model: string) => void;
   setApiKey: (apiKey: string) => void;
+  setCustomEndpoint: (endpoint: string) => void;
+  setCustomContextWindow: (ctx: number) => void;
   connect: (url: string) => Promise<void>;
   disconnect: () => Promise<void>;
   completeOAuth: (code: string) => Promise<void>;
@@ -111,6 +122,10 @@ interface AppState {
   clearParamStore: () => void;
   addParamAlias: (fieldName: string, storeKey: string) => void;
   removeParamAlias: (fieldName: string) => void;
+
+  // Resource loading
+  toggleResource: (uri: string) => Promise<void>;
+  fetchLoadedResources: () => Promise<void>;
 
   // Optimize actions
   evaluate: (prompt: string) => Promise<void>;
@@ -332,6 +347,8 @@ export const useStore = create<AppState>((set, get) => ({
   connectProgress: null,
   model: lsGet("model") || "claude-sonnet-4-6",
   apiKey: lsGet("apiKey"),
+  customEndpoint: lsGet("customEndpoint"),
+  customContextWindow: parseInt(lsGet("customContextWindow") || "128000", 10),
   tools: [],
   resources: [],
   resourceTemplates: [],
@@ -344,6 +361,7 @@ export const useStore = create<AppState>((set, get) => ({
   parameterStore: loadParamStore(),
   parameterAliases: loadAliases(),
   removedAliases: loadRemovedAliases(),
+  loadedResources: [],
   evalResults: [],
   selectedEvalIndex: null,
   evalIncluded: new Set<number>(),
@@ -356,10 +374,13 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
   evalLoading: false,
+  liveContextTokens: 0,
   optimizeRunning: false,
   optimizeProgress: null,
   comparison: null,
   recommendations: [],
+  quickWins: [],
+  planMarkdown: "",
   resultsLoading: false,
 
   fetchComparison: async () => {
@@ -374,10 +395,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   fetchRecommendations: async () => {
     try {
-      const data = await api.getRecommendations() as { recommendations: any[] };
-      set({ recommendations: data.recommendations });
+      const data = await api.getRecommendations() as { recommendations: any[]; quick_wins: any[] };
+      set({ recommendations: data.recommendations, quickWins: data.quick_wins ?? [] });
     } catch {
       // no recommendations yet
+    }
+  },
+
+  fetchPlan: async () => {
+    try {
+      const res = await fetch("/api/results/plan");
+      if (res.ok) {
+        const text = await res.text();
+        set({ planMarkdown: text });
+      }
+    } catch {
+      // no plan yet
     }
   },
 
@@ -408,12 +441,22 @@ export const useStore = create<AppState>((set, get) => ({
     set({ apiKey });
   },
 
+  setCustomEndpoint: (endpoint) => {
+    lsSet("customEndpoint", endpoint);
+    set({ customEndpoint: endpoint });
+  },
+
+  setCustomContextWindow: (ctx) => {
+    lsSet("customContextWindow", String(ctx));
+    set({ customContextWindow: ctx });
+  },
+
   connect: async (url: string) => {
     set({ connecting: true, error: null, oauthPending: false, connectProgress: null });
     try {
       const state = get();
       const authConfig = buildAuthConfig(state);
-      const res = await api.connect(url, authConfig, state.model, state.apiKey);
+      const res = await api.connect(url, authConfig, state.model, state.apiKey, state.customEndpoint, state.customContextWindow);
 
       if (res.status === "oauth_redirect" && res.authorizationUrl) {
         set({ connecting: false, oauthPending: true });
@@ -668,6 +711,31 @@ export const useStore = create<AppState>((set, get) => ({
     set({ parameterAliases: aliases, removedAliases: removed });
   },
 
+  // Resource loading
+  toggleResource: async (uri) => {
+    const isLoaded = get().loadedResources.some((r) => r.uri === uri);
+    try {
+      if (isLoaded) {
+        await api.unloadResource(uri);
+        set((state) => ({
+          loadedResources: state.loadedResources.filter((r) => r.uri !== uri),
+        }));
+      } else {
+        const result = await api.loadResource(uri);
+        set((state) => ({
+          loadedResources: [...state.loadedResources, { uri: result.uri, name: result.name, tokens: result.tokens }],
+        }));
+      }
+    } catch { /* ignore */ }
+  },
+
+  fetchLoadedResources: async () => {
+    try {
+      const data = await api.getLoadedResources();
+      set({ loadedResources: data.resources });
+    } catch { /* ignore */ }
+  },
+
   // Optimize actions
   evaluate: async (prompt) => {
     // Add a placeholder entry immediately and select it
@@ -682,11 +750,11 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const { apiKey: storeApiKey, model: storeModel } = get();
+      const { apiKey: storeApiKey, model: storeModel, customEndpoint } = get();
       const response = await fetch("/api/optimize/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, api_key: storeApiKey || undefined, model: storeModel || undefined }),
+        body: JSON.stringify({ prompt, api_key: storeApiKey || undefined, model: storeModel || undefined, custom_endpoint: customEndpoint || undefined }),
       });
 
       if (!response.ok) {
@@ -715,7 +783,25 @@ export const useStore = create<AppState>((set, get) => ({
           } else if (line.startsWith("data: ") && currentEvent) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (currentEvent === "tool_calling") {
+              // Update live context tokens
+              if (currentEvent === "context_update" && data.context_tokens != null) {
+                // API-reported value is authoritative — allow corrections downward
+                set({ liveContextTokens: data.context_tokens });
+              } else if (data.context_tokens != null && data.context_tokens > get().liveContextTokens) {
+                // Estimates only go up (monotonic) to avoid visual jitter
+                set({ liveContextTokens: data.context_tokens });
+              }
+
+              if (currentEvent === "text_delta") {
+                // Streaming text from LLM — append to current answer
+                set((state) => {
+                  const evalResults = [...state.evalResults];
+                  const entry = { ...evalResults[placeholderIndex] };
+                  entry.answer = (entry.answer || "") + (data.text || "");
+                  evalResults[placeholderIndex] = entry;
+                  return { evalResults };
+                });
+              } else if (currentEvent === "tool_calling") {
                 // Add an in-progress step to the tool chain
                 set((state) => {
                   const evalResults = [...state.evalResults];
@@ -814,11 +900,17 @@ export const useStore = create<AppState>((set, get) => ({
   runOptimize: async () => {
     set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
     try {
-      const included = [...get().evalIncluded];
+      const { evalIncluded, apiKey, model, customEndpoint } = get();
+      const included = [...evalIncluded];
       const response = await fetch("/api/optimize/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ included_indices: included }),
+        body: JSON.stringify({
+          included_indices: included,
+          api_key: apiKey || undefined,
+          model: model || undefined,
+          custom_endpoint: customEndpoint || undefined,
+        }),
       });
 
       if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
@@ -851,15 +943,19 @@ export const useStore = create<AppState>((set, get) => ({
                 set({ optimizeProgress: data.message });
               } else if (currentEvent === "done") {
                 // Fetch final results from backend
-                const [comparison, recs] = await Promise.allSettled([
+                const [comparison, recs, planRes] = await Promise.allSettled([
                   api.getComparison(),
                   api.getRecommendations(),
+                  fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
                 ]);
+                const recsData = recs.status === "fulfilled" ? recs.value as any : {};
                 set({
                   optimizeRunning: false,
                   optimizeProgress: null,
                   comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
-                  recommendations: recs.status === "fulfilled" ? (recs.value as any)?.recommendations ?? recs.value : [],
+                  recommendations: recsData?.recommendations ?? [],
+                  quickWins: recsData?.quick_wins ?? [],
+                  planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
                   activeTab: "results",
                 });
               } else if (currentEvent === "error") {

@@ -1,17 +1,21 @@
 import { useState, useMemo } from "react";
 import { useStore } from "../../store";
 
+type SortMode = "name" | "tokens";
+
 function Section({
   title,
-  count,
-  total,
   tokens,
+  sortable,
+  sortMode,
+  onToggleSort,
   children,
 }: {
   title: string;
-  count: number;
-  total: number;
   tokens?: number;
+  sortable?: boolean;
+  sortMode?: SortMode;
+  onToggleSort?: () => void;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(true);
@@ -24,25 +28,27 @@ function Section({
         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
-        <span>
-          {open ? "\u25BE" : "\u25B8"} {title}
-        </span>
         <span className="flex items-center gap-1.5">
+          {open ? "\u25BE" : "\u25B8"} {title}
+          {sortable && open && (
+            <span
+              className="text-[10px] font-mono px-1 py-0.5 rounded cursor-pointer"
+              style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text-dim)' }}
+              onClick={(e) => { e.stopPropagation(); onToggleSort?.(); }}
+              title={`Sort by ${sortMode === "name" ? "tokens" : "name"}`}
+            >
+              {sortMode === "tokens" ? "\u25BE tok" : "A\u2193Z"}
+            </span>
+          )}
+        </span>
+        {tokens != null && tokens > 0 && (
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 rounded-full"
             style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
           >
-            {count !== total ? `${count}/${total}` : count}
+            {tokens.toLocaleString()}
           </span>
-          {tokens != null && tokens > 0 && (
-            <span
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
-            >
-              {tokens.toLocaleString()} tok
-            </span>
-          )}
-        </span>
+        )}
       </button>
       {open && <div>{children}</div>}
     </div>
@@ -69,48 +75,82 @@ function estimatePromptTokens(prompt: any): number {
 }
 
 export function Sidebar() {
-  const { connected, tools, resources, prompts, selection, select } =
+  const { connected, tools, resources, prompts, selection, select, inventory } =
     useStore();
   const [filter, setFilter] = useState("");
+  const [toolSort, setToolSort] = useState<SortMode>("name");
+  const [resourceSort, setResourceSort] = useState<SortMode>("name");
+  const [promptSort, setPromptSort] = useState<SortMode>("name");
 
   const query = filter.toLowerCase().trim();
 
-  const filteredTools = useMemo(
-    () =>
-      query
-        ? tools.filter(
-            (t: any) =>
-              t.name.toLowerCase().includes(query) ||
-              (t.description || "").toLowerCase().includes(query)
-          )
-        : tools,
-    [tools, query]
+  // Pre-compute token counts
+  const toolsWithTokens = useMemo(
+    () => tools.map((t: any) => ({ item: t, tokens: estimateToolTokens(t) })),
+    [tools]
   );
 
-  const filteredResources = useMemo(
-    () =>
-      query
-        ? resources.filter(
-            (r: any) =>
-              (r.name || "").toLowerCase().includes(query) ||
-              (r.uri || "").toLowerCase().includes(query) ||
-              (r.description || "").toLowerCase().includes(query)
-          )
-        : resources,
-    [resources, query]
+  const resourcesWithTokens = useMemo(
+    () => resources.map((r: any) => ({ item: r, tokens: estimateResourceTokens(r) })),
+    [resources]
   );
 
-  const filteredPrompts = useMemo(
-    () =>
-      query
-        ? prompts.filter(
-            (p: any) =>
-              p.name.toLowerCase().includes(query) ||
-              (p.description || "").toLowerCase().includes(query)
-          )
-        : prompts,
-    [prompts, query]
+  const promptsWithTokens = useMemo(
+    () => prompts.map((p: any) => ({ item: p, tokens: estimatePromptTokens(p) })),
+    [prompts]
   );
+
+  const filteredTools = useMemo(() => {
+    let result = query
+      ? toolsWithTokens.filter(
+          ({ item: t }: any) =>
+            t.name.toLowerCase().includes(query) ||
+            (t.description || "").toLowerCase().includes(query)
+        )
+      : toolsWithTokens;
+
+    if (toolSort === "tokens") {
+      result = [...result].sort((a, b) => b.tokens - a.tokens);
+    } else {
+      result = [...result].sort((a, b) => a.item.name.localeCompare(b.item.name));
+    }
+    return result;
+  }, [toolsWithTokens, query, toolSort]);
+
+  const filteredResources = useMemo(() => {
+    let result = query
+      ? resourcesWithTokens.filter(
+          ({ item: r }: any) =>
+            (r.name || "").toLowerCase().includes(query) ||
+            (r.uri || "").toLowerCase().includes(query) ||
+            (r.description || "").toLowerCase().includes(query)
+        )
+      : resourcesWithTokens;
+
+    if (resourceSort === "tokens") {
+      result = [...result].sort((a, b) => b.tokens - a.tokens);
+    } else {
+      result = [...result].sort((a, b) => (a.item.name || "").localeCompare(b.item.name || ""));
+    }
+    return result;
+  }, [resourcesWithTokens, query, resourceSort]);
+
+  const filteredPrompts = useMemo(() => {
+    let result = query
+      ? promptsWithTokens.filter(
+          ({ item: p }: any) =>
+            p.name.toLowerCase().includes(query) ||
+            (p.description || "").toLowerCase().includes(query)
+        )
+      : promptsWithTokens;
+
+    if (promptSort === "tokens") {
+      result = [...result].sort((a, b) => b.tokens - a.tokens);
+    } else {
+      result = [...result].sort((a, b) => a.item.name.localeCompare(b.item.name));
+    }
+    return result;
+  }, [promptsWithTokens, query, promptSort]);
 
   if (!connected) {
     return (
@@ -126,9 +166,16 @@ export function Sidebar() {
   const isSelected = (type: string, name: string) =>
     selection?.type === type && selection.item.name === name;
 
-  const toolTokens = useMemo(() => filteredTools.reduce((sum: number, t: any) => sum + estimateToolTokens(t), 0), [filteredTools]);
-  const resourceTokens = useMemo(() => filteredResources.reduce((sum: number, r: any) => sum + estimateResourceTokens(r), 0), [filteredResources]);
-  const promptTokens = useMemo(() => filteredPrompts.reduce((sum: number, p: any) => sum + estimatePromptTokens(p), 0), [filteredPrompts]);
+  // Use backend-reported totals when available (matches the inventory bar); fall back to client estimates when filtering
+  const toolTokens = !query && inventory?.tool_tokens != null
+    ? inventory.tool_tokens
+    : filteredTools.reduce((sum: number, { tokens }: any) => sum + tokens, 0);
+  const resourceTokens = !query && inventory?.resource_tokens != null
+    ? inventory.resource_tokens
+    : filteredResources.reduce((sum: number, { tokens }: any) => sum + tokens, 0);
+  const promptTokens = !query && inventory?.prompt_tokens != null
+    ? inventory.prompt_tokens
+    : filteredPrompts.reduce((sum: number, { tokens }: any) => sum + tokens, 0);
 
   return (
     <div
@@ -157,29 +204,58 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* Column headers */}
+      <div
+        className="flex items-center justify-between px-4 py-1.5"
+        style={{ borderBottom: '1px solid var(--sub-rivet)' }}
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>
+          Name
+        </span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>
+          Tokens
+        </span>
+      </div>
+
       {/* Scrollable list */}
       <div className="overflow-y-auto flex-1">
-        <Section title="Tools" count={filteredTools.length} total={tools.length} tokens={toolTokens}>
-          {filteredTools.map((tool: any) => (
+        <Section
+          title="Tools"
+          tokens={toolTokens}
+          sortable
+          sortMode={toolSort}
+          onToggleSort={() => setToolSort(toolSort === "name" ? "tokens" : "name")}
+        >
+          {filteredTools.map(({ item, tokens }: any) => (
             <button
-              key={tool.name}
-              onClick={() => select("tool", tool)}
-              className="w-full text-left px-4 py-1.5 text-sm truncate"
+              key={item.name}
+              onClick={() => select("tool", item)}
+              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
               style={
-                isSelected("tool", tool.name)
+                isSelected("tool", item.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
                   : { color: 'var(--sub-text)' }
               }
               onMouseEnter={(e) => {
-                if (!isSelected("tool", tool.name))
+                if (!isSelected("tool", item.name))
                   e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
               }}
               onMouseLeave={(e) => {
-                if (!isSelected("tool", tool.name))
+                if (!isSelected("tool", item.name))
                   e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              {tool.name}
+              <span className="truncate">{item.name}</span>
+              <span
+                className="text-[10px] font-mono shrink-0"
+                style={
+                  isSelected("tool", item.name)
+                    ? { color: 'rgba(255,255,255,0.7)' }
+                    : { color: 'var(--sub-text-dim)' }
+                }
+              >
+                {tokens}
+              </span>
             </button>
           ))}
           {filteredTools.length === 0 && (
@@ -189,12 +265,18 @@ export function Sidebar() {
           )}
         </Section>
 
-        <Section title="Resources" count={filteredResources.length} total={resources.length} tokens={resourceTokens}>
-          {filteredResources.map((resource: any) => (
+        <Section
+          title="Resources"
+          tokens={resourceTokens}
+          sortable
+          sortMode={resourceSort}
+          onToggleSort={() => setResourceSort(resourceSort === "name" ? "tokens" : "name")}
+        >
+          {filteredResources.map(({ item: resource, tokens }: any) => (
             <button
               key={resource.uri}
               onClick={() => select("resource", resource)}
-              className="w-full text-left px-4 py-1.5 text-sm truncate"
+              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
               style={
                 isSelected("resource", resource.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
@@ -209,7 +291,17 @@ export function Sidebar() {
                   e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              {resource.name || resource.uri}
+              <span className="truncate">{resource.name || resource.uri}</span>
+              <span
+                className="text-[10px] font-mono shrink-0"
+                style={
+                  isSelected("resource", resource.name)
+                    ? { color: 'rgba(255,255,255,0.7)' }
+                    : { color: 'var(--sub-text-dim)' }
+                }
+              >
+                {tokens}
+              </span>
             </button>
           ))}
           {filteredResources.length === 0 && (
@@ -219,12 +311,18 @@ export function Sidebar() {
           )}
         </Section>
 
-        <Section title="Prompts" count={filteredPrompts.length} total={prompts.length} tokens={promptTokens}>
-          {filteredPrompts.map((prompt: any) => (
+        <Section
+          title="Prompts"
+          tokens={promptTokens}
+          sortable
+          sortMode={promptSort}
+          onToggleSort={() => setPromptSort(promptSort === "name" ? "tokens" : "name")}
+        >
+          {filteredPrompts.map(({ item: prompt, tokens }: any) => (
             <button
               key={prompt.name}
               onClick={() => select("prompt", prompt)}
-              className="w-full text-left px-4 py-1.5 text-sm truncate"
+              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
               style={
                 isSelected("prompt", prompt.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
@@ -239,7 +337,17 @@ export function Sidebar() {
                   e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              {prompt.name}
+              <span className="truncate">{prompt.name}</span>
+              <span
+                className="text-[10px] font-mono shrink-0"
+                style={
+                  isSelected("prompt", prompt.name)
+                    ? { color: 'rgba(255,255,255,0.7)' }
+                    : { color: 'var(--sub-text-dim)' }
+                }
+              >
+                {tokens}
+              </span>
             </button>
           ))}
           {filteredPrompts.length === 0 && (

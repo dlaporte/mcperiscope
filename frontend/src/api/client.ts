@@ -32,10 +32,10 @@ export interface ModelConfig {
 
 export const api = {
   // === Connection ===
-  connect: (url: string, auth?: AuthConfig, model?: string, apiKey?: string) =>
+  connect: (url: string, auth?: AuthConfig, model?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number) =>
     request<ConnectResult>("/connect", {
       method: "POST",
-      body: JSON.stringify({ url, auth, model: model || undefined, api_key: apiKey || undefined }),
+      body: JSON.stringify({ url, auth, model: model || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint || undefined, custom_context_window: customContextWindow || undefined }),
     }),
 
   disconnect: () =>
@@ -77,6 +77,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, arguments: args }),
     }),
+
+  loadResource: (uri: string) =>
+    request<{ loaded: boolean; uri: string; name: string; tokens: number }>("/resources/load", {
+      method: "POST",
+      body: JSON.stringify({ uri }),
+    }),
+
+  unloadResource: (uri: string) =>
+    request<{ loaded: boolean; uri: string }>("/resources/unload", {
+      method: "POST",
+      body: JSON.stringify({ uri }),
+    }),
+
+  getLoadedResources: () =>
+    request<{ resources: Array<{ uri: string; name: string; tokens: number }> }>("/resources/loaded"),
 
   // === Analysis ===
   getInventory: () =>

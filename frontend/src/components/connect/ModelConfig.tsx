@@ -15,6 +15,8 @@ const MODELS = [
   { id: "gpt-4o-mini", label: "GPT-4o Mini", context: 128000, provider: "openai" },
 ];
 
+const CUSTOM_MODEL_ID = "__custom__";
+
 function formatContext(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
 }
@@ -27,18 +29,33 @@ function detectProvider(apiKey: string): string | null {
 }
 
 export function ModelConfig() {
-  const { model, apiKey, setModel, setApiKey, connected, connecting } = useStore();
+  const {
+    model, apiKey, customEndpoint, customContextWindow,
+    setModel, setApiKey, setCustomEndpoint, setCustomContextWindow,
+    connected, connecting,
+  } = useStore();
 
   const disabled = connected || connecting;
   const detectedProvider = detectProvider(apiKey);
+  const isCustom = !MODELS.some((m) => m.id === model);
   const selectedModel = MODELS.find((m) => m.id === model);
+
+  // The dropdown value: known model id or __custom__
+  const dropdownValue = isCustom ? CUSTOM_MODEL_ID : model;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
+          value={dropdownValue}
+          onChange={(e) => {
+            if (e.target.value === CUSTOM_MODEL_ID) {
+              setModel(model === "" || MODELS.some((m) => m.id === model) ? "" : model);
+            } else {
+              setModel(e.target.value);
+              setCustomEndpoint("");
+            }
+          }}
           disabled={disabled}
           className="input-sub border rounded-lg px-2 py-2 text-sm disabled:opacity-50 flex-1"
         >
@@ -56,24 +73,61 @@ export function ModelConfig() {
               </option>
             ))}
           </optgroup>
+          <option value={CUSTOM_MODEL_ID}>Custom (OpenAI-compatible)</option>
         </select>
         {selectedModel && (
           <span className="text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
             {selectedModel.provider}
           </span>
         )}
+        {isCustom && (
+          <span className="text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
+            custom
+          </span>
+        )}
       </div>
+
+      {isCustom && (
+        <>
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="Model name (e.g. deepseek-chat)"
+            disabled={disabled}
+            className="w-full input-sub border rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+          />
+          <input
+            type="text"
+            value={customEndpoint}
+            onChange={(e) => setCustomEndpoint(e.target.value)}
+            placeholder="Endpoint URL (e.g. https://api.deepseek.com/v1)"
+            disabled={disabled}
+            className="w-full input-sub border rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+          />
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={customContextWindow}
+              onChange={(e) => setCustomContextWindow(parseInt(e.target.value, 10) || 128000)}
+              disabled={disabled}
+              className="w-32 input-sub border rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+            />
+            <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>context window</span>
+          </div>
+        </>
+      )}
 
       <div className="relative">
         <input
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="API key (sk-...)"
+          placeholder={isCustom ? "API key" : "API key (sk-...)"}
           disabled={disabled}
           className="w-full input-sub border rounded-lg px-3 py-2 text-sm  disabled:opacity-50"
         />
-        {detectedProvider && (
+        {!isCustom && detectedProvider && (
           <span
             className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded"
             style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
@@ -83,7 +137,7 @@ export function ModelConfig() {
         )}
       </div>
 
-      {detectedProvider && selectedModel && detectedProvider !== selectedModel.provider && (
+      {!isCustom && detectedProvider && selectedModel && detectedProvider !== selectedModel.provider && (
         <p className="text-xs" style={{ color: 'var(--sub-brass)' }}>
           API key looks like {detectedProvider} but selected model is {selectedModel.provider}
         </p>

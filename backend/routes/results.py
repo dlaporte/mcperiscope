@@ -3,13 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
+from backend import mcp_manager
 from backend.state import session
 
 router = APIRouter()
 
 
 def _require_connected():
-    if not session.connection:
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
 
 
@@ -27,13 +28,13 @@ async def get_comparison():
 @router.get("/results/recommendations")
 async def get_recommendations():
     _require_connected()
-    return {"recommendations": session.recommendations}
+    return {"recommendations": session.recommendations, "quick_wins": session.quick_wins}
 
 
 def _build_report_data() -> dict:
     """Build the report_data dict expected by mcp_optimizer.report generators."""
     return {
-        "url": session.connection.url if session.connection else "",
+        "url": mcp_manager._url or "",
         "inventory": session.inventory,
         "analysis": session.analysis,
         "recommendations": session.recommendations,

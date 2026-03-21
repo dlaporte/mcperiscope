@@ -198,9 +198,13 @@ async def get_prompt(name: str, arguments: dict[str, str] | None = None):
 
 async def _finish_connect() -> dict:
     """Shared logic after successful connection."""
+    from backend.routes.analysis import generate_quick_wins
+
     session.tools = _tools or []
     inventory = analyze_inventory(session.tools)
     session.inventory = analysis_to_dict(inventory)
+    total_tokens = session.inventory.get("total_budget_tokens", 0)
+    session.quick_wins = generate_quick_wins(session.tools, total_tokens, session.model)
     return {
         "status": "connected",
         "serverInfo": server_info(),

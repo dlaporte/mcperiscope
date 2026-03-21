@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+
+_log_file = Path.home() / ".mcperiscope" / "optimize.log"
+_log_file.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(str(_log_file), mode="a"),
+    ],
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.state import session

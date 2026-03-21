@@ -3,8 +3,7 @@ interface MetricSet {
   menu_tokens?: number;
   avg_tokens_per_prompt?: number;
   avg_calls_per_prompt?: number;
-  accuracy?: number;
-  error_rate?: number;
+  total_context?: number;
 }
 
 interface DeltaEntry {
@@ -16,7 +15,6 @@ interface ComparisonData {
   baseline: MetricSet;
   proxy: MetricSet;
   delta?: Record<string, DeltaEntry>;
-  accuracy_warning?: string;
 }
 
 interface Props {
@@ -57,18 +55,10 @@ const rows: RowDef[] = [
     lowerBetter: true,
   },
   {
-    label: "Accuracy",
-    key: "accuracy",
-    format: (v) => (v != null ? `${(v * 100).toFixed(1)}%` : "\u2014"),
-    lowerBetter: false,
-    isPercent: true,
-  },
-  {
-    label: "Error Rate",
-    key: "error_rate",
-    format: (v) => (v != null ? `${(v * 100).toFixed(1)}%` : "\u2014"),
+    label: "Total Context",
+    key: "total_context",
+    format: (v) => (v != null ? v.toLocaleString() : "\u2014"),
     lowerBetter: true,
-    isPercent: true,
   },
 ];
 
@@ -116,9 +106,7 @@ export function ComparisonTable({ data }: Props) {
     <div className="panel-riveted rounded-lg overflow-hidden">
       <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
         <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>Before / After Comparison</h3>
-        {data.accuracy_warning && (
-          <p className="text-sm mt-1" style={{ color: 'var(--sub-brass)' }}>{data.accuracy_warning}</p>
-        )}
+
       </div>
       <table className="w-full">
         <thead>

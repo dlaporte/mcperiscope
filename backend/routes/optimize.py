@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import time
 import traceback
 import socket
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -52,23 +54,25 @@ async def evaluate(req: EvaluateRequest):
     from backend import mcp_manager as _mgr
     if not _mgr.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
-    # Use request API key/model as fallback (backend may have restarted)
-    if req.api_key and not session.api_key:
+    # Always restore from request (backend may have restarted)
+    if req.api_key:
         session.api_key = req.api_key
-    if req.model and session.model == "claude-sonnet-4-6":
+    if req.model:
         session.model = req.model
+    if req.custom_endpoint:
+        session.custom_endpoint = req.custom_endpoint
     if not session.api_key:
-        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+        raise HTTPException(status_code=400, detail="API key not configured")
     if not session.tools:
         raise HTTPException(status_code=400, detail="No tools available")
 
     async def event_stream():
-        import anthropic
+        from backend.llm_client import LLMClient
 
         try:
-            client = anthropic.Anthropic(api_key=session.api_key)
+            client = LLMClient(session.api_key, session.model, session.custom_endpoint)
         except Exception as e:
-            yield _sse("error", {"message": f"Failed to initialize Anthropic client: {e}"})
+            yield _sse("error", {"message": f"Failed to initialize LLM client: {e}"})
             return
 
         tools = []
@@ -83,6 +87,19 @@ async def evaluate(req: EvaluateRequest):
         # Include the FULL message history (tool calls + results) to mirror
         # real-world behavior where tool responses accumulate in context
         messages = []
+
+        # Inject loaded resources as context at the start
+        if session.loaded_resources:
+            resource_parts = []
+            for uri, res in session.loaded_resources.items():
+                resource_parts.append(f"## {res['name']}\n\n{res['content']}")
+            resource_context = (
+                "The following resources have been loaded for reference:\n\n"
+                + "\n\n---\n\n".join(resource_parts)
+            )
+            messages.append({"role": "user", "content": resource_context})
+            messages.append({"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."})
+
         for prev in session.eval_results:
             raw = prev.get("raw_messages")
             if raw:
@@ -101,40 +118,50 @@ async def evaluate(req: EvaluateRequest):
         total_input_tokens = 0
         total_output_tokens = 0
         peak_input_tokens = 0  # Last round's input_tokens = actual context window usage
+        # Context tracking: use API-reported base + estimated delta from new content
+        context_base = 0  # Last API-reported input_tokens (accurate)
+        context_delta = 0  # Estimated tokens added since last API report
 
         try:
             while True:
-                yield _sse("thinking", {"step": step})
+                yield _sse("thinking", {"step": step, "context_tokens": context_base + context_delta})
 
-                response = client.messages.create(
-                    model=session.model,
-                    max_tokens=4096,
-                    tools=tools,
-                    messages=messages,
-                )
+                # Stream the LLM response — yields text deltas then final LLMResponse
+                response = None
+                streamed_text_len = 0
+                async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=4096):
+                    if isinstance(item, str):
+                        streamed_text_len += len(item)
+                        yield _sse("text_delta", {"text": item, "context_tokens": context_base + context_delta + streamed_text_len // 4})
+                    else:
+                        # Final LLMResponse
+                        response = item
 
-                # Capture actual token usage from the API
-                if hasattr(response, "usage") and response.usage:
-                    round_input = getattr(response.usage, "input_tokens", 0)
-                    round_output = getattr(response.usage, "output_tokens", 0)
-                    total_input_tokens += round_input
-                    total_output_tokens += round_output
-                    peak_input_tokens = round_input  # Each round includes full context
+                if response is None:
+                    yield _sse("error", {"message": "No response from LLM"})
+                    break
 
-                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-                text_blocks = [b for b in response.content if b.type == "text"]
+                # Replace estimate with API-reported value — this is authoritative
+                total_input_tokens += response.input_tokens
+                total_output_tokens += response.output_tokens
+                peak_input_tokens = response.input_tokens
+                if response.input_tokens > 0:
+                    context_base = response.input_tokens
+                    context_delta = 0  # Reset delta — base is now accurate
+                    # Send corrected value so frontend can update
+                    yield _sse("context_update", {"context_tokens": context_base, "source": "api"})
 
-                if not tool_use_blocks:
-                    final_answer = "\n".join(b.text for b in text_blocks)
+                if not response.tool_calls:
+                    final_answer = response.text
                     break
 
                 messages.append({
                     "role": "assistant",
-                    "content": [_block_to_dict(b) for b in response.content],
+                    "content": client.to_anthropic_blocks(response),
                 })
 
                 tool_results = []
-                for tool_use in tool_use_blocks:
+                for tool_use in response.tool_calls:
                     step += 1
                     start = time.time()
                     error = None
@@ -158,6 +185,11 @@ async def evaluate(req: EvaluateRequest):
 
                     duration = time.time() - start
 
+                    # Update context delta estimate: add tool call input + result tokens
+                    # Use //5 for a more conservative estimate (JSON is token-dense)
+                    input_str = json.dumps(tool_use.input)
+                    context_delta += max(1, len(input_str) // 5) + max(1, len(result_text) // 5)
+
                     tool_step = {
                         "step": step,
                         "tool": tool_use.name,
@@ -165,6 +197,7 @@ async def evaluate(req: EvaluateRequest):
                         "output": result_text,
                         "duration": round(duration, 3),
                         "error": error,
+                        "context_tokens": context_base + context_delta,
                     }
                     tool_chain.append(tool_step)
 
@@ -306,6 +339,9 @@ async def rate(req: RatingRequest):
 
 class OptimizeRunRequest(BaseModel):
     included_indices: list[int] | None = None
+    api_key: str | None = None
+    model: str | None = None
+    custom_endpoint: str | None = None
 
 
 @router.post("/optimize/run")
@@ -318,18 +354,27 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
 
+    # Always restore API key/model/endpoint from request (backend may have restarted)
+    if req and req.api_key:
+        session.api_key = req.api_key
+    if req and req.model:
+        session.model = req.model
+    if req and req.custom_endpoint:
+        session.custom_endpoint = req.custom_endpoint
+    if not session.api_key:
+        raise HTTPException(status_code=400, detail="API key not configured")
+
+    # Kill any proxy left over from a previous run
+    session.kill_proxy()
+
     # Filter to only included evaluations
     included = set(req.included_indices) if req and req.included_indices is not None else set(range(len(session.eval_results)))
-    rated = [
-        r for i, r in enumerate(session.ratings)
-        if r is not None and i in included
-    ]
-    if not rated:
-        raise HTTPException(status_code=400, detail="No rated evaluations included")
+    included_evals = [e for i, e in enumerate(session.eval_results) if i in included]
+    if not included_evals:
+        raise HTTPException(status_code=400, detail="No evaluations included")
 
     async def event_stream():
         import asyncio
-        import anthropic
         from mcp_optimizer.analyze import run_analysis
         from mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
         from mcp_optimizer.report import compute_comparison
@@ -337,7 +382,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         # --- Step 1: Analyze ---
         yield _sse("progress", {"phase": "analyze", "message": "Analyzing tool usage patterns..."})
         try:
-            analysis_result = run_analysis(session.tools, session.traces, rated)
+            # Pass empty ratings — rating is no longer used
+            analysis_result = run_analysis(session.tools, session.traces, [])
             session.analysis = analysis_result
             session.recommendations = analysis_result.get("recommendations", [])
         except Exception as e:
@@ -405,7 +451,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     yield _sse("progress", {"phase": "proxy", "message": f"Proxy failed to start: {stderr[:200]}"})
                     proxy_port = None
                     proxy_process = None
+                    session.proxy_process = None
                 else:
+                    session.proxy_process = proxy_process
                     # Get proxy tool list
                     from fastmcp import Client
                     proxy_client = Client(f"http://localhost:{proxy_port}/mcp")
@@ -425,31 +473,47 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 yield _sse("progress", {"phase": "proxy", "message": f"Proxy start failed: {e}"})
 
         # --- Step 4: Re-run prompts through proxy ---
+        await asyncio.sleep(0)  # Yield control to flush pending SSE events
         proxy_traces = []
         proxy_answers = []  # Capture proxy answers for LLM-as-judge
         proxy_tool_count = proxy_tools or 0
-        if proxy_port and session.api_key and session.eval_results:
-            yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(session.eval_results)} prompts through optimized proxy..."})
+        _log = logging.getLogger("mcperiscope.optimize")
+        _log.info(f"Step 4: proxy_port={proxy_port}, api_key={'SET' if session.api_key else 'EMPTY'}, eval_results={len(session.eval_results)}")
+        if not proxy_port:
+            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
+        elif not session.api_key:
+            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no API key)"})
+        elif not session.eval_results:
+            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no evaluation prompts)"})
+        else:
+            _log.info("Entering proxy evaluation branch")
             try:
-                client = anthropic.Anthropic(api_key=session.api_key)
+                from backend.llm_client import LLMClient
+                _log.info("Creating LLM client...")
+                llm = LLMClient(session.api_key, session.model, session.custom_endpoint)
+                _log.info("LLM client created")
                 from fastmcp import Client as McpClient
 
                 # Build tool list from proxy — keep connection open for all prompts
+                _log.info(f"Connecting to proxy at localhost:{proxy_port}...")
                 proxy_mcp = McpClient(f"http://localhost:{proxy_port}/mcp")
+                _log.info("McpClient created, entering async with...")
                 async with proxy_mcp:
+                    _log.info("Connected to proxy, listing tools...")
                     proxy_tools_defs = await proxy_mcp.list_tools()
-                    anthropic_tools = [{
+                    _log.info(f"Got {len(proxy_tools_defs)} proxy tools")
+                    proxy_tools_list = [{
                         "name": t.name,
                         "description": t.description or "",
                         "input_schema": t.inputSchema or {"type": "object", "properties": {}},
                     } for t in proxy_tools_defs]
-
                     included_evals = [(i, e) for i, e in enumerate(session.eval_results) if i in included]
-                    for i, eval_result in included_evals:
+                    yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(included_evals)} prompts through proxy ({len(proxy_tools_list)} tools)..."})
+                    for eval_num, (i, eval_result) in enumerate(included_evals, 1):
                         prompt = eval_result["prompt"]
                         yield _sse("progress", {
                             "phase": "evaluate",
-                            "message": f"Re-running prompt {i+1}/{len(session.eval_results)}: {prompt[:50]}..."
+                            "message": f"Re-running prompt {eval_num}/{len(included_evals)}: {prompt[:50]}..."
                         })
 
                         # Run the same prompt through the proxy
@@ -458,28 +522,20 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         proxy_answer = ""
                         try:
                             while True:
-                                response = client.messages.create(
-                                    model=session.model,
-                                    max_tokens=4096,
-                                    tools=anthropic_tools,
-                                    messages=messages,
-                                )
+                                response = await llm.chat(messages=messages, tools=proxy_tools_list, max_tokens=4096)
 
-                                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-                                text_blocks = [b for b in response.content if b.type == "text"]
-
-                                if not tool_use_blocks:
-                                    proxy_answer = "\n".join(b.text for b in text_blocks)
+                                if not response.tool_calls:
+                                    proxy_answer = response.text
                                     proxy_answers.append({"prompt": prompt, "answer": proxy_answer})
                                     break
 
                                 messages.append({
                                     "role": "assistant",
-                                    "content": [_block_to_dict(b) for b in response.content],
+                                    "content": llm.to_anthropic_blocks(response),
                                 })
 
                                 tool_results = []
-                                for tool_use in tool_use_blocks:
+                                for tool_use in response.tool_calls:
                                     step += 1
                                     start = time.time()
                                     error = None
@@ -521,20 +577,10 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             })
 
             except Exception as e:
-                import traceback
+                _log.exception("Proxy evaluation failed")
                 yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}\n{traceback.format_exc()[:300]}"})
-        elif not proxy_port:
-            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
-        elif not session.eval_results:
-            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no evaluation prompts)"})
 
-        # --- Step 5: Stop proxy ---
-        if proxy_process and proxy_process.poll() is None:
-            proxy_process.terminate()
-            try:
-                proxy_process.wait(timeout=5)
-            except Exception:
-                proxy_process.kill()
+        _log.info(f"Step 4 complete. proxy_answers={len(proxy_answers)}, proxy_traces={len(proxy_traces)}")
 
         # --- Step 6: LLM-as-judge — compare baseline vs proxy answers ---
         judge_results = []
@@ -543,7 +589,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if proxy_answers and session.api_key:
             yield _sse("progress", {"phase": "judge", "message": "Comparing baseline vs optimized answers..."})
             try:
-                judge_client = anthropic.Anthropic(api_key=session.api_key)
+                from backend.llm_client import LLMClient
+                judge = LLMClient(session.api_key, session.model, session.custom_endpoint)
+
                 for i, proxy_entry in enumerate(proxy_answers):
                     if i >= len(session.eval_results):
                         break
@@ -552,7 +600,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     prompt = proxy_entry.get("prompt", "")
 
                     if not baseline_answer or not proxy_answer or proxy_answer.startswith("Error:"):
-                        judge_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer"})
+                        judge_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer", "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
                         continue
 
                     yield _sse("progress", {
@@ -560,38 +608,36 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         "message": f"Judging prompt {i+1}/{len(proxy_answers)}: {prompt[:50]}..."
                     })
 
-                    judge_response = judge_client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=300,
+                    judge_response = await judge.chat(
                         messages=[{
                             "role": "user",
                             "content": (
-                                "Compare these two answers to the same question. Are they semantically equivalent — "
-                                "do they convey the same key facts and information?\n\n"
+                                "You are comparing two LLM-generated answers to the same question. "
+                                "Your job is to determine if they provide the same USEFUL information to the user. "
+                                "Be lenient — differences in wording, formatting, ordering, level of detail, "
+                                "markdown structure, or conversational tone do NOT matter. "
+                                "What matters is: would a user get the same actionable information from both answers?\n\n"
                                 f"QUESTION: {prompt}\n\n"
                                 f"ANSWER A (baseline):\n{baseline_answer[:2000]}\n\n"
                                 f"ANSWER B (optimized):\n{proxy_answer[:2000]}\n\n"
                                 "Respond with exactly one of these verdicts on the first line, followed by a brief explanation:\n"
-                                "IDENTICAL - answers contain the same information\n"
-                                "EQUIVALENT - answers convey the same key facts with minor differences in wording/format\n"
-                                "PARTIAL - answers share some information but one is missing key details\n"
-                                "DIFFERENT - answers contain materially different information\n"
-                                "CONTRADICTORY - answers directly contradict each other"
+                                "EQUIVALENT - both answers provide the same useful information (even if worded differently, in different order, or with different formatting)\n"
+                                "PARTIAL - one answer is missing a key fact that the other includes\n"
+                                "DIFFERENT - the answers provide materially different information or data"
                             ),
                         }],
+                        max_tokens=300,
                     )
 
-                    judge_text = judge_response.content[0].text.strip()
+                    judge_text = judge_response.text.strip()
                     first_line = judge_text.split("\n")[0].strip().upper()
                     explanation = "\n".join(judge_text.split("\n")[1:]).strip()
 
-                    if "IDENTICAL" in first_line or "EQUIVALENT" in first_line:
+                    if "EQUIVALENT" in first_line or "IDENTICAL" in first_line:
                         verdict = "equivalent"
                         proxy_correct += 1
                     elif "PARTIAL" in first_line:
                         verdict = "partial"
-                    elif "CONTRADICTORY" in first_line:
-                        verdict = "contradictory"
                     else:
                         verdict = "different"
 
@@ -600,6 +646,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         "prompt": prompt,
                         "verdict": verdict,
                         "explanation": explanation,
+                        "baseline_answer": baseline_answer[:2000],
+                        "proxy_answer": proxy_answer[:2000],
                     })
 
                 yield _sse("progress", {
@@ -626,25 +674,22 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             for t in session.tools
         )
 
-        correct_count = sum(1 for r in rated if r["correctness"] == "correct")
-        baseline_accuracy = round(correct_count / len(rated), 3) if rated else 0
-
+        baseline_avg = round(baseline_tokens / num_prompts, 1)
         baseline = {
             "tool_count": len(session.tools),
             "menu_tokens": orig_menu,
-            "avg_tokens_per_prompt": round(baseline_tokens / num_prompts, 1),
+            "avg_tokens_per_prompt": baseline_avg,
             "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
-            "accuracy": baseline_accuracy,
-            "error_rate": round(baseline_errors / max(baseline_calls, 1), 3),
+            "total_context": round(orig_menu + baseline_avg, 1),
         }
 
+        proxy_avg = round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None
         proxy = {
             "tool_count": proxy_tool_count if proxy_tool_count > 0 else None,
             "menu_tokens": proxy_menu_tokens if proxy_menu_tokens > 0 else None,
-            "avg_tokens_per_prompt": round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None,
+            "avg_tokens_per_prompt": proxy_avg,
             "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else None,
-            "accuracy": round(proxy_correct / proxy_total, 3) if proxy_total > 0 else (baseline_accuracy if proxy_traces else None),
-            "error_rate": round(proxy_errors / max(proxy_calls, 1), 3) if proxy_traces else None,
+            "total_context": round(proxy_menu_tokens + proxy_avg, 1) if proxy_menu_tokens and proxy_avg is not None else None,
         }
 
         # Calculate deltas with percentages
@@ -658,11 +703,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 delta[key] = {"value": diff, "pct": pct}
 
         comparison = {"baseline": baseline, "proxy": proxy, "delta": delta, "judge_results": judge_results}
-
-        # Warn if accuracy decreased
-        if proxy_traces and proxy.get("accuracy") is not None and baseline_accuracy > 0:
-            if proxy["accuracy"] < baseline_accuracy:
-                comparison["accuracy_warning"] = "Accuracy decreased after optimization — some recommendations may need to be reverted."
 
         session.comparison = comparison
 
@@ -735,7 +775,9 @@ def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
         "",
         "SPECIAL_TOOLS = set(LOOKUP_TOOLS.values()) | set(REMOVED_TOOLS)",
         "",
-        "upstream = UpstreamClient(UPSTREAM_URL)",
+        f"TOKEN_DIR = {json.dumps(str(Path.home() / '.mcperiscope' / 'tokens'))}",
+        "",
+        "upstream = UpstreamClient(UPSTREAM_URL, token_dir=TOKEN_DIR)",
         "",
         "@asynccontextmanager",
         "async def lifespan(app):",
