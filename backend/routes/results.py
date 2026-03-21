@@ -85,7 +85,15 @@ async def get_plan():
         )
     from mcp_optimizer.report import generate_plan_md
 
-    plan_md = generate_plan_md(session.recommendations)
+    plan_md = generate_plan_md(
+        url=mcp_manager._url or "",
+        inventory=session.inventory or {},
+        analysis=session.analysis or {},
+        recommendations=session.recommendations,
+        ratings=session.ratings,
+        traces=session.traces,
+        prompts=session.prompts,
+    )
     return Response(content=plan_md, media_type="text/markdown")
 
 

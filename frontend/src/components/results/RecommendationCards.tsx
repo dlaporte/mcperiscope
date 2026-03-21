@@ -100,22 +100,15 @@ export function RecommendationCards({ recommendations }: Props) {
   if (sorted.length === 0) return null;
 
   return (
-    <div className="panel-riveted rounded-lg overflow-hidden">
-      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
-        <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
-          Recommendations ({sorted.length})
-        </h3>
-      </div>
-      <div className="p-4 space-y-2">
-        {sorted.map((rec, i) => (
-          <RecommendationCard
-            key={i}
-            rec={rec}
-            expanded={expandedIndex === i}
-            onToggle={() => setExpandedIndex(expandedIndex === i ? null : i)}
-          />
-        ))}
-      </div>
+    <div className="p-4 space-y-2">
+      {sorted.map((rec, i) => (
+        <RecommendationCard
+          key={i}
+          rec={rec}
+          expanded={expandedIndex === i}
+          onToggle={() => setExpandedIndex(expandedIndex === i ? null : i)}
+        />
+      ))}
     </div>
   );
 }

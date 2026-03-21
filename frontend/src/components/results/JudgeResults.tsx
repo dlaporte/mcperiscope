@@ -31,16 +31,7 @@ export function JudgeResults({ results }: Props) {
   const total = results.length;
 
   return (
-    <div className="panel-riveted rounded-lg overflow-hidden">
-      <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--sub-rivet)" }}>
-        <h3 className="text-lg font-semibold font-stencil" style={{ color: "var(--sub-text)" }}>
-          Answer Equivalence
-        </h3>
-        <p className="text-sm mt-1" style={{ color: "var(--sub-text-dim)" }}>
-          LLM judge compared baseline vs optimized answers for each prompt
-        </p>
-      </div>
-
+    <div>
       {/* Summary */}
       <div className="px-4 py-3 flex items-center gap-4" style={{ borderBottom: "1px solid var(--sub-rivet)" }}>
         <span
