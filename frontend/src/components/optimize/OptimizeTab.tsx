@@ -1,40 +1,107 @@
+import { useMemo } from "react";
 import { useStore } from "../../store";
+import { ContextGauge } from "../explore/ContextGauge";
 import { PromptInput } from "./PromptInput";
 import { EvalHistory } from "./EvalHistory";
 import { ToolChainViewer } from "./ToolChainViewer";
 import { RatingPanel } from "./RatingPanel";
+
+const MODEL_CONTEXT: Record<string, number> = {
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5-20251001": 200_000,
+  "gpt-5.4": 1_000_000,
+  "gpt-5.4-mini": 400_000,
+  "gpt-5.2": 400_000,
+  "gpt-4o": 128_000,
+  "gpt-4o-mini": 128_000,
+};
 
 export function OptimizeTab() {
   const evalResults = useStore((s) => s.evalResults);
   const optimizeRunning = useStore((s) => s.optimizeRunning);
   const optimizeProgress = useStore((s) => s.optimizeProgress);
   const runOptimize = useStore((s) => s.runOptimize);
+  const inventory = useStore((s) => s.inventory);
+  const model = useStore((s) => s.model);
 
   const ratedCount = evalResults.filter((e) => e.rating).length;
   const canOptimize = ratedCount > 0 && !optimizeRunning;
 
+  // Compute running token usage — use actual API counts when available
+  const tokenUsage = useMemo(() => {
+    const toolDefTokens = inventory?.total_budget_tokens ?? 0;
+    let apiInputTokens = 0;
+    let apiOutputTokens = 0;
+    let hasApiUsage = false;
+
+    for (const evalResult of evalResults) {
+      if (evalResult.usage?.total_tokens) {
+        // Use actual counts from the Anthropic API
+        apiInputTokens += evalResult.usage.input_tokens ?? 0;
+        apiOutputTokens += evalResult.usage.output_tokens ?? 0;
+        hasApiUsage = true;
+      }
+    }
+
+    if (hasApiUsage) {
+      return {
+        toolDefs: toolDefTokens,
+        conversation: apiInputTokens + apiOutputTokens,
+        total: apiInputTokens + apiOutputTokens,
+        label: `${apiInputTokens.toLocaleString()} in + ${apiOutputTokens.toLocaleString()} out (API-reported)`,
+      };
+    }
+
+    // Fallback to estimates
+    return {
+      toolDefs: toolDefTokens,
+      conversation: 0,
+      total: toolDefTokens,
+      label: `${toolDefTokens.toLocaleString()} tool catalog`,
+    };
+  }, [evalResults, inventory]);
+
+  const contextWindow = MODEL_CONTEXT[model] ?? 200_000;
+
   return (
-    <div className="h-full flex relative">
-      {/* Left panel: prompt input + eval history */}
-      <div className="w-1/3 flex flex-col min-h-0" style={{ borderRight: '1px solid var(--sub-rivet)' }}>
-        {/* Explanation */}
-        <div className="px-4 pt-4 pb-2">
-          <p className="text-xs leading-relaxed" style={{ color: 'var(--sub-text-dim)' }}>
-            Test how well an LLM uses this MCP's tools by entering real questions below.
-            The LLM will chain tool calls to answer each prompt. Rate the responses for correctness,
-            then click <strong style={{ color: 'var(--sub-brass)' }}>Optimize</strong> to analyze tool usage
-            patterns and generate recommendations for reducing token waste, consolidating tools, and
-            improving accuracy.
-          </p>
-        </div>
-        <PromptInput />
-        <EvalHistory />
+    <div className="h-full flex flex-col relative">
+      {/* Context usage bar */}
+      <div
+        className="flex items-center gap-3 px-4 py-2"
+        style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
+      >
+        <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
+          Session usage
+        </span>
+        <ContextGauge tokens={tokenUsage.total} max={contextWindow} />
+        <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
+          {tokenUsage.label}
+        </span>
       </div>
 
-      {/* Right panel: tool chain viewer + rating */}
-      <div className="flex-1 flex flex-col min-h-0">
-        <ToolChainViewer />
-        <RatingPanel />
+      <div className="flex-1 flex min-h-0">
+        {/* Left panel: prompt input + eval history */}
+        <div className="w-1/3 flex flex-col min-h-0" style={{ borderRight: '1px solid var(--sub-rivet)' }}>
+          {/* Explanation */}
+          <div className="px-4 pt-4 pb-2">
+            <p className="text-xs leading-relaxed" style={{ color: 'var(--sub-text-dim)' }}>
+              Test how well an LLM uses this MCP's tools by entering real questions below.
+              The LLM will chain tool calls to answer each prompt. Rate the responses for correctness,
+              then click <strong style={{ color: 'var(--sub-brass)' }}>Optimize</strong> to analyze tool usage
+              patterns and generate recommendations for reducing token waste, consolidating tools, and
+              improving accuracy.
+            </p>
+          </div>
+          <PromptInput />
+          <EvalHistory />
+        </div>
+
+        {/* Right panel: tool chain viewer + rating */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <ToolChainViewer />
+          <RatingPanel />
+        </div>
       </div>
 
       {/* Optimize button + progress */}

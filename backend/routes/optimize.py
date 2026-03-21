@@ -73,11 +73,19 @@ async def evaluate(req: EvaluateRequest):
                 "input_schema": t.inputSchema or {"type": "object", "properties": {}},
             })
 
-        messages = [{"role": "user", "content": req.prompt}]
+        # Build conversation history from previous evaluations
+        messages = []
+        for prev in session.eval_results:
+            if prev.get("answer"):
+                messages.append({"role": "user", "content": prev["prompt"]})
+                messages.append({"role": "assistant", "content": prev["answer"]})
+        messages.append({"role": "user", "content": req.prompt})
         tool_chain: list[dict] = []
         trace_events: list[dict] = []
         step = 0
         final_answer = ""
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         try:
             while True:
@@ -89,6 +97,11 @@ async def evaluate(req: EvaluateRequest):
                     tools=tools,
                     messages=messages,
                 )
+
+                # Capture actual token usage from the API
+                if hasattr(response, "usage") and response.usage:
+                    total_input_tokens += getattr(response.usage, "input_tokens", 0)
+                    total_output_tokens += getattr(response.usage, "output_tokens", 0)
 
                 tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
                 text_blocks = [b for b in response.content if b.type == "text"]
@@ -163,11 +176,18 @@ async def evaluate(req: EvaluateRequest):
         except Exception as e:
             final_answer = f"Evaluation error: {e}\n{traceback.format_exc()}"
 
+        usage = {
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "total_tokens": total_input_tokens + total_output_tokens,
+        }
+
         eval_result = {
             "prompt": req.prompt,
             "answer": final_answer,
             "toolChain": tool_chain,
             "traceEvents": trace_events,
+            "usage": usage,
         }
         session.eval_results.append(eval_result)
         session.traces.extend(trace_events)
@@ -178,6 +198,7 @@ async def evaluate(req: EvaluateRequest):
             "answer": final_answer,
             "toolChain": tool_chain,
             "traceEvents": trace_events,
+            "usage": usage,
             "index": len(session.eval_results) - 1,
         })
 
@@ -272,7 +293,7 @@ async def run_optimize():
         proxy_code = None
         try:
             proxy_code = _generate_proxy_for_recommendations(
-                session.recommendations, session.tools, mcp_manager._server_url or ""
+                session.recommendations, session.tools, mcp_manager._url or ""
             )
             session.proxy_code = proxy_code
         except Exception as e:

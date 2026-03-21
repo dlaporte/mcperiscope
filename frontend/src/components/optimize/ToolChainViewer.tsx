@@ -134,16 +134,29 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
           {isLoading ? (
             <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--sub-brass)', borderTopColor: 'transparent' }} />
           ) : (
-            <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={
-                step.duration > 2
-                  ? { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }
-                  : { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }
-              }
-            >
-              {step.duration}s
-            </span>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs px-2 py-0.5 rounded-full"
+                style={
+                  step.duration > 2
+                    ? { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }
+                    : { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }
+                }
+              >
+                {step.duration}s
+              </span>
+              <span
+                className="text-xs px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
+              >
+                {(() => {
+                  const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
+                  const outputStr = step.output ?? "";
+                  const tokens = Math.ceil(inputStr.length / 4) + Math.ceil(outputStr.length / 4);
+                  return `${tokens.toLocaleString()} tok`;
+                })()}
+              </span>
+            </div>
           )}
         </div>
 
@@ -179,7 +192,15 @@ export function ToolChainViewer() {
     <div className="flex-1 overflow-y-auto p-4">
       {/* Prompt header */}
       <div className="mb-4 p-3 rounded-lg panel-riveted">
-        <span className="font-stencil text-xs uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>Prompt</span>
+        <div className="flex items-center justify-between">
+          <span className="font-stencil text-xs uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>Prompt</span>
+          <span
+            className="text-xs px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
+          >
+            {Math.ceil((evalResult.prompt?.length ?? 0) / 4).toLocaleString()} tok
+          </span>
+        </div>
         <p className="text-sm mt-1" style={{ color: 'var(--sub-text)' }}>{evalResult.prompt}</p>
       </div>
 
@@ -203,9 +224,39 @@ export function ToolChainViewer() {
       {/* Final answer */}
       {evalResult.answer ? (
         <div className="p-4 rounded-lg" style={{ border: '2px solid var(--sub-phosphor)', backgroundColor: 'rgba(51,255,51,0.05)' }}>
-          <span className="phosphor-text text-xs uppercase tracking-wider font-medium">
-            Final Answer
-          </span>
+          <div className="flex items-center justify-between">
+            <span className="phosphor-text text-xs uppercase tracking-wider font-medium">
+              Final Answer
+            </span>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
+              >
+                {(() => {
+                  const totalTime = toolChain.reduce((sum, s) => sum + (s.duration ?? 0), 0);
+                  return `${totalTime.toFixed(1)}s`;
+                })()}
+              </span>
+              <span
+                className="text-xs px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
+              >
+                {(() => {
+                  if (evalResult.usage?.total_tokens) {
+                    return `${evalResult.usage.total_tokens.toLocaleString()} tok`;
+                  }
+                  let total = Math.ceil((evalResult.prompt?.length ?? 0) / 4);
+                  for (const step of toolChain) {
+                    const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
+                    total += Math.ceil(inputStr.length / 4) + Math.ceil((step.output ?? "").length / 4);
+                  }
+                  total += Math.ceil((evalResult.answer?.length ?? 0) / 4);
+                  return `~${total.toLocaleString()} tok`;
+                })()}
+              </span>
+            </div>
+          </div>
           <div className="mt-2 text-sm prose prose-sm prose-invert max-w-none" style={{ color: 'var(--sub-text)' }}>
             <Markdown remarkPlugins={[remarkGfm]}>{evalResult.answer}</Markdown>
           </div>

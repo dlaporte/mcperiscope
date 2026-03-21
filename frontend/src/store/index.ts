@@ -219,11 +219,12 @@ function buildAuthConfig(state: AppState): AuthConfig | undefined {
 }
 
 async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
-  const [tools, resources, templates, prompts] = await Promise.allSettled([
+  const [tools, resources, templates, prompts, inventoryRes] = await Promise.allSettled([
     api.listTools(),
     api.listResources(),
     api.listResourceTemplates(),
     api.listPrompts(),
+    api.getInventory(),
   ]);
 
   set({
@@ -231,6 +232,7 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
     resources: resources.status === "fulfilled" ? (resources.value as { resources: any[] }).resources : [],
     resourceTemplates: templates.status === "fulfilled" ? (templates.value as { resourceTemplates: any[] }).resourceTemplates : [],
     prompts: prompts.status === "fulfilled" ? (prompts.value as { prompts: any[] }).prompts : [],
+    inventory: inventoryRes.status === "fulfilled" ? inventoryRes.value : null,
   });
 }
 
@@ -725,6 +727,7 @@ export const useStore = create<AppState>((set, get) => ({
                     answer: data.answer,
                     toolChain: data.toolChain,
                     traceEvents: data.traceEvents,
+                    usage: data.usage,
                   };
                   return { evalResults, evalLoading: false };
                 });

@@ -80,7 +80,7 @@ export const api = {
 
   // === Analysis ===
   getInventory: () =>
-    request<unknown>("/analyze/inventory"),
+    request<unknown>("/analysis/inventory"),
 
   getToolStats: () =>
     request<unknown>("/analyze/tool-stats"),

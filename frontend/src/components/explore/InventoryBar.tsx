@@ -147,7 +147,7 @@ export function InventoryBar() {
       style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
     >
       {/* Context budget */}
-      <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Tool context usage</span>
+      <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Session usage</span>
       {!loading && inventory && (
         <div className="flex-1 min-w-0">
           <ContextGauge tokens={totalTokens} max={contextWindow} />
