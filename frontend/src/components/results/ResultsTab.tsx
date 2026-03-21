@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useStore } from "../../store";
 import { ComparisonTable } from "./ComparisonTable";
+import { JudgeResults } from "./JudgeResults";
 import { RecommendationCards } from "./RecommendationCards";
 import { ExportPanel } from "./ExportPanel";
 
@@ -80,6 +81,10 @@ export function ResultsTab() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         {comparison && <ComparisonTable data={comparison} />}
+
+        {comparison?.judge_results?.length > 0 && (
+          <JudgeResults results={comparison.judge_results} />
+        )}
 
         {recommendations.length > 0 && (
           <RecommendationCards recommendations={recommendations} />

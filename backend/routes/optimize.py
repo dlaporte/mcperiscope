@@ -312,6 +312,7 @@ async def run_optimize():
 
         # --- Step 4: Re-run prompts through proxy ---
         proxy_traces = []
+        proxy_answers = []  # Capture proxy answers for LLM-as-judge
         proxy_tool_count = proxy_tools or 0
         if proxy_port and session.api_key:
             yield _sse("progress", {"phase": "evaluate", "message": "Re-running prompts through optimized proxy..."})
@@ -339,6 +340,7 @@ async def run_optimize():
                         # Run the same prompt through the proxy
                         messages = [{"role": "user", "content": prompt}]
                         step = 0
+                        proxy_answer = ""
                         try:
                             while True:
                                 response = client.messages.create(
@@ -352,6 +354,8 @@ async def run_optimize():
                                 text_blocks = [b for b in response.content if b.type == "text"]
 
                                 if not tool_use_blocks:
+                                    proxy_answer = "\n".join(b.text for b in text_blocks)
+                                    proxy_answers.append({"prompt": prompt, "answer": proxy_answer})
                                     break
 
                                 messages.append({
@@ -395,6 +399,7 @@ async def run_optimize():
 
                                 messages.append({"role": "user", "content": tool_results})
                         except Exception as e:
+                            proxy_answers.append({"prompt": prompt, "answer": f"Error: {e}"})
                             yield _sse("progress", {
                                 "phase": "evaluate",
                                 "message": f"Prompt {i+1} failed: {str(e)[:100]}"
@@ -413,11 +418,81 @@ async def run_optimize():
             except Exception:
                 proxy_process.kill()
 
-        # --- Step 6: Compute comparison ---
-        yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
+        # --- Step 6: LLM-as-judge — compare baseline vs proxy answers ---
+        judge_results = []
+        proxy_correct = 0
+        proxy_total = 0
+        if proxy_answers and session.api_key:
+            yield _sse("progress", {"phase": "judge", "message": "Comparing baseline vs optimized answers..."})
+            try:
+                judge_client = anthropic.Anthropic(api_key=session.api_key)
+                for i, proxy_entry in enumerate(proxy_answers):
+                    if i >= len(session.eval_results):
+                        break
+                    baseline_answer = session.eval_results[i].get("answer", "")
+                    proxy_answer = proxy_entry.get("answer", "")
+                    prompt = proxy_entry.get("prompt", "")
 
-        # Use the same ratings for proxy (assume same correctness since same prompts)
-        proxy_ratings = rated if proxy_traces else []
+                    if not baseline_answer or not proxy_answer or proxy_answer.startswith("Error:"):
+                        judge_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer"})
+                        continue
+
+                    yield _sse("progress", {
+                        "phase": "judge",
+                        "message": f"Judging prompt {i+1}/{len(proxy_answers)}: {prompt[:50]}..."
+                    })
+
+                    judge_response = judge_client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=300,
+                        messages=[{
+                            "role": "user",
+                            "content": (
+                                "Compare these two answers to the same question. Are they semantically equivalent — "
+                                "do they convey the same key facts and information?\n\n"
+                                f"QUESTION: {prompt}\n\n"
+                                f"ANSWER A (baseline):\n{baseline_answer[:2000]}\n\n"
+                                f"ANSWER B (optimized):\n{proxy_answer[:2000]}\n\n"
+                                "Respond with exactly one of these verdicts on the first line, followed by a brief explanation:\n"
+                                "IDENTICAL - answers contain the same information\n"
+                                "EQUIVALENT - answers convey the same key facts with minor differences in wording/format\n"
+                                "PARTIAL - answers share some information but one is missing key details\n"
+                                "DIFFERENT - answers contain materially different information\n"
+                                "CONTRADICTORY - answers directly contradict each other"
+                            ),
+                        }],
+                    )
+
+                    judge_text = judge_response.content[0].text.strip()
+                    first_line = judge_text.split("\n")[0].strip().upper()
+                    explanation = "\n".join(judge_text.split("\n")[1:]).strip()
+
+                    if "IDENTICAL" in first_line or "EQUIVALENT" in first_line:
+                        verdict = "equivalent"
+                        proxy_correct += 1
+                    elif "PARTIAL" in first_line:
+                        verdict = "partial"
+                    elif "CONTRADICTORY" in first_line:
+                        verdict = "contradictory"
+                    else:
+                        verdict = "different"
+
+                    proxy_total += 1
+                    judge_results.append({
+                        "prompt": prompt,
+                        "verdict": verdict,
+                        "explanation": explanation,
+                    })
+
+                yield _sse("progress", {
+                    "phase": "judge",
+                    "message": f"Answer comparison: {proxy_correct}/{proxy_total} equivalent"
+                })
+            except Exception as e:
+                yield _sse("progress", {"phase": "judge", "message": f"Answer comparison failed: {str(e)[:100]}"})
+
+        # --- Step 7: Compute comparison ---
+        yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
 
         # Build comparison from measured data
         baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in session.traces)
@@ -450,7 +525,7 @@ async def run_optimize():
             "menu_tokens": proxy_menu_tokens if proxy_menu_tokens > 0 else None,
             "avg_tokens_per_prompt": round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None,
             "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else None,
-            "accuracy": baseline_accuracy if proxy_traces else None,  # Same prompts, assume same correctness
+            "accuracy": round(proxy_correct / proxy_total, 3) if proxy_total > 0 else (baseline_accuracy if proxy_traces else None),
             "error_rate": round(proxy_errors / max(proxy_calls, 1), 3) if proxy_traces else None,
         }
 
@@ -464,7 +539,7 @@ async def run_optimize():
                 pct = round((p - b) / b * 100, 1) if b != 0 else (0 if p == 0 else None)
                 delta[key] = {"value": diff, "pct": pct}
 
-        comparison = {"baseline": baseline, "proxy": proxy, "delta": delta}
+        comparison = {"baseline": baseline, "proxy": proxy, "delta": delta, "judge_results": judge_results}
 
         # Warn if accuracy decreased
         if proxy_traces and proxy.get("accuracy") is not None and baseline_accuracy > 0:
