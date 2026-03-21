@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useStore } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
 import { PromptInput } from "./PromptInput";
 import { EvalHistory } from "./EvalHistory";
 import { ToolChainViewer } from "./ToolChainViewer";
 import { RatingPanel } from "./RatingPanel";
-import { ContextModal } from "./ContextModal";
 
 const MODEL_CONTEXT: Record<string, number> = {
   "claude-opus-4-6": 1_000_000,
@@ -26,46 +25,32 @@ export function OptimizeTab() {
   const inventory = useStore((s) => s.inventory);
   const model = useStore((s) => s.model);
 
-  const [showContext, setShowContext] = useState(false);
+  const evalIncluded = useStore((s) => s.evalIncluded);
 
-  const ratedCount = evalResults.filter((e) => e.rating).length;
-  const canOptimize = ratedCount > 0 && !optimizeRunning;
+  const includedRatedCount = evalResults.filter((e, i) => evalIncluded.has(i) && e.rating).length;
+  const canOptimize = includedRatedCount > 0 && !optimizeRunning;
 
-  // The latest eval index for context window fetch
-  const latestEvalIndex = evalResults.length > 0 ? evalResults.length - 1 : null;
-
-  // Compute running token usage — use actual API counts when available
+  // Compute context window usage — use peak_context_tokens from the most recent eval
   const tokenUsage = useMemo(() => {
-    const toolDefTokens = inventory?.total_budget_tokens ?? 0;
-    let apiInputTokens = 0;
-    let apiOutputTokens = 0;
-    let hasApiUsage = false;
-
-    for (const evalResult of evalResults) {
-      if (evalResult.usage?.total_tokens) {
-        // Use actual counts from the Anthropic API
-        apiInputTokens += evalResult.usage.input_tokens ?? 0;
-        apiOutputTokens += evalResult.usage.output_tokens ?? 0;
-        hasApiUsage = true;
+    // Find the most recent eval with API usage data
+    let peakContext = 0;
+    for (let i = evalResults.length - 1; i >= 0; i--) {
+      const usage = evalResults[i]?.usage;
+      if (usage?.peak_context_tokens) {
+        peakContext = usage.peak_context_tokens;
+        break;
       }
     }
 
-    if (hasApiUsage) {
-      return {
-        toolDefs: toolDefTokens,
-        conversation: apiInputTokens + apiOutputTokens,
-        total: apiInputTokens + apiOutputTokens,
-        label: `${apiInputTokens.toLocaleString()} in + ${apiOutputTokens.toLocaleString()} out (API-reported)`,
-      };
+    if (peakContext > 0) {
+      return { total: peakContext };
     }
 
-    // Fallback to estimates
-    return {
-      toolDefs: toolDefTokens,
-      conversation: 0,
-      total: toolDefTokens,
-      label: `${toolDefTokens.toLocaleString()} tool catalog`,
-    };
+    // Before any prompts: the inventory estimate uses chars/4 which under-counts
+    // by ~1.6x for JSON-heavy tool definitions. Apply correction factor.
+    const toolDefTokens = inventory?.total_budget_tokens ?? 0;
+    const corrected = Math.round(toolDefTokens * 1.6);
+    return { total: corrected };
   }, [evalResults, inventory]);
 
   const contextWindow = MODEL_CONTEXT[model] ?? 200_000;
@@ -80,10 +65,7 @@ export function OptimizeTab() {
         <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
           Session usage
         </span>
-        <ContextGauge tokens={tokenUsage.total} max={contextWindow} onClick={latestEvalIndex !== null ? () => setShowContext(true) : undefined} />
-        <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
-          {tokenUsage.label}
-        </span>
+        <ContextGauge tokens={tokenUsage.total} max={contextWindow} />
       </div>
 
       <div className="flex-1 flex min-h-0">
@@ -144,9 +126,9 @@ export function OptimizeTab() {
           ) : (
             <>
               Optimize
-              {ratedCount > 0 && (
+              {includedRatedCount > 0 && (
                 <span className="ml-2 text-xs opacity-75">
-                  ({ratedCount} rated)
+                  ({includedRatedCount} included)
                 </span>
               )}
             </>
@@ -154,9 +136,6 @@ export function OptimizeTab() {
         </button>
       </div>
 
-      {showContext && latestEvalIndex !== null && (
-        <ContextModal evalIndex={latestEvalIndex} onClose={() => setShowContext(false)} />
-      )}
     </div>
   );
 }

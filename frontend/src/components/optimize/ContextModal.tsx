@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -84,14 +84,43 @@ interface ContextData {
 
 interface Props {
   evalIndex: number;
+  totalTokens: number;
   onClose: () => void;
 }
 
-export function ContextModal({ evalIndex, onClose }: Props) {
+export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
   const [context, setContext] = useState<ContextData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<"messages" | "tools">("messages");
+
+  // Estimate tokens using the API-reported total to calibrate
+  // The API wraps tools and messages with overhead, so we calculate proportional shares
+  const { messageTokens, toolTokens } = useMemo(() => {
+    if (!context) return { messageTokens: 0, toolTokens: 0 };
+
+    // Calculate raw char counts for proportional split
+    const msgChars = context.messages.reduce((sum, m) => {
+      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return sum + content.length;
+    }, 0);
+
+    const toolChars = context.tools.reduce((sum, t) => {
+      return sum + `${t.name}: ${t.description}`.length;
+    }, 0);
+
+    const totalChars = msgChars + toolChars;
+    if (totalChars === 0) return { messageTokens: 0, toolTokens: 0 };
+
+    // Use the API-reported total to split proportionally
+    const msgRatio = msgChars / totalChars;
+    const toolRatio = toolChars / totalChars;
+
+    return {
+      messageTokens: Math.round(totalTokens * msgRatio),
+      toolTokens: Math.round(totalTokens * toolRatio),
+    };
+  }, [context, totalTokens]);
 
   useEffect(() => {
     setLoading(true);
@@ -126,32 +155,57 @@ export function ContextModal({ evalIndex, onClose }: Props) {
           style={{ borderBottom: "1px solid var(--sub-rivet)", backgroundColor: "var(--sub-panel)" }}
         >
           <div className="flex items-center gap-4">
-            <h2 className="font-stencil text-sm" style={{ color: "var(--sub-text)" }}>
-              Context Window Contents
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="font-stencil text-sm" style={{ color: "var(--sub-text)" }}>
+                Context Window
+              </h2>
+              <span className="text-xs font-mono phosphor-text">
+                {totalTokens.toLocaleString()} tokens
+              </span>
+            </div>
             {context && (
-              <div className="flex gap-1">
+              <div className="flex gap-2">
                 <button
                   onClick={() => setActiveSection("messages")}
-                  className="px-3 py-1 text-xs rounded"
+                  className="flex items-center gap-1.5 px-3 py-1 text-xs rounded"
                   style={
                     activeSection === "messages"
                       ? { backgroundColor: "var(--sub-brass)", color: "#1a1a1a", fontWeight: 700 }
                       : { color: "var(--sub-text-dim)" }
                   }
                 >
-                  Messages ({context.message_count})
+                  Messages
+                  <span
+                    className="text-[10px] font-mono px-1.5 rounded-full"
+                    style={
+                      activeSection === "messages"
+                        ? { backgroundColor: "rgba(0,0,0,0.2)", color: "#1a1a1a" }
+                        : { backgroundColor: "var(--sub-panel-light)", color: "var(--sub-text-dim)" }
+                    }
+                  >
+                    ~{messageTokens.toLocaleString()} tok
+                  </span>
                 </button>
                 <button
                   onClick={() => setActiveSection("tools")}
-                  className="px-3 py-1 text-xs rounded"
+                  className="flex items-center gap-1.5 px-3 py-1 text-xs rounded"
                   style={
                     activeSection === "tools"
                       ? { backgroundColor: "var(--sub-brass)", color: "#1a1a1a", fontWeight: 700 }
                       : { color: "var(--sub-text-dim)" }
                   }
                 >
-                  Tools ({context.tool_count})
+                  Tools
+                  <span
+                    className="text-[10px] font-mono px-1.5 rounded-full"
+                    style={
+                      activeSection === "tools"
+                        ? { backgroundColor: "rgba(0,0,0,0.2)", color: "#1a1a1a" }
+                        : { backgroundColor: "var(--sub-panel-light)", color: "var(--sub-text-dim)" }
+                    }
+                  >
+                    ~{toolTokens.toLocaleString()} tok
+                  </span>
                 </button>
               </div>
             )}
@@ -253,15 +307,6 @@ export function ContextModal({ evalIndex, onClose }: Props) {
           )}
         </div>
 
-        {/* Footer */}
-        {context && (
-          <div
-            className="px-5 py-2 text-xs shrink-0"
-            style={{ borderTop: "1px solid var(--sub-rivet)", color: "var(--sub-text-dim)" }}
-          >
-            {context.tool_count} tool definitions + {context.message_count} messages in context
-          </div>
-        )}
       </div>
     </>
   );

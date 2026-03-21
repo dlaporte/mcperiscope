@@ -5,11 +5,13 @@ function Section({
   title,
   count,
   total,
+  tokens,
   children,
 }: {
   title: string;
   count: number;
   total: number;
+  tokens?: number;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(true);
@@ -25,16 +27,45 @@ function Section({
         <span>
           {open ? "\u25BE" : "\u25B8"} {title}
         </span>
-        <span
-          className="text-xs px-1.5 py-0.5 rounded"
-          style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
-        >
-          {count !== total ? `${count}/${total}` : count}
+        <span className="flex items-center gap-1.5">
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded-full"
+            style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
+          >
+            {count !== total ? `${count}/${total}` : count}
+          </span>
+          {tokens != null && tokens > 0 && (
+            <span
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
+            >
+              {tokens.toLocaleString()} tok
+            </span>
+          )}
         </span>
       </button>
       {open && <div>{children}</div>}
     </div>
   );
+}
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function estimateToolTokens(tool: any): number {
+  const desc = tool.description || "";
+  const schema = JSON.stringify(tool.inputSchema || {});
+  return estimateTokens(`${tool.name}: ${desc}`) + estimateTokens(schema);
+}
+
+function estimateResourceTokens(resource: any): number {
+  return estimateTokens(`${resource.name || ""}: ${resource.description || ""} (${resource.uri || ""})`);
+}
+
+function estimatePromptTokens(prompt: any): number {
+  const args = (prompt.arguments || []).map((a: any) => a.name).join(", ");
+  return estimateTokens(`${prompt.name}(${args}): ${prompt.description || ""}`);
 }
 
 export function Sidebar() {
@@ -95,6 +126,10 @@ export function Sidebar() {
   const isSelected = (type: string, name: string) =>
     selection?.type === type && selection.item.name === name;
 
+  const toolTokens = useMemo(() => filteredTools.reduce((sum: number, t: any) => sum + estimateToolTokens(t), 0), [filteredTools]);
+  const resourceTokens = useMemo(() => filteredResources.reduce((sum: number, r: any) => sum + estimateResourceTokens(r), 0), [filteredResources]);
+  const promptTokens = useMemo(() => filteredPrompts.reduce((sum: number, p: any) => sum + estimatePromptTokens(p), 0), [filteredPrompts]);
+
   return (
     <div
       className="w-64 flex flex-col shrink-0"
@@ -124,7 +159,7 @@ export function Sidebar() {
 
       {/* Scrollable list */}
       <div className="overflow-y-auto flex-1">
-        <Section title="Tools" count={filteredTools.length} total={tools.length}>
+        <Section title="Tools" count={filteredTools.length} total={tools.length} tokens={toolTokens}>
           {filteredTools.map((tool: any) => (
             <button
               key={tool.name}
@@ -154,7 +189,7 @@ export function Sidebar() {
           )}
         </Section>
 
-        <Section title="Resources" count={filteredResources.length} total={resources.length}>
+        <Section title="Resources" count={filteredResources.length} total={resources.length} tokens={resourceTokens}>
           {filteredResources.map((resource: any) => (
             <button
               key={resource.uri}
@@ -184,7 +219,7 @@ export function Sidebar() {
           )}
         </Section>
 
-        <Section title="Prompts" count={filteredPrompts.length} total={prompts.length}>
+        <Section title="Prompts" count={filteredPrompts.length} total={prompts.length} tokens={promptTokens}>
           {filteredPrompts.map((prompt: any) => (
             <button
               key={prompt.name}

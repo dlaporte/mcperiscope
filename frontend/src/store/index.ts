@@ -77,6 +77,8 @@ interface AppState {
     rating?: { correctness: string; notes: string };
   }>;
   selectedEvalIndex: number | null;
+  evalIncluded: Set<number>;
+  toggleEvalIncluded: (index: number) => void;
   evalLoading: boolean;
   optimizeRunning: boolean;
   optimizeProgress: string | null;
@@ -344,6 +346,15 @@ export const useStore = create<AppState>((set, get) => ({
   removedAliases: loadRemovedAliases(),
   evalResults: [],
   selectedEvalIndex: null,
+  evalIncluded: new Set<number>(),
+  toggleEvalIncluded: (index) => {
+    set((state) => {
+      const next = new Set(state.evalIncluded);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return { evalIncluded: next };
+    });
+  },
   evalLoading: false,
   optimizeRunning: false,
   optimizeProgress: null,
@@ -495,6 +506,7 @@ export const useStore = create<AppState>((set, get) => ({
       parameterStore: {},
       evalResults: [],
       selectedEvalIndex: null,
+      evalIncluded: new Set<number>(),
       evalLoading: false,
       optimizeRunning: false,
       optimizeProgress: null,
@@ -743,7 +755,10 @@ export const useStore = create<AppState>((set, get) => ({
                     usage: data.usage,
                     contextWindow: data.contextWindow,
                   };
-                  return { evalResults, evalLoading: false };
+                  // Auto-include in optimization
+                  const included = new Set(state.evalIncluded);
+                  included.add(placeholderIndex);
+                  return { evalResults, evalLoading: false, evalIncluded: included };
                 });
               } else if (currentEvent === "error") {
                 set((state) => {
@@ -799,7 +814,12 @@ export const useStore = create<AppState>((set, get) => ({
   runOptimize: async () => {
     set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
     try {
-      const response = await fetch("/api/optimize/run", { method: "POST" });
+      const included = [...get().evalIncluded];
+      const response = await fetch("/api/optimize/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ included_indices: included }),
+      });
 
       if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
         const err = await response.json().catch(() => ({ detail: response.statusText }));

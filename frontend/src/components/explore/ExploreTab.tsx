@@ -3,7 +3,6 @@ import { Sidebar } from "./Sidebar";
 import { ToolDetail } from "./ToolDetail";
 import { ResourceDetail } from "./ResourceDetail";
 import { PromptDetail } from "./PromptDetail";
-import { InventoryBar } from "./InventoryBar";
 import { ParameterStorePanel } from "../shared/ParameterStorePanel";
 
 function DetailPanel() {
@@ -42,7 +41,6 @@ function DetailPanel() {
 export function ExploreTab() {
   return (
     <div className="flex flex-col h-full">
-      <InventoryBar />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <DetailPanel />

@@ -10,6 +10,7 @@ import socket
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from pydantic import BaseModel
 from backend.models import EvaluateRequest, RatingRequest
 from backend.state import session
 
@@ -91,6 +92,7 @@ async def evaluate(req: EvaluateRequest):
         final_answer = ""
         total_input_tokens = 0
         total_output_tokens = 0
+        peak_input_tokens = 0  # Last round's input_tokens = actual context window usage
 
         try:
             while True:
@@ -105,8 +107,11 @@ async def evaluate(req: EvaluateRequest):
 
                 # Capture actual token usage from the API
                 if hasattr(response, "usage") and response.usage:
-                    total_input_tokens += getattr(response.usage, "input_tokens", 0)
-                    total_output_tokens += getattr(response.usage, "output_tokens", 0)
+                    round_input = getattr(response.usage, "input_tokens", 0)
+                    round_output = getattr(response.usage, "output_tokens", 0)
+                    total_input_tokens += round_input
+                    total_output_tokens += round_output
+                    peak_input_tokens = round_input  # Each round includes full context
 
                 tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
                 text_blocks = [b for b in response.content if b.type == "text"]
@@ -185,6 +190,8 @@ async def evaluate(req: EvaluateRequest):
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
             "total_tokens": total_input_tokens + total_output_tokens,
+            "peak_context_tokens": peak_input_tokens,  # Actual context window usage (last round)
+            "api_rounds": step + 1,  # Number of API calls made
         }
 
         # Capture the full context window contents for inspection
@@ -278,8 +285,12 @@ async def rate(req: RatingRequest):
     }
 
 
+class OptimizeRunRequest(BaseModel):
+    included_indices: list[int] | None = None
+
+
 @router.post("/optimize/run")
-async def run_optimize():
+async def run_optimize(req: OptimizeRunRequest | None = None):
     """Full optimization pipeline with SSE progress streaming.
 
     Steps: analyze → generate proxy → start proxy → re-run prompts → compare → results
@@ -288,9 +299,14 @@ async def run_optimize():
     if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
 
-    rated = [r for r in session.ratings if r is not None]
+    # Filter to only included evaluations
+    included = set(req.included_indices) if req and req.included_indices is not None else set(range(len(session.eval_results)))
+    rated = [
+        r for i, r in enumerate(session.ratings)
+        if r is not None and i in included
+    ]
     if not rated:
-        raise HTTPException(status_code=400, detail="No rated evaluations yet")
+        raise HTTPException(status_code=400, detail="No rated evaluations included")
 
     async def event_stream():
         import asyncio
@@ -409,7 +425,8 @@ async def run_optimize():
                         "input_schema": t.inputSchema or {"type": "object", "properties": {}},
                     } for t in proxy_tools_defs]
 
-                    for i, eval_result in enumerate(session.eval_results):
+                    included_evals = [(i, e) for i, e in enumerate(session.eval_results) if i in included]
+                    for i, eval_result in included_evals:
                         prompt = eval_result["prompt"]
                         yield _sse("progress", {
                             "phase": "evaluate",
