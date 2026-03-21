@@ -17,7 +17,7 @@ function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900 text-white">
+    <div className="h-screen flex flex-col text-white" style={{ backgroundColor: 'var(--sub-hull)' }}>
       <TabBar active={activeTab} onChange={setActiveTab} connected={connected} />
       <div className="flex-1 overflow-hidden">
         {activeTab === "connect" && <ConnectTab />}

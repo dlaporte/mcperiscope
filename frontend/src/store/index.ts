@@ -78,6 +78,7 @@ interface AppState {
   selectedEvalIndex: number | null;
   evalLoading: boolean;
   optimizeRunning: boolean;
+  optimizeProgress: string | null;
 
   // Results
   comparison: any;
@@ -341,6 +342,7 @@ export const useStore = create<AppState>((set, get) => ({
   selectedEvalIndex: null,
   evalLoading: false,
   optimizeRunning: false,
+  optimizeProgress: null,
   comparison: null,
   recommendations: [],
   resultsLoading: false,
@@ -743,23 +745,66 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   runOptimize: async () => {
-    set({ optimizeRunning: true });
+    set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
     try {
-      const result = await api.runOptimize();
-      // Fetch results and navigate to Results tab
-      const [comparison, recs] = await Promise.allSettled([
-        api.getComparison(),
-        api.getRecommendations(),
-      ]);
-      set({
-        optimizeRunning: false,
-        comparison: comparison.status === "fulfilled" ? comparison.value : null,
-        recommendations: recs.status === "fulfilled" ? (recs.value as any)?.recommendations ?? recs.value : [],
-        activeTab: "results",
-      });
+      const response = await fetch("/api/optimize/run", { method: "POST" });
+
+      if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
+        const err = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(err.detail || response.statusText);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "progress") {
+                set({ optimizeProgress: data.message });
+              } else if (currentEvent === "done") {
+                // Fetch final results from backend
+                const [comparison, recs] = await Promise.allSettled([
+                  api.getComparison(),
+                  api.getRecommendations(),
+                ]);
+                set({
+                  optimizeRunning: false,
+                  optimizeProgress: null,
+                  comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
+                  recommendations: recs.status === "fulfilled" ? (recs.value as any)?.recommendations ?? recs.value : [],
+                  activeTab: "results",
+                });
+              } else if (currentEvent === "error") {
+                set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
+              }
+            } catch { /* skip */ }
+            currentEvent = "";
+          }
+        }
+      }
+
+      if (get().optimizeRunning) {
+        set({ optimizeRunning: false, optimizeProgress: null });
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ optimizeRunning: false, error: message });
+      set({ optimizeRunning: false, optimizeProgress: null, error: message });
     }
   },
 

@@ -197,7 +197,7 @@ export function ConnectTab() {
     return (
       <>
         {fullUrl.slice(0, idx)}
-        <span className="text-white font-semibold">{fullUrl.slice(idx, idx + query.length)}</span>
+        <span className="font-semibold" style={{ color: 'var(--sub-text)' }}>{fullUrl.slice(idx, idx + query.length)}</span>
         {fullUrl.slice(idx + query.length)}
       </>
     );
@@ -206,14 +206,15 @@ export function ConnectTab() {
   return (
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-xl">
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-lg">
+        <div className="panel-riveted rounded-xl p-6 shadow-lg">
           <div className="flex items-center gap-3 mb-6">
             <div
               className={`w-3 h-3 rounded-full ${
-                connected ? "bg-green-500" : "bg-gray-500"
+                connected ? "" : ""
               }`}
+              style={{ backgroundColor: connected ? 'var(--sub-phosphor)' : 'var(--sub-text-dim)', boxShadow: connected ? '0 0 6px var(--sub-phosphor)' : 'none' }}
             />
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
               {connected ? "Connected" : "Connect to MCP Server"}
             </h2>
           </div>
@@ -221,7 +222,7 @@ export function ConnectTab() {
           <form onSubmit={handleConnect} className="space-y-4">
             {/* URL Input */}
             <div ref={wrapperRef} className="relative">
-              <label className="block text-sm text-gray-400 mb-1">Server URL</label>
+              <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Server URL</label>
               <input
                 ref={inputRef}
                 type="text"
@@ -235,10 +236,14 @@ export function ConnectTab() {
                 onKeyDown={handleKeyDown}
                 placeholder="e.g. http://localhost:3000/sse"
                 disabled={connected || connecting}
-                className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 disabled:opacity-50"
+                className="w-full rounded-lg px-3 py-2 text-sm placeholder-gray-500 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)', color: 'var(--sub-text)' }}
               />
               {isOpen && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-600 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto">
+                <div
+                  className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto"
+                  style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
+                >
                   {matches.map((item, i) => {
                     const cached = getCachedAuth(item);
                     const authLabel = cached?.method && cached.method !== "none" ? cached.method : null;
@@ -247,23 +252,26 @@ export function ConnectTab() {
                         key={item}
                         onMouseDown={() => selectUrl(item)}
                         onMouseEnter={() => setSelectedIndex(i)}
-                        className={`flex items-center justify-between px-3 py-2 text-sm font-mono cursor-pointer group ${
-                          i === selectedIndex
-                            ? "bg-gray-700 text-white"
-                            : "text-gray-400 hover:bg-gray-800"
-                        }`}
+                        className="flex items-center justify-between px-3 py-2 text-sm font-mono cursor-pointer group"
+                        style={{
+                          backgroundColor: i === selectedIndex ? 'var(--sub-panel-light)' : 'transparent',
+                          color: i === selectedIndex ? 'var(--sub-text)' : 'var(--sub-text-dim)',
+                        }}
                       >
                         <span className="truncate">{highlightMatch(item, url)}</span>
                         <div className="flex items-center gap-1.5 shrink-0 ml-2">
                           {authLabel && (
-                            <span className="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">
+                            <span
+                              className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
+                            >
                               {authLabel}
                             </span>
                           )}
                           <button
                             type="button"
                             onMouseDown={(e) => handleRemove(e, item)}
-                            className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+                            className="alarm-text opacity-0 group-hover:opacity-100 transition-opacity text-xs"
                             title="Remove from history"
                           >
                             x
@@ -278,13 +286,13 @@ export function ConnectTab() {
 
             {/* Auth Config */}
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Authentication</label>
+              <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Authentication</label>
               <AuthConfig />
             </div>
 
             {/* Model Config */}
             <div>
-              <label className="block text-sm text-gray-400 mb-1">LLM Configuration</label>
+              <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>LLM Configuration</label>
               <ModelConfig />
             </div>
 
@@ -294,7 +302,8 @@ export function ConnectTab() {
                 <button
                   type="button"
                   onClick={disconnect}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium"
+                  className="w-full px-4 py-2.5 rounded-lg text-sm font-medium text-white"
+                  style={{ backgroundColor: 'var(--sub-red)' }}
                 >
                   Disconnect
                 </button>
@@ -302,7 +311,7 @@ export function ConnectTab() {
                 <button
                   type="submit"
                   disabled={connecting || !url.trim()}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-medium"
+                  className="btn-brass w-full px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                   {connecting ? "Connecting..." : oauthPending ? "Redirecting..." : "Connect"}
                 </button>
@@ -312,14 +321,14 @@ export function ConnectTab() {
 
           {/* Error Display */}
           {error && (
-            <p className="text-red-400 text-sm mt-4">{error}</p>
+            <p className="alarm-text text-sm mt-4">{error}</p>
           )}
 
           {/* Connection Progress */}
           {connecting && connectProgress && (
-            <div className="mt-4 p-3 bg-gray-900 rounded-lg flex items-center gap-3">
-              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              <span className="text-sm text-gray-400">{connectProgress}</span>
+            <div className="mt-4 p-3 rounded-lg flex items-center gap-3" style={{ backgroundColor: 'var(--sub-hull)' }}>
+              <div className="w-4 h-4 border-2 rounded-full animate-spin flex-shrink-0" style={{ borderColor: 'var(--sub-brass)', borderTopColor: 'transparent' }} />
+              <span className="text-sm" style={{ color: 'var(--sub-text-dim)' }}>{connectProgress}</span>
             </div>
           )}
 

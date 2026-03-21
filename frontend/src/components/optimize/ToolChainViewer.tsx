@@ -9,7 +9,7 @@ function ToolLink({ name, args }: { name: string; args?: Record<string, unknown>
     <button
       type="button"
       onClick={() => navigateToTool(name, args)}
-      className="text-sm font-mono font-medium text-blue-300 hover:text-blue-200 hover:underline cursor-pointer"
+      className="text-sm font-mono font-medium hover:underline cursor-pointer phosphor-text"
       title="View in Explore tab"
     >
       {name}
@@ -29,10 +29,10 @@ interface ToolChainStep {
 function syntaxHighlight(json: string): string {
   return json.replace(
     /("(?:\\.|[^"\\])*")\s*:/g,
-    '<span style="color:#93c5fd">$1</span>:'
+    '<span style="color:#c49a2a">$1</span>:'
   ).replace(
     /:\s*("(?:\\.|[^"\\])*")/g,
-    ': <span style="color:#86efac">$1</span>'
+    ': <span style="color:#33ff33">$1</span>'
   ).replace(
     /:\s*(true|false)/g,
     ': <span style="color:#fbbf24">$1</span>'
@@ -41,7 +41,7 @@ function syntaxHighlight(json: string): string {
     ': <span style="color:#c4b5fd">$1</span>'
   ).replace(
     /:\s*(null)/g,
-    ': <span style="color:#6b7280">$1</span>'
+    ': <span style="color:#7a7a72">$1</span>'
   );
 }
 
@@ -75,7 +75,8 @@ function CollapsibleJson({
     <div className="mt-1">
       <button
         onClick={() => setOpen(!open)}
-        className="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1"
+        className="text-xs flex items-center gap-1"
+        style={{ color: 'var(--sub-text-dim)' }}
       >
         <svg
           className={`w-3 h-3 transition-transform ${open ? "rotate-90" : ""}`}
@@ -90,12 +91,12 @@ function CollapsibleJson({
         </svg>
         {label}
         {!open && isLong && (
-          <span className="text-gray-600 ml-1">({text.length} chars)</span>
+          <span className="ml-1" style={{ color: 'var(--sub-text-dim)' }}>({text.length} chars)</span>
         )}
       </button>
       {open && (
         <pre
-          className="mt-1 p-2 bg-gray-950 rounded text-xs text-green-300 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono"
+          className="sonar-screen mt-1 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono"
           dangerouslySetInnerHTML={{ __html: syntaxHighlight(text) }}
         />
       )}
@@ -112,35 +113,34 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
       {/* Timeline connector */}
       <div className="flex flex-col items-center">
         <div
-          className={`w-3 h-3 rounded-full flex-shrink-0 mt-1.5 ${
-            hasError ? "bg-red-500" : "bg-blue-500"
-          }`}
+          className="w-3 h-3 rounded-full flex-shrink-0 mt-1.5"
+          style={{ backgroundColor: hasError ? 'var(--sub-red)' : 'var(--sub-brass)' }}
         />
-        {!isLast && <div className="w-0.5 flex-1 bg-gray-700 mt-1" />}
+        {!isLast && <div className="w-0.5 flex-1 mt-1" style={{ backgroundColor: 'var(--sub-rivet)' }} />}
       </div>
 
       {/* Card */}
       <div
-        className={`flex-1 mb-3 p-3 rounded-lg border ${
-          hasError
-            ? "bg-red-950/30 border-red-800"
-            : "bg-gray-800 border-gray-700"
+        className={`flex-1 mb-3 p-3 rounded-lg panel-riveted ${
+          hasError ? "" : ""
         }`}
+        style={hasError ? { borderColor: 'var(--sub-red)', backgroundColor: 'rgba(204,51,51,0.1)' } : {}}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">#{step.step}</span>
+            <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>#{step.step}</span>
             <ToolLink name={step.tool} args={step.input} />
           </div>
           {isLoading ? (
-            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--sub-brass)', borderTopColor: 'transparent' }} />
           ) : (
             <span
-              className={`text-xs px-2 py-0.5 rounded-full ${
+              className="text-xs px-2 py-0.5 rounded-full"
+              style={
                 step.duration > 2
-                  ? "bg-yellow-900 text-yellow-300"
-                  : "bg-gray-700 text-gray-300"
-              }`}
+                  ? { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }
+                  : { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }
+              }
             >
               {step.duration}s
             </span>
@@ -148,7 +148,7 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
         </div>
 
         {hasError && (
-          <div className="mt-2 text-xs text-red-400 bg-red-950/50 p-2 rounded">
+          <div className="mt-2 alarm-text text-xs p-2 rounded" style={{ backgroundColor: 'rgba(204,51,51,0.15)' }}>
             {step.error}
           </div>
         )}
@@ -167,7 +167,7 @@ export function ToolChainViewer() {
   if (selectedEvalIndex === null || !evalResults[selectedEvalIndex]) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-gray-500">Select an evaluation to view its tool chain</p>
+        <p style={{ color: 'var(--sub-text-dim)' }}>Select an evaluation to view its tool chain</p>
       </div>
     );
   }
@@ -178,9 +178,9 @@ export function ToolChainViewer() {
   return (
     <div className="flex-1 overflow-y-auto p-4">
       {/* Prompt header */}
-      <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-        <span className="text-xs text-gray-500 uppercase tracking-wider">Prompt</span>
-        <p className="text-sm text-gray-200 mt-1">{evalResult.prompt}</p>
+      <div className="mb-4 p-3 rounded-lg panel-riveted">
+        <span className="font-stencil text-xs uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>Prompt</span>
+        <p className="text-sm mt-1" style={{ color: 'var(--sub-text)' }}>{evalResult.prompt}</p>
       </div>
 
       {/* Tool chain timeline */}
@@ -195,25 +195,25 @@ export function ToolChainViewer() {
           ))}
         </div>
       ) : (
-        <div className="mb-4 text-sm text-gray-500 italic">
+        <div className="mb-4 text-sm italic" style={{ color: 'var(--sub-text-dim)' }}>
           No tool calls were made
         </div>
       )}
 
       {/* Final answer */}
       {evalResult.answer ? (
-        <div className="p-4 rounded-lg border-2 border-green-800 bg-green-950/20">
-          <span className="text-xs text-green-400 uppercase tracking-wider font-medium">
+        <div className="p-4 rounded-lg" style={{ border: '2px solid var(--sub-phosphor)', backgroundColor: 'rgba(51,255,51,0.05)' }}>
+          <span className="phosphor-text text-xs uppercase tracking-wider font-medium">
             Final Answer
           </span>
-          <div className="mt-2 text-sm text-gray-200 prose prose-sm prose-invert max-w-none">
+          <div className="mt-2 text-sm prose prose-sm prose-invert max-w-none" style={{ color: 'var(--sub-text)' }}>
             <Markdown remarkPlugins={[remarkGfm]}>{evalResult.answer}</Markdown>
           </div>
         </div>
       ) : (
-        <div className="p-4 rounded-lg border-2 border-gray-700 bg-gray-800/50 flex items-center gap-3">
-          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-gray-400">LLM is working...</span>
+        <div className="p-4 rounded-lg flex items-center gap-3 panel-riveted">
+          <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--sub-brass)', borderTopColor: 'transparent' }} />
+          <span className="text-sm" style={{ color: 'var(--sub-text-dim)' }}>LLM is working...</span>
         </div>
       )}
     </div>

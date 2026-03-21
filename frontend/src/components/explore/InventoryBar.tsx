@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useStore } from "../../store";
-import { ContextBudget } from "./ContextBudget";
+import { ContextGauge } from "./ContextGauge";
 
 interface QuickWin {
   type: string;
@@ -38,7 +38,7 @@ function QuickWinCard({ win }: { win: QuickWin }) {
   const badgeClass = typeColors[win.type] || "bg-gray-500/20 text-gray-300";
 
   return (
-    <div className="border border-gray-700 rounded-lg p-3 bg-gray-800/50">
+    <div className="panel-riveted rounded-lg p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -46,17 +46,18 @@ function QuickWinCard({ win }: { win: QuickWin }) {
               {win.type}
             </span>
             {win.estimated_savings != null && win.estimated_savings > 0 && (
-              <span className="text-[10px] text-green-400">
+              <span className="phosphor-text text-[10px]">
                 ~{win.estimated_savings.toLocaleString()} tokens saved
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-300 leading-relaxed">{win.description}</p>
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--sub-text)' }}>{win.description}</p>
         </div>
         {win.tools.length > 0 && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-[10px] text-gray-500 hover:text-gray-300 shrink-0 mt-0.5"
+            className="text-[10px] shrink-0 mt-0.5"
+            style={{ color: 'var(--sub-text-dim)' }}
           >
             {expanded ? "hide" : `${win.tools.length} tools`}
           </button>
@@ -65,7 +66,11 @@ function QuickWinCard({ win }: { win: QuickWin }) {
       {expanded && win.tools.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {win.tools.map((t) => (
-            <span key={t} className="text-[10px] font-mono bg-gray-900 text-gray-400 px-1.5 py-0.5 rounded">
+            <span
+              key={t}
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+              style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text-dim)' }}
+            >
               {t}
             </span>
           ))}
@@ -137,16 +142,19 @@ export function InventoryBar() {
   const quickWinsList = Array.isArray(inventory?.quick_wins) ? inventory.quick_wins : [];
 
   return (
-    <div className="relative flex items-center gap-4 px-4 py-2 bg-gray-800/50 border-b border-gray-700 text-sm">
+    <div
+      className="relative flex items-center gap-4 px-4 py-2 text-sm"
+      style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
+    >
       {/* Context budget */}
-      <span className="text-xs text-gray-500 whitespace-nowrap">Tool context usage</span>
+      <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Tool context usage</span>
       {!loading && inventory && (
         <div className="flex-1 min-w-0">
-          <ContextBudget tokens={totalTokens} max={contextWindow} />
+          <ContextGauge tokens={totalTokens} max={contextWindow} />
         </div>
       )}
       {loading && (
-        <div className="flex-1 text-xs text-gray-500 animate-pulse">
+        <div className="flex-1 text-xs animate-pulse" style={{ color: 'var(--sub-text-dim)' }}>
           Calculating token budget...
         </div>
       )}
@@ -158,25 +166,29 @@ export function InventoryBar() {
             onClick={() => setShowQuickWins(!showQuickWins)}
             className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
           >
-            <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded-full">
+            <span className="phosphor-text text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(51,255,51,0.15)' }}>
               {quickWinsList.length}
             </span>
-            <span className="text-gray-400 text-xs">quick wins</span>
+            <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>quick wins</span>
           </button>
 
           {/* Quick wins dropdown */}
           {showQuickWins && (
-            <div className="absolute right-0 top-full mt-2 w-[480px] max-h-[400px] overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 p-4">
+            <div
+              className="absolute right-0 top-full mt-2 w-[480px] max-h-[400px] overflow-y-auto rounded-xl shadow-2xl z-50 p-4"
+              style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
+            >
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-white">Quick Wins</h3>
+                <h3 className="text-sm font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>Quick Wins</h3>
                 <button
                   onClick={() => setShowQuickWins(false)}
-                  className="text-gray-500 hover:text-gray-300 text-xs"
+                  className="text-xs"
+                  style={{ color: 'var(--sub-text-dim)' }}
                 >
                   Close
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mb-3">
+              <p className="text-xs mb-3" style={{ color: 'var(--sub-text-dim)' }}>
                 Optimization opportunities detected from tool inventory analysis.
                 These can be addressed on the Optimize tab.
               </p>

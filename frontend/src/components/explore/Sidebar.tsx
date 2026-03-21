@@ -17,12 +17,18 @@ function Section({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-gray-300 hover:bg-gray-700"
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold"
+        style={{ color: 'var(--sub-text)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
+        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
         <span>
           {open ? "\u25BE" : "\u25B8"} {title}
         </span>
-        <span className="text-xs text-gray-500 bg-gray-700 px-1.5 py-0.5 rounded">
+        <span
+          className="text-xs px-1.5 py-0.5 rounded"
+          style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
+        >
           {count !== total ? `${count}/${total}` : count}
         </span>
       </button>
@@ -77,7 +83,10 @@ export function Sidebar() {
 
   if (!connected) {
     return (
-      <div className="w-64 bg-gray-800 border-r border-gray-700 p-4 text-gray-500 text-sm">
+      <div
+        className="w-64 p-4 text-sm"
+        style={{ backgroundColor: 'var(--sub-panel)', borderRight: '1px solid var(--sub-rivet)', color: 'var(--sub-text-dim)' }}
+      >
         Connect to an MCP server to explore its capabilities.
       </div>
     );
@@ -87,21 +96,26 @@ export function Sidebar() {
     selection?.type === type && selection.item.name === name;
 
   return (
-    <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col shrink-0">
+    <div
+      className="w-64 flex flex-col shrink-0"
+      style={{ backgroundColor: 'var(--sub-panel)', borderRight: '1px solid var(--sub-rivet)' }}
+    >
       {/* Search filter */}
-      <div className="p-2 border-b border-gray-700">
+      <div className="p-2" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
         <div className="relative">
           <input
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter..."
-            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-xs text-white placeholder-gray-500 pr-7"
+            className="w-full rounded px-3 py-1.5 text-xs placeholder-gray-500 pr-7"
+            style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)', color: 'var(--sub-text)' }}
           />
           {filter && (
             <button
               onClick={() => setFilter("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+              style={{ color: 'var(--sub-text-dim)' }}
             >
               ✕
             </button>
@@ -116,17 +130,26 @@ export function Sidebar() {
             <button
               key={tool.name}
               onClick={() => select("tool", tool)}
-              className={`w-full text-left px-4 py-1.5 text-sm truncate ${
+              className="w-full text-left px-4 py-1.5 text-sm truncate"
+              style={
                 isSelected("tool", tool.name)
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-300 hover:bg-gray-700"
-              }`}
+                  ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
+                  : { color: 'var(--sub-text)' }
+              }
+              onMouseEnter={(e) => {
+                if (!isSelected("tool", tool.name))
+                  e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
+              }}
+              onMouseLeave={(e) => {
+                if (!isSelected("tool", tool.name))
+                  e.currentTarget.style.backgroundColor = 'transparent';
+              }}
             >
               {tool.name}
             </button>
           ))}
           {filteredTools.length === 0 && (
-            <p className="px-4 py-1 text-xs text-gray-500">
+            <p className="px-4 py-1 text-xs" style={{ color: 'var(--sub-text-dim)' }}>
               {query ? "No matches" : "None"}
             </p>
           )}
@@ -137,17 +160,26 @@ export function Sidebar() {
             <button
               key={resource.uri}
               onClick={() => select("resource", resource)}
-              className={`w-full text-left px-4 py-1.5 text-sm truncate ${
+              className="w-full text-left px-4 py-1.5 text-sm truncate"
+              style={
                 isSelected("resource", resource.name)
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-300 hover:bg-gray-700"
-              }`}
+                  ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
+                  : { color: 'var(--sub-text)' }
+              }
+              onMouseEnter={(e) => {
+                if (!isSelected("resource", resource.name))
+                  e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
+              }}
+              onMouseLeave={(e) => {
+                if (!isSelected("resource", resource.name))
+                  e.currentTarget.style.backgroundColor = 'transparent';
+              }}
             >
               {resource.name || resource.uri}
             </button>
           ))}
           {filteredResources.length === 0 && (
-            <p className="px-4 py-1 text-xs text-gray-500">
+            <p className="px-4 py-1 text-xs" style={{ color: 'var(--sub-text-dim)' }}>
               {query ? "No matches" : "None"}
             </p>
           )}
@@ -158,17 +190,26 @@ export function Sidebar() {
             <button
               key={prompt.name}
               onClick={() => select("prompt", prompt)}
-              className={`w-full text-left px-4 py-1.5 text-sm truncate ${
+              className="w-full text-left px-4 py-1.5 text-sm truncate"
+              style={
                 isSelected("prompt", prompt.name)
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-300 hover:bg-gray-700"
-              }`}
+                  ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
+                  : { color: 'var(--sub-text)' }
+              }
+              onMouseEnter={(e) => {
+                if (!isSelected("prompt", prompt.name))
+                  e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
+              }}
+              onMouseLeave={(e) => {
+                if (!isSelected("prompt", prompt.name))
+                  e.currentTarget.style.backgroundColor = 'transparent';
+              }}
             >
               {prompt.name}
             </button>
           ))}
           {filteredPrompts.length === 0 && (
-            <p className="px-4 py-1 text-xs text-gray-500">
+            <p className="px-4 py-1 text-xs" style={{ color: 'var(--sub-text-dim)' }}>
               {query ? "No matches" : "None"}
             </p>
           )}

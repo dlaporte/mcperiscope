@@ -1,21 +1,101 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* Ensure markdown tables render properly in dark prose */
+/* Import a military stencil font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Black+Ops+One&display=swap');
+
+/* Submarine theme CSS variables */
+:root {
+  --sub-hull: #2a2d2e;        /* dark steel gray - main background */
+  --sub-panel: #353839;        /* lighter steel - panels/cards */
+  --sub-panel-light: #3f4344;  /* panel hover/active */
+  --sub-rivet: #4a4e50;        /* borders, rivets */
+  --sub-brass: #c49a2a;        /* brass/amber accent */
+  --sub-brass-dim: #8b6f1e;    /* dimmed brass */
+  --sub-brass-glow: #d4aa3a;   /* bright brass */
+  --sub-phosphor: #33ff33;     /* green phosphor - data */
+  --sub-phosphor-dim: #1a8a1a; /* dim phosphor */
+  --sub-sonar: #0a3a0a;        /* sonar screen background */
+  --sub-red: #cc3333;          /* alarm red */
+  --sub-red-dim: #661a1a;      /* dim red */
+  --sub-text: #c8c8c0;         /* main text - slightly warm gray */
+  --sub-text-dim: #7a7a72;     /* dimmed text */
+  --sub-text-bright: #e8e8e0;  /* bright text */
+}
+
+body {
+  background-color: var(--sub-hull);
+  color: var(--sub-text);
+}
+
+/* Stencil font for headings */
+.font-stencil {
+  font-family: 'Black Ops One', system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Riveted panel borders */
+.panel-riveted {
+  border: 1px solid var(--sub-rivet);
+  background-color: var(--sub-panel);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* Brass button style */
+.btn-brass {
+  background: linear-gradient(180deg, var(--sub-brass-glow) 0%, var(--sub-brass) 50%, var(--sub-brass-dim) 100%);
+  color: #1a1a1a;
+  font-weight: 700;
+  border: 1px solid var(--sub-brass-dim);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.2);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.btn-brass:hover {
+  background: linear-gradient(180deg, #e0b840 0%, var(--sub-brass-glow) 50%, var(--sub-brass) 100%);
+}
+.btn-brass:disabled {
+  opacity: 0.4;
+}
+
+/* Phosphor data display */
+.phosphor-text {
+  color: var(--sub-phosphor);
+  text-shadow: 0 0 4px rgba(51, 255, 51, 0.3);
+}
+
+/* Sonar screen background for data panels */
+.sonar-screen {
+  background-color: var(--sub-sonar);
+  border: 1px solid var(--sub-phosphor-dim);
+  border-radius: 4px;
+}
+
+/* Alarm red for errors */
+.alarm-text {
+  color: var(--sub-red);
+  text-shadow: 0 0 4px rgba(204, 51, 51, 0.3);
+}
+
+/* Override Tailwind dark grays with submarine steel grays */
+/* Keep the existing markdown table styles but update colors */
 .prose table {
   width: 100%;
   border-collapse: collapse;
 }
 .prose th,
 .prose td {
-  border: 1px solid #374151;
+  border: 1px solid var(--sub-rivet);
   padding: 0.5rem 0.75rem;
   text-align: left;
 }
 .prose th {
-  background-color: rgba(55, 65, 81, 0.5);
+  background-color: var(--sub-panel-light);
   font-weight: 600;
 }
 .prose tr:nth-child(even) {
-  background-color: rgba(55, 65, 81, 0.2);
+  background-color: rgba(53, 56, 57, 0.3);
 }

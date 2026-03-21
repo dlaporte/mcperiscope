@@ -36,16 +36,16 @@ export function ToolDetail() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-white">{tool.name}</h2>
+        <h2 className="text-lg font-bold font-stencil" style={{ color: 'var(--sub-text)' }}>{tool.name}</h2>
         {tool.description && (
-          <p className="text-gray-400 text-sm mt-1">{tool.description}</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--sub-text-dim)' }}>{tool.description}</p>
         )}
       </div>
 
       <ToolStats toolName={tool.name} />
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-300 mb-2">
+        <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--sub-text)' }}>
           Parameters
         </h3>
         <SchemaForm
@@ -60,7 +60,7 @@ export function ToolDetail() {
 
       {result && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">Result</h3>
+          <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--sub-text)' }}>Result</h3>
           <JsonViewer data={result} />
         </div>
       )}

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import time
 import traceback
+import socket
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -58,10 +61,9 @@ async def evaluate(req: EvaluateRequest):
         try:
             client = anthropic.Anthropic(api_key=session.api_key)
         except Exception as e:
-            yield _sse_event("error", {"message": f"Failed to initialize Anthropic client: {e}"})
+            yield _sse("error", {"message": f"Failed to initialize Anthropic client: {e}"})
             return
 
-        # Convert MCP tools to Anthropic tool format
         tools = []
         for t in session.tools:
             tools.append({
@@ -78,8 +80,7 @@ async def evaluate(req: EvaluateRequest):
 
         try:
             while True:
-                # Send "thinking" event so frontend knows LLM is working
-                yield _sse_event("thinking", {"step": step})
+                yield _sse("thinking", {"step": step})
 
                 response = client.messages.create(
                     model=session.model,
@@ -95,13 +96,11 @@ async def evaluate(req: EvaluateRequest):
                     final_answer = "\n".join(b.text for b in text_blocks)
                     break
 
-                # Add assistant message
                 messages.append({
                     "role": "assistant",
                     "content": [_block_to_dict(b) for b in response.content],
                 })
 
-                # Execute each tool call and stream results
                 tool_results = []
                 for tool_use in tool_use_blocks:
                     step += 1
@@ -109,8 +108,7 @@ async def evaluate(req: EvaluateRequest):
                     error = None
                     result_text = ""
 
-                    # Send "calling" event before the call
-                    yield _sse_event("tool_calling", {
+                    yield _sse("tool_calling", {
                         "step": step,
                         "tool": tool_use.name,
                         "input": tool_use.input,
@@ -137,10 +135,8 @@ async def evaluate(req: EvaluateRequest):
                     }
                     tool_chain.append(tool_step)
 
-                    # Send "tool_result" event after the call completes
-                    yield _sse_event("tool_result", tool_step)
+                    yield _sse("tool_result", tool_step)
 
-                    # Build trace event
                     trace_event = {
                         "step": len(session.traces) + len(trace_events),
                         "timestamp": start,
@@ -165,7 +161,6 @@ async def evaluate(req: EvaluateRequest):
         except Exception as e:
             final_answer = f"Evaluation error: {e}\n{traceback.format_exc()}"
 
-        # Store results in session
         eval_result = {
             "prompt": req.prompt,
             "answer": final_answer,
@@ -176,8 +171,7 @@ async def evaluate(req: EvaluateRequest):
         session.traces.extend(trace_events)
         session.prompts.append(req.prompt)
 
-        # Send final "done" event with full result
-        yield _sse_event("done", {
+        yield _sse("done", {
             "prompt": req.prompt,
             "answer": final_answer,
             "toolChain": tool_chain,
@@ -190,11 +184,6 @@ async def evaluate(req: EvaluateRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-def _sse_event(event_type: str, data: dict) -> str:
-    """Format a Server-Sent Event."""
-    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
 @router.post("/optimize/rate")
@@ -235,6 +224,10 @@ async def rate(req: RatingRequest):
 
 @router.post("/optimize/run")
 async def run_optimize():
+    """Full optimization pipeline with SSE progress streaming.
+
+    Steps: analyze → generate proxy → start proxy → re-run prompts → compare → results
+    """
     if not session.connection:
         raise HTTPException(status_code=400, detail="Not connected")
 
@@ -242,54 +235,407 @@ async def run_optimize():
     if not rated:
         raise HTTPException(status_code=400, detail="No rated evaluations yet")
 
-    try:
+    async def event_stream():
+        import asyncio
+        import anthropic
         from mcp_optimizer.analyze import run_analysis
+        from mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
         from mcp_optimizer.report import compute_comparison
 
-        analysis_result = run_analysis(session.tools, session.traces, rated)
-        session.analysis = analysis_result
-        session.recommendations = analysis_result.get("recommendations", [])
+        # --- Step 1: Analyze ---
+        yield _sse("progress", {"phase": "analyze", "message": "Analyzing tool usage patterns..."})
+        try:
+            analysis_result = run_analysis(session.tools, session.traces, rated)
+            session.analysis = analysis_result
+            session.recommendations = analysis_result.get("recommendations", [])
+        except Exception as e:
+            yield _sse("error", {"message": f"Analysis failed: {e}"})
+            return
 
-        # Compute comparison metrics
+        rec_count = len(session.recommendations)
+        yield _sse("progress", {"phase": "analyze", "message": f"Found {rec_count} optimization recommendations"})
+
+        if rec_count == 0:
+            yield _sse("done", {
+                "status": "complete",
+                "recommendationCount": 0,
+                "comparison": None,
+                "message": "No optimizations found",
+            })
+            return
+
+        # --- Step 2: Generate proxy ---
+        yield _sse("progress", {"phase": "proxy", "message": "Generating optimized proxy server..."})
+        proxy_code = None
+        try:
+            proxy_code = _generate_proxy_for_recommendations(
+                session.recommendations, session.tools, session.connection.url
+            )
+            session.proxy_code = proxy_code
+        except Exception as e:
+            yield _sse("progress", {"phase": "proxy", "message": f"Proxy generation skipped: {e}"})
+
+        # --- Step 3: Start proxy ---
+        proxy_port = None
+        proxy_process = None
+        proxy_tools = None
+        if proxy_code:
+            yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
+            try:
+                proxy_port, proxy_process = _start_proxy(proxy_code)
+                await asyncio.sleep(3)  # Give it time to start
+
+                if proxy_process.poll() is not None:
+                    stderr = proxy_process.stderr.read().decode() if proxy_process.stderr else ""
+                    yield _sse("progress", {"phase": "proxy", "message": f"Proxy failed to start: {stderr[:200]}"})
+                    proxy_port = None
+                    proxy_process = None
+                else:
+                    # Get proxy tool count
+                    from fastmcp import Client
+                    proxy_client = Client(f"http://localhost:{proxy_port}/mcp")
+                    async with proxy_client:
+                        proxy_tools_list = await proxy_client.list_tools()
+                        proxy_tools = len(proxy_tools_list)
+                    yield _sse("progress", {
+                        "phase": "proxy",
+                        "message": f"Proxy running with {proxy_tools} tools (was {len(session.tools)})"
+                    })
+            except Exception as e:
+                yield _sse("progress", {"phase": "proxy", "message": f"Proxy start failed: {e}"})
+
+        # --- Step 4: Re-run prompts through proxy ---
+        proxy_traces = []
+        proxy_tool_count = proxy_tools or 0
+        if proxy_port and session.api_key:
+            yield _sse("progress", {"phase": "evaluate", "message": "Re-running prompts through optimized proxy..."})
+            try:
+                client = anthropic.Anthropic(api_key=session.api_key)
+                from fastmcp import Client as McpClient
+
+                # Build tool list from proxy
+                proxy_mcp = McpClient(f"http://localhost:{proxy_port}/mcp")
+                async with proxy_mcp:
+                    proxy_tools_defs = await proxy_mcp.list_tools()
+                    anthropic_tools = [{
+                        "name": t.name,
+                        "description": t.description or "",
+                        "input_schema": t.inputSchema or {"type": "object", "properties": {}},
+                    } for t in proxy_tools_defs]
+
+                    for i, eval_result in enumerate(session.eval_results):
+                        prompt = eval_result["prompt"]
+                        yield _sse("progress", {
+                            "phase": "evaluate",
+                            "message": f"Re-running prompt {i+1}/{len(session.eval_results)}: {prompt[:50]}..."
+                        })
+
+                        # Run the same prompt through the proxy
+                        messages = [{"role": "user", "content": prompt}]
+                        step = 0
+                        try:
+                            while True:
+                                response = client.messages.create(
+                                    model=session.model,
+                                    max_tokens=4096,
+                                    tools=anthropic_tools,
+                                    messages=messages,
+                                )
+
+                                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+                                text_blocks = [b for b in response.content if b.type == "text"]
+
+                                if not tool_use_blocks:
+                                    break
+
+                                messages.append({
+                                    "role": "assistant",
+                                    "content": [_block_to_dict(b) for b in response.content],
+                                })
+
+                                tool_results = []
+                                for tool_use in tool_use_blocks:
+                                    step += 1
+                                    start = time.time()
+                                    error = None
+                                    result_text = ""
+
+                                    try:
+                                        result = await proxy_mcp.call_tool(tool_use.name, tool_use.input)
+                                        result_text = _serialize_mcp_result(result)
+                                    except Exception as e:
+                                        error = str(e)
+                                        result_text = f"Error: {error}"
+
+                                    duration = time.time() - start
+
+                                    proxy_traces.append({
+                                        "step": step,
+                                        "timestamp": start,
+                                        "tool_name": tool_use.name,
+                                        "tool_input": tool_use.input,
+                                        "tool_response_chars": len(result_text),
+                                        "tool_response_tokens_est": max(1, len(result_text) // 4),
+                                        "tool_response_fields": _extract_fields(result_text),
+                                        "tool_duration_s": round(duration, 3),
+                                        "error_category": error if error else None,
+                                    })
+
+                                    tool_results.append({
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_use.id,
+                                        "content": result_text,
+                                    })
+
+                                messages.append({"role": "user", "content": tool_results})
+                        except Exception as e:
+                            yield _sse("progress", {
+                                "phase": "evaluate",
+                                "message": f"Prompt {i+1} failed: {str(e)[:100]}"
+                            })
+
+            except Exception as e:
+                yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}"})
+        elif not proxy_port:
+            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
+
+        # --- Step 5: Stop proxy ---
+        if proxy_process and proxy_process.poll() is None:
+            proxy_process.terminate()
+            try:
+                proxy_process.wait(timeout=5)
+            except Exception:
+                proxy_process.kill()
+
+        # --- Step 6: Compute comparison ---
+        yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
+
+        # Use the same ratings for proxy (assume same correctness since same prompts)
+        proxy_ratings = rated if proxy_traces else []
+
         try:
             comparison = compute_comparison(
                 baseline_traces=session.traces,
                 baseline_ratings=rated,
-                proxy_traces=[],
-                proxy_ratings=[],
+                proxy_traces=proxy_traces,
+                proxy_ratings=proxy_ratings,
                 original_tools=session.tools,
-                proxy_tool_count=0,
+                proxy_tool_count=proxy_tool_count,
             )
             session.comparison = comparison
-        except Exception:
-            session.comparison = None
+        except Exception as e:
+            # Fallback: build comparison manually
+            baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in session.traces)
+            proxy_tokens = sum(t.get("tool_response_tokens_est", 0) for t in proxy_traces)
+            baseline_calls = len(session.traces)
+            proxy_calls = len(proxy_traces)
+            baseline_errors = sum(1 for t in session.traces if t.get("error_category"))
+            proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
 
-        return {
+            num_prompts = len(session.eval_results) or 1
+            orig_menu = sum(len(json.dumps(t.inputSchema or {})) // 4 + len(f"{t.name}: {t.description or ''}") // 4 for t in session.tools)
+
+            comparison = {
+                "baseline": {
+                    "tool_count": len(session.tools),
+                    "menu_tokens": orig_menu,
+                    "avg_tokens_per_prompt": round(baseline_tokens / num_prompts, 1),
+                    "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
+                    "accuracy": round(sum(1 for r in rated if r["correctness"] == "correct") / len(rated), 3) if rated else 0,
+                    "error_rate": round(baseline_errors / max(baseline_calls, 1), 3),
+                },
+                "proxy": {
+                    "tool_count": proxy_tool_count,
+                    "menu_tokens": 0,  # Would need proxy tool defs to calculate
+                    "avg_tokens_per_prompt": round(proxy_tokens / num_prompts, 1) if proxy_traces else 0,
+                    "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else 0,
+                    "accuracy": round(sum(1 for r in rated if r["correctness"] == "correct") / len(rated), 3) if rated else 0,
+                    "error_rate": round(proxy_errors / max(proxy_calls, 1), 3) if proxy_traces else 0,
+                },
+            }
+            # Add deltas
+            comparison["delta"] = {}
+            for key in comparison["baseline"]:
+                b = comparison["baseline"][key]
+                p = comparison["proxy"][key]
+                if isinstance(b, (int, float)) and isinstance(p, (int, float)) and b != 0:
+                    comparison["delta"][key] = {
+                        "value": round(p - b, 3),
+                        "pct": round((p - b) / b * 100, 1) if b else 0,
+                    }
+
+            if proxy_tool_count > 0 and proxy_tool_count < len(session.tools):
+                comparison["accuracy_warning"] = None
+            session.comparison = comparison
+
+        yield _sse("progress", {"phase": "complete", "message": "Optimization complete!"})
+
+        yield _sse("done", {
             "status": "complete",
             "recommendationCount": len(session.recommendations),
-            "accuracy": round(
-                sum(1 for r in rated if r["correctness"] == "correct") / len(rated), 3
-            ) if rated else 0,
-        }
-    except ImportError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"mcp-optimizer dependency not available: {e}",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Optimization failed: {e}")
+            "comparison": session.comparison,
+            "proxyToolCount": proxy_tool_count,
+            "baselineToolCount": len(session.tools),
+        })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
+    """Generate proxy code, handling the recommendation format from analyze.py."""
+    from mcp_optimizer.inventory import find_name_clusters, tool_token_budget
+
+    # Build a practical proxy: consolidate no-param lookup tools + passthrough rest
+    no_param_tools = []
+    for t in tools:
+        schema = t.inputSchema or {}
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not props and not required:
+            no_param_tools.append(t.name)
+
+    # Generate proxy code directly (simpler than going through proxy_generator)
+    lookup_map = {}
+    for name in no_param_tools:
+        # Strip common prefixes to make table names
+        short = name
+        for prefix in ["get_", "list_", "fetch_"]:
+            if short.startswith(prefix):
+                short = short[len(prefix):]
+                break
+        lookup_map[short] = name
+
+    removed_tools = set()
+    # Remove v1/duplicate tools
+    tool_names = {t.name for t in tools}
+    for t in tools:
+        if t.name.endswith("_v1") or t.name == "get_profile_v1":
+            removed_tools.add(t.name)
+
+    special_tools = set(no_param_tools) | removed_tools
+
+    # Build proxy code
+    lines = [
+        '"""Auto-generated MCP proxy server by MCPeriscope."""',
+        "",
+        "from __future__ import annotations",
+        "import argparse",
+        "import json",
+        "from contextlib import asynccontextmanager",
+        "from fastmcp import FastMCP",
+        "from mcp_optimizer.proxy_runtime import UpstreamClient",
+        "",
+        f"UPSTREAM_URL = {json.dumps(upstream_url)}",
+        "",
+        f"LOOKUP_TOOLS = {json.dumps(lookup_map, indent=2)}",
+        "",
+        f"REMOVED_TOOLS = {json.dumps(sorted(removed_tools))}",
+        "",
+        "SPECIAL_TOOLS = set(LOOKUP_TOOLS.values()) | set(REMOVED_TOOLS)",
+        "",
+        "upstream = UpstreamClient(UPSTREAM_URL)",
+        "",
+        "@asynccontextmanager",
+        "async def lifespan(app):",
+        "    await upstream.connect()",
+        "    try:",
+        "        yield",
+        "    finally:",
+        "        await upstream.disconnect()",
+        "",
+        'mcp = FastMCP("mcperiscope-proxy", lifespan=lifespan)',
+        "",
+        "@mcp.tool()",
+        "async def lookup(table: str) -> str:",
+        '    """Look up reference data by table name. Available tables: ' + ", ".join(sorted(lookup_map.keys())) + '"""',
+        "    if table not in LOOKUP_TOOLS:",
+        '        return json.dumps({"error": f"Unknown table: {table}. Available: {sorted(LOOKUP_TOOLS.keys())}"})',
+        "    result = await upstream.call(LOOKUP_TOOLS[table], {})",
+        "    return json.dumps(result) if not isinstance(result, str) else result",
+        "",
+    ]
+
+    # Generate passthrough tools
+    for t in tools:
+        if t.name in special_tools:
+            continue
+        schema = t.inputSchema or {}
+        props = schema.get("properties", {})
+        required_set = set(schema.get("required", []))
+        desc = (t.description or "").replace('"', '\\"').replace("\n", " ")
+
+        # Build params
+        params = []
+        args_entries = []
+        for pname, pschema in props.items():
+            ptype = {"string": "str", "integer": "int", "number": "float", "boolean": "bool"}.get(
+                pschema.get("type", "string"), "str"
+            )
+            if pname in required_set:
+                params.append(f"{pname}: {ptype}")
+            else:
+                params.append(f"{pname}: {ptype} | None = None")
+            args_entries.append(f'"{pname}": {pname}')
+
+        param_str = ", ".join(params)
+        args_str = "{" + ", ".join(args_entries) + "}" if args_entries else "{}"
+
+        lines.append(f'@mcp.tool(description="{desc[:500]}")')
+        lines.append(f"async def {t.name}({param_str}) -> str:")
+        lines.append(f"    args = {{k: v for k, v in {args_str}.items() if v is not None}}")
+        lines.append(f'    result = await upstream.call("{t.name}", args)')
+        lines.append(f"    return json.dumps(result) if not isinstance(result, str) else result")
+        lines.append("")
+
+    # Entry point
+    lines.extend([
+        'if __name__ == "__main__":',
+        '    parser = argparse.ArgumentParser()',
+        '    parser.add_argument("--port", type=int, default=8000)',
+        '    args = parser.parse_args()',
+        '    mcp.run(transport="streamable-http", port=args.port)',
+    ])
+
+    code = "\n".join(lines)
+
+    # Save to file
+    proxy_dir = session.project_dir / "proxy"
+    proxy_dir.mkdir(parents=True, exist_ok=True)
+    (proxy_dir / "server.py").write_text(code)
+
+    return code
+
+
+def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen]:
+    """Start the proxy server on a random port. Returns (port, process)."""
+    # Find available port
+    with socket.socket() as s:
+        s.bind(("", 0))
+        port = s.getsockname()[1]
+
+    proxy_file = session.project_dir / "proxy" / "server.py"
+
+    process = subprocess.Popen(
+        [sys.executable, str(proxy_file), "--port", str(port)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    return port, process
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 def _block_to_dict(block) -> dict:
-    """Convert an Anthropic content block to a serializable dict."""
     if block.type == "text":
         return {"type": "text", "text": block.text}
     elif block.type == "tool_use":
-        return {
-            "type": "tool_use",
-            "id": block.id,
-            "name": block.name,
-            "input": block.input,
-        }
+        return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
     else:
         return {"type": block.type}

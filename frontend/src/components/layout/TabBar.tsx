@@ -15,8 +15,16 @@ const TABS: { id: Tab; label: string; requiresConnection: boolean }[] = [
 
 export function TabBar({ active, onChange, connected }: TabBarProps) {
   return (
-    <div className="bg-gray-800 border-b border-gray-700 px-4 flex items-center gap-0">
-      <span className="text-sm font-bold text-white mr-6 py-3">MCPeriscope</span>
+    <div
+      className="px-4 flex items-center gap-0"
+      style={{
+        backgroundColor: 'var(--sub-panel)',
+        borderBottom: '1px solid var(--sub-rivet)',
+      }}
+    >
+      <span className="font-stencil text-sm font-bold mr-6 py-3" style={{ color: 'var(--sub-brass)' }}>
+        MCPeriscope
+      </span>
       {TABS.map((tab) => {
         const disabled = tab.requiresConnection && !connected;
         const isActive = active === tab.id;
@@ -25,15 +33,20 @@ export function TabBar({ active, onChange, connected }: TabBarProps) {
             key={tab.id}
             onClick={() => !disabled && onChange(tab.id)}
             disabled={disabled}
-            className={`
-              px-4 py-3 text-sm font-medium border-b-2 transition-colors
-              ${isActive
-                ? "border-blue-500 text-white"
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              isActive
+                ? "text-white"
                 : disabled
-                  ? "border-transparent text-gray-600 cursor-not-allowed"
-                  : "border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600 cursor-pointer"
-              }
-            `}
+                  ? "border-transparent cursor-not-allowed"
+                  : "border-transparent cursor-pointer"
+            }`}
+            style={
+              isActive
+                ? { borderColor: 'var(--sub-brass)', color: 'var(--sub-brass)', textShadow: '0 0 6px rgba(196,154,42,0.4)' }
+                : disabled
+                  ? { color: 'var(--sub-text-dim)' }
+                  : { color: 'var(--sub-text)' }
+            }
           >
             {tab.label}
           </button>
