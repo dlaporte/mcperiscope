@@ -54,6 +54,7 @@ interface AppState {
   selection: Selection | null;
   result: any;
   resultLoading: boolean;
+  resultMeta: { durationMs: number; tokens: number } | null;
 
   // Parameter Store — each key holds an array of entries with context
   parameterStore: Record<string, ParamEntry[]>;
@@ -337,6 +338,7 @@ export const useStore = create<AppState>((set, get) => ({
   selection: null,
   result: null,
   resultLoading: false,
+  resultMeta: null,
   parameterStore: loadParamStore(),
   parameterAliases: loadAliases(),
   removedAliases: loadRemovedAliases(),
@@ -505,13 +507,23 @@ export const useStore = create<AppState>((set, get) => ({
   clearSelection: () => set({ selection: null, result: null }),
 
   callTool: async (name, args) => {
-    set({ resultLoading: true, result: null });
+    set({ resultLoading: true, result: null, resultMeta: null });
+    const start = performance.now();
     try {
       const result = await api.callTool(name, args);
-      set({ result, resultLoading: false });
+      const durationMs = Math.round(performance.now() - start);
+      // Estimate tokens from response content
+      let tokens = 0;
+      const content = (result as any)?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block?.text) tokens += Math.ceil(block.text.length / 4);
+        }
+      }
+      set({ result, resultLoading: false, resultMeta: { durationMs, tokens } });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ result: { error: message }, resultLoading: false });
+      set({ result: { error: message }, resultLoading: false, resultMeta: null });
     }
   },
 
