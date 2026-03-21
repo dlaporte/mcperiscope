@@ -459,6 +459,11 @@ export const useStore = create<AppState>((set, get) => ({
       selection: null,
       result: null,
       parameterStore: {},
+      evalResults: [],
+      selectedEvalIndex: null,
+      evalLoading: false,
+      optimizeRunning: false,
+      optimizeProgress: null,
       comparison: null,
       recommendations: [],
     });

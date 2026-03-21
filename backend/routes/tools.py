@@ -6,6 +6,7 @@ import time
 from fastapi import APIRouter, HTTPException
 
 from backend.models import ToolCallRequest
+from backend import mcp_manager
 from backend.state import session
 
 router = APIRouter()
@@ -27,31 +28,25 @@ async def list_tools():
 
 @router.post("/tools/call")
 async def call_tool(req: ToolCallRequest):
-    if not session.connection:
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
     try:
         start = time.time()
-        result = await session.connection.call_tool(req.name, req.arguments)
+        result = await mcp_manager.call_tool(req.name, req.arguments)
         duration = time.time() - start
 
-        # Serialize MCP result
         content = []
         if hasattr(result, "content"):
             for block in result.content:
                 if hasattr(block, "text"):
                     content.append({"type": "text", "text": block.text})
                 elif hasattr(block, "data"):
-                    content.append({
-                        "type": "image",
-                        "data": block.data,
-                        "mimeType": getattr(block, "mimeType", "image/png"),
-                    })
+                    content.append({"type": "image", "data": block.data, "mimeType": getattr(block, "mimeType", "image/png")})
                 else:
                     content.append({"type": "unknown", "value": str(block)})
         else:
             content.append({"type": "text", "text": str(result)})
 
-        # Capture trace event for optimize tab
         trace_event = {
             "step": len(session.traces),
             "timestamp": start,
@@ -71,7 +66,6 @@ async def call_tool(req: ToolCallRequest):
 
 
 def _extract_fields(content: list[dict]) -> list[str]:
-    """Extract top-level JSON keys from text content."""
     for c in content:
         if c.get("type") == "text":
             try:

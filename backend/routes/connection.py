@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from backend.models import ConnectRequest
 from backend import mcp_manager
@@ -28,14 +28,16 @@ async def _validate_api_key(api_key: str) -> None:
 
 
 @router.post("/connect")
-async def connect(req: ConnectRequest):
+async def connect(req: ConnectRequest, request: Request):
     if req.model:
         session.model = req.model
     if req.api_key:
         await _validate_api_key(req.api_key)
         session.api_key = req.api_key
     try:
-        return await mcp_manager.connect(req.url, req.auth)
+        # Pass the request origin so OAuth redirect goes to the right host
+        origin = request.headers.get("origin")
+        return await mcp_manager.connect(req.url, req.auth, request_origin=origin)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -51,8 +53,8 @@ async def status():
         "connected": mcp_manager.is_connected(),
         "serverInfo": mcp_manager.server_info(),
         "oauthPending": (
-            session.connection is not None
-            and session.connection.pending_auth_url is not None
-            and not session.connection.connected
+            mcp_manager._oauth_provider is not None
+            and mcp_manager._oauth_provider.pending_authorization_url is not None
+            and not mcp_manager.is_connected()
         ),
     }

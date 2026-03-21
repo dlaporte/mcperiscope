@@ -8,7 +8,6 @@ from fastapi.responses import StreamingResponse
 from backend.models import OAuthCallbackRequest
 from backend import mcp_manager
 from backend.state import session
-from mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
 
 router = APIRouter()
 
@@ -34,33 +33,25 @@ async def auth_callback(req: OAuthCallbackRequest):
                 yield _sse("error", {"message": e.detail})
                 return
 
-        # Step 2: Exchange OAuth code for tokens
+        # Step 2: Exchange OAuth code and reconnect
         yield _sse("progress", {"message": "Exchanging authorization code..."})
         try:
-            if not session.connection:
-                yield _sse("error", {"message": "No connection in progress"})
+            # Extract the code from the callback URL
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(req.callback_url)
+            params = parse_qs(parsed.query)
+            code = params.get("code", [None])[0]
+            if not code:
+                yield _sse("error", {"message": "No authorization code found in callback URL"})
                 return
-            session.connection.supply_callback_url(req.callback_url)
+
+            yield _sse("progress", {"message": "Connecting to MCP server..."})
+            result = await mcp_manager.complete_oauth(code)
         except Exception as e:
-            yield _sse("error", {"message": f"OAuth code exchange failed: {e}"})
+            yield _sse("error", {"message": f"OAuth completion failed: {e}"})
             return
 
-        # Step 3: Complete connection (this does the MCP handshake)
-        yield _sse("progress", {"message": "Connecting to MCP server..."})
-        try:
-            tools = await session.connection.complete_connect(timeout=30)
-        except Exception as e:
-            yield _sse("error", {"message": f"Connection failed: {e}"})
-            return
-
-        # Step 4: List tools
-        yield _sse("progress", {"message": f"Discovered {len(tools)} tools, analyzing..."})
-        session.tools = tools
-
-        # Step 5: Run inventory analysis
-        yield _sse("progress", {"message": "Analyzing tool inventory..."})
-        inventory = analyze_inventory(tools)
-        session.inventory = analysis_to_dict(inventory)
+        yield _sse("progress", {"message": f"Discovered {len(session.tools)} tools, analyzing..."})
 
         # Done
         yield _sse("done", {
@@ -80,9 +71,7 @@ async def auth_callback(req: OAuthCallbackRequest):
 async def auth_status():
     return {
         "connected": mcp_manager.is_connected(),
-        "oauthPending": (
-            session.connection is not None
-            and session.connection.pending_auth_url is not None
-            and not session.connection.connected
-        ),
+        "oauthPending": mcp_manager._oauth_provider is not None
+            and mcp_manager._oauth_provider.pending_authorization_url is not None
+            and not mcp_manager.is_connected(),
     }

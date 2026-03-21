@@ -3,26 +3,27 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from backend.models import ResourceReadRequest
-from backend.state import session
+from backend import mcp_manager
 
 router = APIRouter()
 
 
 @router.get("/resources")
 async def list_resources():
-    if not session.connection or not session.connection.connected:
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
     try:
-        result = await session.connection._client.list_resources()
-        # FastMCP Client returns list[Resource] directly
-        items = result if isinstance(result, list) else getattr(result, "resources", [])
+        items = await mcp_manager.list_resources()
+        # FastMCP Client returns list directly
+        if not isinstance(items, list):
+            items = getattr(items, "resources", [items])
         resources = []
         for r in items:
             resources.append({
-                "uri": str(getattr(r, "uri", r.get("uri", "")) if isinstance(r, dict) else r.uri),
-                "name": getattr(r, "name", None) if not isinstance(r, dict) else r.get("name"),
-                "description": getattr(r, "description", None) if not isinstance(r, dict) else r.get("description"),
-                "mimeType": getattr(r, "mimeType", None) if not isinstance(r, dict) else r.get("mimeType"),
+                "uri": str(getattr(r, "uri", "")),
+                "name": getattr(r, "name", None),
+                "description": getattr(r, "description", None),
+                "mimeType": getattr(r, "mimeType", None),
             })
         return {"resources": resources}
     except Exception as e:
@@ -31,16 +32,19 @@ async def list_resources():
 
 @router.post("/resources/read")
 async def read_resource(req: ResourceReadRequest):
-    if not session.connection or not session.connection.connected:
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
     try:
-        result = await session.connection._client.read_resource(req.uri)
-        # Result might be list of content blocks or object with .contents
-        items = result if isinstance(result, list) else getattr(result, "contents", [result])
+        result = await mcp_manager.read_resource(req.uri)
+        # Result might be string, list, or object with .contents
+        if isinstance(result, str):
+            return {"contents": [{"text": result}]}
+        if isinstance(result, list):
+            return {"contents": [{"text": str(r)} for r in result]}
         contents = []
-        for c in items:
-            if isinstance(c, dict):
-                contents.append(c)
+        for c in getattr(result, "contents", [result]):
+            if isinstance(c, str):
+                contents.append({"text": c})
             else:
                 contents.append({
                     "uri": str(getattr(c, "uri", "")),
@@ -55,21 +59,19 @@ async def read_resource(req: ResourceReadRequest):
 
 @router.get("/resource-templates")
 async def list_resource_templates():
-    if not session.connection or not session.connection.connected:
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
     try:
-        result = await session.connection._client.list_resource_templates()
-        items = result if isinstance(result, list) else getattr(result, "resource_templates", [])
+        items = await mcp_manager.list_resource_templates()
+        if not isinstance(items, list):
+            items = getattr(items, "resource_templates", [items])
         templates = []
         for t in items:
-            if isinstance(t, dict):
-                templates.append(t)
-            else:
-                templates.append({
-                    "uriTemplate": str(getattr(t, "uriTemplate", "")),
-                    "name": getattr(t, "name", None),
-                    "description": getattr(t, "description", None),
-                })
+            templates.append({
+                "uriTemplate": str(getattr(t, "uriTemplate", "")),
+                "name": getattr(t, "name", None),
+                "description": getattr(t, "description", None),
+            })
         return {"resourceTemplates": templates}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

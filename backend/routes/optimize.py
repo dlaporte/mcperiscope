@@ -48,7 +48,8 @@ def _extract_fields(text: str) -> list[str]:
 @router.post("/optimize/evaluate")
 async def evaluate(req: EvaluateRequest):
     """Run an evaluation prompt with SSE streaming of tool calls."""
-    if not session.connection:
+    from backend import mcp_manager as _mgr
+    if not _mgr.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
     if not session.api_key:
         raise HTTPException(status_code=400, detail="Anthropic API key not configured")
@@ -115,7 +116,8 @@ async def evaluate(req: EvaluateRequest):
                     })
 
                     try:
-                        result = await session.connection.call_tool(
+                        from backend import mcp_manager
+                        result = await mcp_manager.call_tool(
                             tool_use.name, tool_use.input
                         )
                         result_text = _serialize_mcp_result(result)
@@ -228,7 +230,8 @@ async def run_optimize():
 
     Steps: analyze → generate proxy → start proxy → re-run prompts → compare → results
     """
-    if not session.connection:
+    from backend import mcp_manager
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
 
     rated = [r for r in session.ratings if r is not None]
@@ -269,7 +272,7 @@ async def run_optimize():
         proxy_code = None
         try:
             proxy_code = _generate_proxy_for_recommendations(
-                session.recommendations, session.tools, session.connection.url
+                session.recommendations, session.tools, mcp_manager._server_url or ""
             )
             session.proxy_code = proxy_code
         except Exception as e:
@@ -284,7 +287,29 @@ async def run_optimize():
             yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
             try:
                 proxy_port, proxy_process = _start_proxy(proxy_code)
-                await asyncio.sleep(3)  # Give it time to start
+
+                # Wait for proxy to start, check health
+                proxy_started = False
+                for attempt in range(10):
+                    await asyncio.sleep(1)
+                    if proxy_process.poll() is not None:
+                        break  # Process died
+                    try:
+                        import httpx
+                        async with httpx.AsyncClient() as hc:
+                            resp = await hc.post(
+                                f"http://localhost:{proxy_port}/mcp",
+                                json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                      "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                                                 "clientInfo": {"name": "health", "version": "0.1"}}},
+                                headers={"Accept": "application/json, text/event-stream"},
+                                timeout=5.0,
+                            )
+                            if resp.status_code == 200:
+                                proxy_started = True
+                                break
+                    except Exception:
+                        pass  # Not ready yet
 
                 if proxy_process.poll() is not None:
                     stderr = proxy_process.stderr.read().decode() if proxy_process.stderr else ""
@@ -305,7 +330,7 @@ async def run_optimize():
                         )
                     yield _sse("progress", {
                         "phase": "proxy",
-                        "message": f"Proxy running with {proxy_tools} tools (was {len(session.tools)})"
+                        "message": f"Proxy running on port {proxy_port} with {proxy_tools} tools (was {len(session.tools)})"
                     })
             except Exception as e:
                 yield _sse("progress", {"phase": "proxy", "message": f"Proxy start failed: {e}"})
@@ -314,13 +339,13 @@ async def run_optimize():
         proxy_traces = []
         proxy_answers = []  # Capture proxy answers for LLM-as-judge
         proxy_tool_count = proxy_tools or 0
-        if proxy_port and session.api_key:
-            yield _sse("progress", {"phase": "evaluate", "message": "Re-running prompts through optimized proxy..."})
+        if proxy_port and session.api_key and session.eval_results:
+            yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(session.eval_results)} prompts through optimized proxy..."})
             try:
                 client = anthropic.Anthropic(api_key=session.api_key)
                 from fastmcp import Client as McpClient
 
-                # Build tool list from proxy
+                # Build tool list from proxy — keep connection open for all prompts
                 proxy_mcp = McpClient(f"http://localhost:{proxy_port}/mcp")
                 async with proxy_mcp:
                     proxy_tools_defs = await proxy_mcp.list_tools()
@@ -406,9 +431,12 @@ async def run_optimize():
                             })
 
             except Exception as e:
-                yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}"})
+                import traceback
+                yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}\n{traceback.format_exc()[:300]}"})
         elif not proxy_port:
             yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
+        elif not session.eval_results:
+            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no evaluation prompts)"})
 
         # --- Step 5: Stop proxy ---
         if proxy_process and proxy_process.poll() is None:

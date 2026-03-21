@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface JudgeResult {
   prompt: string;
@@ -80,10 +82,8 @@ export function JudgeResults({ results }: Props) {
                 </span>
               </button>
               {isExpanded && result.explanation && (
-                <div className="px-4 pb-3 pl-12">
-                  <p className="text-xs" style={{ color: "var(--sub-text-dim)" }}>
-                    {result.explanation}
-                  </p>
+                <div className="px-4 pb-3 pl-12 prose prose-sm prose-invert max-w-none text-xs" style={{ color: "var(--sub-text)" }}>
+                  <Markdown remarkPlugins={[remarkGfm]}>{result.explanation}</Markdown>
                 </div>
               )}
             </div>

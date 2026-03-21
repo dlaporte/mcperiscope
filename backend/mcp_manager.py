@@ -1,85 +1,184 @@
+"""MCP connection manager for mcperiscope.
+
+Uses FastMCP Client with WebOAuth for web-native OAuth flow.
+The redirect URI points to the mcperiscope frontend.
+"""
+
 from __future__ import annotations
+
+import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
-from mcp_optimizer.connections import MCPConnection
+from fastmcp import Client
+from mcp.types import Tool
 from mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
+from mcp_optimizer.token_store import FileKeyValueStore
+
+from backend.auth.oauth import WebOAuth
 from backend.state import session
 from backend.models import AuthConfig
 
 logger = logging.getLogger(__name__)
 
+# Global state
+_client: Client | None = None
+_auth: WebOAuth | None = None
+_url: str | None = None
+_tools: list[Tool] | None = None
 
-async def connect(url: str, auth_config: AuthConfig | None = None) -> dict:
-    """Connect to an MCP server. Returns status dict."""
-    # Clean up any previous connection (ignore errors from broken ones)
-    if session.connection:
-        try:
-            await session.connection.disconnect()
-        except Exception:
-            pass
-    session.connection = None
-    session.reset()
 
-    conn = MCPConnection(url)
+def _get_redirect_url(request_origin: str | None = None) -> str:
+    env_url = os.environ.get("OAUTH_REDIRECT_URL")
+    if env_url:
+        return env_url
+    if request_origin:
+        return f"{request_origin.rstrip('/')}/oauth/callback"
+    return "http://localhost:5173/oauth/callback"
 
-    try:
-        tools, auth_url = await conn.connect_with_auth_url()
-    except Exception:
-        # Don't leave a broken connection in session
-        try:
-            await conn.disconnect()
-        except Exception:
-            pass
-        raise
 
-    # Only store the connection after successful connect
-    session.connection = conn
+async def connect(url: str, auth_config: AuthConfig | None = None, request_origin: str | None = None) -> dict:
+    """Connect to an MCP server."""
+    global _client, _auth, _url, _tools
 
-    if auth_url:
+    await disconnect()
+
+    _url = url
+    redirect_url = _get_redirect_url(request_origin)
+    token_dir = Path.home() / ".mcperiscope" / "tokens"
+
+    _auth = WebOAuth(
+        redirect_url=redirect_url,
+        client_name="MCPeriscope",
+        token_storage=FileKeyValueStore(token_dir),
+    )
+
+    _client = Client(url, auth=_auth)
+
+    # Try connecting — if OAuth is needed, HeadlessOAuth captures the auth URL
+    connect_task = asyncio.create_task(_do_connect())
+
+    # Wait for either connection success or OAuth redirect
+    for _ in range(50):
+        if connect_task.done():
+            await connect_task  # Re-raise exceptions
+            return await _finish_connect()
+        if _auth.pending_auth_url:
+            return {
+                "status": "oauth_redirect",
+                "authorizationUrl": _auth.pending_auth_url,
+            }
+        await asyncio.sleep(0.1)
+
+    # Still connecting — check one more time
+    if _auth.pending_auth_url:
         return {
             "status": "oauth_redirect",
-            "authorizationUrl": auth_url,
+            "authorizationUrl": _auth.pending_auth_url,
         }
 
-    return _finish_connect(tools)
+    # Wait for completion
+    await connect_task
+    return await _finish_connect()
+
+
+async def _do_connect():
+    """Internal connect that enters the client context."""
+    global _tools
+    await _client.__aenter__()
+    _tools = await _client.list_tools()
 
 
 async def complete_oauth(callback_url: str) -> dict:
-    """Complete OAuth by providing the callback URL."""
-    if not session.connection:
-        raise ValueError("No connection in progress")
-    session.connection.supply_callback_url(callback_url)
-    tools = await session.connection.complete_connect(timeout=30)
-    return _finish_connect(tools)
+    """Complete OAuth by providing the callback URL from the frontend."""
+    global _tools
+
+    if not _auth:
+        raise ValueError("No OAuth flow in progress")
+
+    _auth.supply_callback_url(callback_url)
+
+    # Wait for the connection to complete
+    for _ in range(300):
+        if _tools is not None:
+            return await _finish_connect()
+        await asyncio.sleep(0.1)
+
+    raise TimeoutError("OAuth connection timed out")
 
 
 async def disconnect() -> dict:
     """Disconnect from the MCP server."""
-    if session.connection:
-        await session.connection.disconnect()
-        session.connection = None
+    global _client, _auth, _url, _tools
+
+    if _client is not None:
+        try:
+            await _client.__aexit__(None, None, None)
+        except Exception:
+            pass
+    _client = None
+    _auth = None
+    _url = None
+    _tools = None
+    session.connection = None
     session.reset()
     return {"status": "disconnected"}
 
 
 def is_connected() -> bool:
-    return session.connection is not None and session.connection.connected
+    return _client is not None and _tools is not None
 
 
 def server_info() -> dict | None:
-    # MCPConnection doesn't expose server info directly
-    # Return basic info
     if not is_connected():
         return None
-    return {"url": session.connection.url, "toolCount": len(session.tools)}
+    return {"url": _url, "toolCount": len(session.tools)}
 
 
-def _finish_connect(tools) -> dict:
+async def call_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
+    """Call a tool on the connected MCP server."""
+    if not _client:
+        raise RuntimeError("Not connected")
+    return await _client.call_tool(name, arguments or {})
+
+
+async def list_resources():
+    if not _client:
+        raise RuntimeError("Not connected")
+    return await _client.list_resources()
+
+
+async def list_resource_templates():
+    if not _client:
+        raise RuntimeError("Not connected")
+    return await _client.list_resource_templates()
+
+
+async def read_resource(uri: str):
+    if not _client:
+        raise RuntimeError("Not connected")
+    return await _client.read_resource(uri)
+
+
+async def list_prompts():
+    if not _client:
+        raise RuntimeError("Not connected")
+    return await _client.list_prompts()
+
+
+async def get_prompt(name: str, arguments: dict[str, str] | None = None):
+    if not _client:
+        raise RuntimeError("Not connected")
+    return await _client.get_prompt(name, arguments)
+
+
+async def _finish_connect() -> dict:
     """Shared logic after successful connection."""
-    session.tools = tools
-    inventory = analyze_inventory(tools)
+    session.tools = _tools or []
+    inventory = analyze_inventory(session.tools)
     session.inventory = analysis_to_dict(inventory)
     return {
         "status": "connected",
