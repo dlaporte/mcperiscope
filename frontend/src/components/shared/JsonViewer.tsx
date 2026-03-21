@@ -140,7 +140,7 @@ export function JsonViewer({ data }: Props) {
       {formatted && extracted ? (
         <div
           className="p-4 rounded-lg overflow-auto text-sm max-h-[600px] prose prose-invert prose-sm max-w-none"
-          style={{ backgroundColor: 'var(--sub-sonar)' }}
+          style={{ backgroundColor: 'var(--sub-hull)' }}
         >
           <Markdown remarkPlugins={[remarkGfm]}>{extracted.text}</Markdown>
         </div>
