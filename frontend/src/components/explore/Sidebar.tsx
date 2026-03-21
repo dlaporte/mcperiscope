@@ -108,8 +108,7 @@ export function Sidebar() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter..."
-            className="w-full rounded px-3 py-1.5 text-xs placeholder-gray-500 pr-7"
-            style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)', color: 'var(--sub-text)' }}
+            className="w-full input-sub border rounded px-3 py-1.5 text-xs  pr-7"
           />
           {filter && (
             <button

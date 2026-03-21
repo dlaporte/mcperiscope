@@ -16,7 +16,8 @@ function ParamValueBadge({ entry }: { entry: ParamEntry }) {
   const tooltip = formatContext(entry.context);
   return (
     <span
-      className="inline-block bg-gray-700/60 text-gray-200 text-xs font-mono px-2 py-0.5 rounded cursor-default max-w-full truncate"
+      className="inline-block text-xs font-mono px-2 py-0.5 rounded cursor-default max-w-full truncate"
+      style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
       title={tooltip}
     >
       {String(entry.value)}
@@ -49,14 +50,26 @@ export function ParameterStorePanel() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed right-0 top-1/2 -translate-y-1/2 z-30 bg-gray-800 border border-r-0 border-gray-600 rounded-l-lg px-2 py-3 hover:bg-gray-700 transition-colors group"
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-30 border border-r-0 rounded-l-lg px-2 py-3 transition-colors group"
+          style={{
+            backgroundColor: 'var(--sub-panel)',
+            borderColor: 'var(--sub-rivet)',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel)')}
           title="Parameter Store"
         >
           <div className="flex flex-col items-center gap-1">
-            <span className="text-xs font-semibold text-gray-400 group-hover:text-gray-200 [writing-mode:vertical-lr] rotate-180">
+            <span
+              className="text-xs font-semibold [writing-mode:vertical-lr] rotate-180"
+              style={{ color: 'var(--sub-text-dim)' }}
+            >
               Params
             </span>
-            <span className="text-[10px] bg-blue-500/20 text-blue-400 font-bold rounded-full w-5 h-5 flex items-center justify-center">
+            <span
+              className="text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center"
+              style={{ backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }}
+            >
               {totalValues}
             </span>
           </div>
@@ -65,29 +78,32 @@ export function ParameterStorePanel() {
 
       {/* Slide-over panel */}
       <div
-        className={`fixed top-0 right-0 h-full w-96 border-l border-gray-700 z-50 shadow-2xl transform transition-transform duration-200 ease-in-out flex flex-col ${
+        className={`fixed top-0 right-0 h-full w-96 z-50 shadow-2xl transform transition-transform duration-200 ease-in-out flex flex-col ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
-        style={{ backgroundColor: "#1a1d23" }}
+        style={{ backgroundColor: 'var(--sub-hull)', borderLeft: '1px solid var(--sub-rivet)' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-          <h3 className="text-sm font-semibold text-white">
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--sub-text)' }}>
             Parameter Store
-            <span className="ml-2 text-xs text-gray-500">
+            <span className="ml-2 text-xs" style={{ color: 'var(--sub-text-dim)' }}>
               ({entries.length} keys, {totalValues} values)
             </span>
           </h3>
           <div className="flex items-center gap-2">
             <button
               onClick={clearParamStore}
-              className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              className="text-xs alarm-text hover:opacity-80 transition-colors"
             >
               Clear All
             </button>
             <button
               onClick={() => setOpen(false)}
-              className="text-gray-500 hover:text-gray-300 transition-colors text-lg leading-none"
+              className="transition-colors text-lg leading-none"
+              style={{ color: 'var(--sub-text-dim)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-text)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-text-dim)')}
             >
               &times;
             </button>
@@ -102,12 +118,12 @@ export function ParameterStorePanel() {
               {entries.map(([key, paramEntries]) => (
                 <div
                   key={key}
-                  className="bg-gray-800/50 rounded-lg px-3 py-2 border border-gray-700/50"
+                  className="rounded-lg px-3 py-2 panel-riveted"
                 >
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[11px] font-medium text-gray-400">{key}</span>
+                    <span className="text-[11px] font-medium" style={{ color: 'var(--sub-text-dim)' }}>{key}</span>
                     {paramEntries.length > 1 && (
-                      <span className="text-[10px] text-gray-600">
+                      <span className="text-[10px]" style={{ color: 'var(--sub-text-dim)', opacity: 0.6 }}>
                         ({paramEntries.length} values)
                       </span>
                     )}
@@ -117,13 +133,13 @@ export function ParameterStorePanel() {
                       <ParamValueBadge key={i} entry={entry} />
                     ))}
                     {paramEntries.length > 10 && (
-                      <span className="text-[10px] text-gray-600 self-center">
+                      <span className="text-[10px] self-center" style={{ color: 'var(--sub-text-dim)', opacity: 0.6 }}>
                         +{paramEntries.length - 10} more
                       </span>
                     )}
                   </div>
                   {paramEntries[0]?.source && (
-                    <div className="text-[10px] text-gray-600 mt-1">
+                    <div className="text-[10px] mt-1" style={{ color: 'var(--sub-text-dim)', opacity: 0.6 }}>
                       from {paramEntries[0].source}
                       {paramEntries.length > 1 && ` + ${new Set(paramEntries.map(e => e.source)).size - 1} other source(s)`}
                     </div>
@@ -136,23 +152,27 @@ export function ParameterStorePanel() {
           {/* Aliases */}
           {aliasEntries.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--sub-text-dim)' }}>
                 Mappings
               </h4>
               <div className="space-y-1.5">
                 {aliasEntries.map(([fieldName, storeKey]) => (
                   <div
                     key={fieldName}
-                    className="flex items-center justify-between bg-gray-800/30 rounded-lg px-3 py-2 border border-gray-700/30"
+                    className="flex items-center justify-between rounded-lg px-3 py-2"
+                    style={{ backgroundColor: 'rgba(53,56,57,0.3)', border: '1px solid rgba(74,78,80,0.3)' }}
                   >
                     <div className="flex items-center gap-1.5 text-xs font-mono min-w-0">
-                      <span className="text-gray-400 truncate">{fieldName}</span>
-                      <span className="text-gray-600 shrink-0">&larr;</span>
-                      <span className="text-blue-400 truncate">{storeKey}</span>
+                      <span className="truncate" style={{ color: 'var(--sub-text-dim)' }}>{fieldName}</span>
+                      <span className="shrink-0" style={{ color: 'var(--sub-text-dim)', opacity: 0.5 }}>&larr;</span>
+                      <span className="truncate" style={{ color: 'var(--sub-brass)' }}>{storeKey}</span>
                     </div>
                     <button
                       onClick={() => removeParamAlias(fieldName)}
-                      className="text-gray-600 hover:text-red-400 transition-colors text-xs ml-2 shrink-0"
+                      className="transition-colors text-xs ml-2 shrink-0"
+                      style={{ color: 'var(--sub-text-dim)' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-red)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-text-dim)')}
                       title="Remove mapping"
                     >
                       &times;

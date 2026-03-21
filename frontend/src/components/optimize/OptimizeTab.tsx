@@ -55,7 +55,7 @@ export function OptimizeTab() {
           disabled={!canOptimize}
           className={`px-6 py-3 rounded-xl font-semibold text-sm shadow-lg transition-all ${
             canOptimize
-              ? "btn-brass shadow-yellow-900/50 hover:shadow-yellow-800/50"
+              ? "btn-brass"
               : "cursor-not-allowed"
           }`}
           style={!canOptimize ? { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' } : {}}

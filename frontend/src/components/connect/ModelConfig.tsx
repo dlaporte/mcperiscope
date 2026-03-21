@@ -40,7 +40,7 @@ export function ModelConfig() {
           value={model}
           onChange={(e) => setModel(e.target.value)}
           disabled={disabled}
-          className="bg-gray-900 border border-gray-600 rounded-lg px-2 py-2 text-sm text-white disabled:opacity-50 flex-1"
+          className="input-sub border rounded-lg px-2 py-2 text-sm disabled:opacity-50 flex-1"
         >
           <optgroup label="Anthropic">
             {MODELS.filter((m) => m.provider === "anthropic").map((m) => (
@@ -58,7 +58,7 @@ export function ModelConfig() {
           </optgroup>
         </select>
         {selectedModel && (
-          <span className="text-xs text-gray-500 whitespace-nowrap">
+          <span className="text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
             {selectedModel.provider}
           </span>
         )}
@@ -71,17 +71,20 @@ export function ModelConfig() {
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="API key (sk-...)"
           disabled={disabled}
-          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 disabled:opacity-50"
+          className="w-full input-sub border rounded-lg px-3 py-2 text-sm  disabled:opacity-50"
         />
         {detectedProvider && (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">
+          <span
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
+          >
             {detectedProvider}
           </span>
         )}
       </div>
 
       {detectedProvider && selectedModel && detectedProvider !== selectedModel.provider && (
-        <p className="text-yellow-400 text-xs">
+        <p className="text-xs" style={{ color: 'var(--sub-brass)' }}>
           API key looks like {detectedProvider} but selected model is {selectedModel.provider}
         </p>
       )}

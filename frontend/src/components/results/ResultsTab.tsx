@@ -18,7 +18,7 @@ export function ResultsTab() {
 
   if (resultsLoading) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400">
+      <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>
         <div className="flex items-center gap-3">
           <svg
             className="animate-spin h-5 w-5"
@@ -51,7 +51,7 @@ export function ResultsTab() {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <div className="text-gray-500 text-4xl mb-4">
+          <div className="text-4xl mb-4" style={{ color: 'var(--sub-text-dim)' }}>
             <svg
               className="w-16 h-16 mx-auto opacity-30"
               fill="none"
@@ -66,8 +66,8 @@ export function ResultsTab() {
               />
             </svg>
           </div>
-          <p className="text-gray-400 text-lg font-medium">No results yet</p>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-lg font-medium" style={{ color: 'var(--sub-text-dim)' }}>No results yet</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--sub-text-dim)' }}>
             Run optimization first to see before/after comparison and
             recommendations.
           </p>

@@ -23,26 +23,26 @@ interface InventoryData {
 
 function QuickWinCard({ win }: { win: QuickWin }) {
   const [expanded, setExpanded] = useState(false);
-  const typeColors: Record<string, string> = {
-    high_tool_count: "bg-red-500/20 text-red-300",
-    high_context_usage: "bg-red-500/20 text-red-300",
-    moderate_context_usage: "bg-yellow-500/20 text-yellow-300",
-    consolidation: "bg-purple-500/20 text-purple-300",
-    duplicate: "bg-yellow-500/20 text-yellow-300",
-    oversized_schema: "bg-orange-500/20 text-orange-300",
-    missing_description: "bg-red-500/20 text-red-300",
-    terse_description: "bg-yellow-500/20 text-yellow-300",
-    no_return_info: "bg-blue-500/20 text-blue-300",
-    duplicate_description: "bg-orange-500/20 text-orange-300",
+  const typeStyles: Record<string, React.CSSProperties> = {
+    high_tool_count: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
+    high_context_usage: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
+    moderate_context_usage: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+    consolidation: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
+    duplicate: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+    oversized_schema: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+    missing_description: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
+    terse_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+    no_return_info: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
+    duplicate_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
   };
-  const badgeClass = typeColors[win.type] || "bg-gray-500/20 text-gray-300";
+  const badgeStyle = typeStyles[win.type] || { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' };
 
   return (
     <div className="panel-riveted rounded-lg p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badgeClass}`}>
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={badgeStyle}>
               {win.type}
             </span>
             {win.estimated_savings != null && win.estimated_savings > 0 && (

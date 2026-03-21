@@ -21,6 +21,18 @@
   --sub-text: #c8c8c0;         /* main text - slightly warm gray */
   --sub-text-dim: #7a7a72;     /* dimmed text */
   --sub-text-bright: #e8e8e0;  /* bright text */
+  --sub-input: #22262a;        /* input field background - neutral dark */
+  --sub-input-border: #4a4e50; /* input border */
+}
+
+/* Override Tailwind's blue-tinted grays for inputs */
+.input-sub {
+  background-color: var(--sub-input) !important;
+  border-color: var(--sub-input-border) !important;
+  color: var(--sub-text) !important;
+}
+.input-sub::placeholder {
+  color: var(--sub-text-dim) !important;
 }
 
 body {

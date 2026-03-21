@@ -28,10 +28,16 @@ export function OAuthCallback() {
 
   if (localError) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-900 text-white">
+      <div className="h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text)' }}>
         <div className="text-center">
-          <p className="text-red-400 text-lg mb-4">{localError}</p>
-          <a href="/" className="text-blue-400 hover:text-blue-300 underline">
+          <p className="alarm-text text-lg mb-4">{localError}</p>
+          <a
+            href="/"
+            className="underline"
+            style={{ color: 'var(--sub-brass)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+          >
             Return to MCPeriscope
           </a>
         </div>
@@ -40,10 +46,13 @@ export function OAuthCallback() {
   }
 
   return (
-    <div className="h-screen flex items-center justify-center bg-gray-900 text-white">
+    <div className="h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text)' }}>
       <div className="text-center">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-gray-400">Redirecting...</p>
+        <div
+          className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-4"
+          style={{ borderColor: 'var(--sub-brass)', borderTopColor: 'transparent' }}
+        />
+        <p style={{ color: 'var(--sub-text-dim)' }}>Redirecting...</p>
       </div>
     </div>
   );

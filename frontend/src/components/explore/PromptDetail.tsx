@@ -35,14 +35,14 @@ export function PromptDetail() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-white">{prompt.name}</h2>
+        <h2 className="text-lg font-bold font-stencil" style={{ color: 'var(--sub-text)' }}>{prompt.name}</h2>
         {prompt.description && (
-          <p className="text-gray-400 text-sm mt-1">{prompt.description}</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--sub-text-dim)' }}>{prompt.description}</p>
         )}
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-300 mb-2">Arguments</h3>
+        <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--sub-text)' }}>Arguments</h3>
         <SchemaForm
           key={prompt.name}
           schema={schema}
@@ -55,7 +55,7 @@ export function PromptDetail() {
 
       {result && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">
+          <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--sub-text)' }}>
             Prompt Messages
           </h3>
           <JsonViewer data={result} />

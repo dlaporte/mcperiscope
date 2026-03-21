@@ -70,17 +70,30 @@ export function ExportPanel() {
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-      <h3 className="text-lg font-semibold text-white mb-3">Export</h3>
+    <div className="panel-riveted rounded-lg p-4">
+      <h3 className="text-lg font-semibold font-stencil mb-3" style={{ color: 'var(--sub-text)' }}>Export</h3>
       <div className="flex flex-wrap gap-3">
         {DOWNLOADS.map((dl) => (
           <button
             key={dl.endpoint}
             onClick={() => handleDownload(dl)}
             disabled={downloading !== null}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed
-                       text-gray-200 text-sm font-medium rounded-lg border border-gray-600
+            className="px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed
+                       text-sm font-medium rounded-lg border
                        transition-colors flex items-center gap-2"
+            style={{
+              backgroundColor: 'var(--sub-panel-light)',
+              borderColor: 'var(--sub-rivet)',
+              color: 'var(--sub-text)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--sub-rivet)';
+              e.currentTarget.style.color = 'var(--sub-text-bright)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
+              e.currentTarget.style.color = 'var(--sub-text)';
+            }}
           >
             <svg
               className="w-4 h-4"
@@ -100,7 +113,7 @@ export function ExportPanel() {
         ))}
       </div>
       {error && (
-        <p className="text-red-400 text-sm mt-2">{error}</p>
+        <p className="alarm-text text-sm mt-2">{error}</p>
       )}
     </div>
   );

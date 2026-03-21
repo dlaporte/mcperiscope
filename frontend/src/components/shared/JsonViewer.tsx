@@ -121,7 +121,16 @@ export function JsonViewer({ data }: Props) {
           <button
             type="button"
             onClick={() => setFormatted(!formatted)}
-            className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 transition-colors"
+            className="text-xs px-2 py-1 rounded border transition-colors"
+            style={{ borderColor: 'var(--sub-rivet)', color: 'var(--sub-text)' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--sub-text-bright)';
+              e.currentTarget.style.borderColor = 'var(--sub-brass-dim)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--sub-text)';
+              e.currentTarget.style.borderColor = 'var(--sub-rivet)';
+            }}
           >
             {formatted ? "Show JSON" : "Show Formatted"}
           </button>
@@ -129,11 +138,16 @@ export function JsonViewer({ data }: Props) {
       )}
 
       {formatted && extracted ? (
-        <div className="bg-gray-900 p-4 rounded-lg overflow-auto text-sm max-h-[600px] prose prose-invert prose-sm max-w-none">
+        <div
+          className="p-4 rounded-lg overflow-auto text-sm max-h-[600px] prose prose-invert prose-sm max-w-none"
+          style={{ backgroundColor: 'var(--sub-sonar)' }}
+        >
           <Markdown remarkPlugins={[remarkGfm]}>{extracted.text}</Markdown>
         </div>
       ) : (
-        <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto text-sm max-h-[600px]">
+        <pre
+          className="sonar-screen phosphor-text p-4 rounded-lg overflow-auto text-sm max-h-[600px]"
+        >
           {prettyPrintJson(prettyData)}
         </pre>
       )}

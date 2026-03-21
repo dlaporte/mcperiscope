@@ -3,11 +3,36 @@ import { useStore } from "../../store";
 
 type Correctness = "correct" | "partial" | "wrong" | "skipped";
 
-const BUTTONS: { value: Correctness; label: string; color: string; activeColor: string; hoverBg: string }[] = [
-  { value: "correct", label: "Correct", color: "border-green-700 text-green-400", activeColor: "bg-green-700 text-white border-green-700", hoverBg: "rgba(51,255,51,0.1)" },
-  { value: "partial", label: "Partial", color: "text-yellow-400", activeColor: "bg-yellow-700 text-white border-yellow-700", hoverBg: "rgba(196,154,42,0.15)" },
-  { value: "wrong", label: "Wrong", color: "text-red-400", activeColor: "bg-red-700 text-white border-red-700", hoverBg: "rgba(204,51,51,0.15)" },
-  { value: "skipped", label: "Skip", color: "", activeColor: "", hoverBg: "var(--sub-panel-light)" },
+const BUTTONS: {
+  value: Correctness;
+  label: string;
+  style: React.CSSProperties;
+  activeStyle: React.CSSProperties;
+}[] = [
+  {
+    value: "correct",
+    label: "Correct",
+    style: { borderColor: 'var(--sub-phosphor-dim)', color: 'var(--sub-phosphor)' },
+    activeStyle: { backgroundColor: 'var(--sub-phosphor-dim)', color: 'white', borderColor: 'var(--sub-phosphor-dim)' },
+  },
+  {
+    value: "partial",
+    label: "Partial",
+    style: { borderColor: 'var(--sub-rivet)', color: 'var(--sub-brass)' },
+    activeStyle: { backgroundColor: 'var(--sub-brass-dim)', color: 'white', borderColor: 'var(--sub-brass-dim)' },
+  },
+  {
+    value: "wrong",
+    label: "Wrong",
+    style: { borderColor: 'var(--sub-rivet)', color: 'var(--sub-red)' },
+    activeStyle: { backgroundColor: 'var(--sub-red-dim)', color: 'white', borderColor: 'var(--sub-red-dim)' },
+  },
+  {
+    value: "skipped",
+    label: "Skip",
+    style: { borderColor: 'var(--sub-rivet)', color: 'var(--sub-text-dim)' },
+    activeStyle: { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)', borderColor: 'var(--sub-rivet)' },
+  },
 ];
 
 export function RatingPanel() {
@@ -68,30 +93,15 @@ export function RatingPanel() {
         <span className="text-xs mr-1" style={{ color: 'var(--sub-text-dim)' }}>Rate:</span>
         {BUTTONS.map((btn) => {
           const isActive = existingRating?.correctness === btn.value;
-          if (btn.value === "skipped") {
-            return (
-              <button
-                key={btn.value}
-                onClick={() => handleRate(btn.value)}
-                disabled={isRated}
-                className={`px-3 py-1 text-sm rounded-lg border transition-colors disabled:opacity-60 ${
-                  isActive ? btn.activeColor : ""
-                } ${isRated && !isActive ? "opacity-30" : ""}`}
-                style={!isActive ? { borderColor: 'var(--sub-rivet)', color: 'var(--sub-text-dim)' } : {}}
-              >
-                {btn.label}
-              </button>
-            );
-          }
           return (
             <button
               key={btn.value}
               onClick={() => handleRate(btn.value)}
               disabled={isRated}
               className={`px-3 py-1 text-sm rounded-lg border transition-colors disabled:opacity-60 ${
-                isActive ? btn.activeColor : btn.color
-              } ${isRated && !isActive ? "opacity-30" : ""}`}
-              style={!isActive ? { borderColor: 'var(--sub-rivet)' } : {}}
+                isRated && !isActive ? "opacity-30" : ""
+              }`}
+              style={isActive ? btn.activeStyle : btn.style}
             >
               {btn.label}
             </button>
@@ -107,12 +117,7 @@ export function RatingPanel() {
             onChange={(e) => setNotes(e.target.value)}
             placeholder={`What was ${pending === "partial" ? "missing or incomplete" : "wrong"}?`}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg text-sm placeholder-gray-500 focus:outline-none resize-none"
-            style={{
-              backgroundColor: 'var(--sub-panel)',
-              border: '1px solid var(--sub-rivet)',
-              color: 'var(--sub-text)',
-            }}
+            className="w-full px-3 py-2 rounded-lg text-sm input-sub border focus:outline-none resize-none"
           />
           <button
             onClick={() => handleRate(pending)}

@@ -52,7 +52,7 @@ export function ToolStats({ toolName }: Props) {
 
   if (loading) {
     return (
-      <div className="text-xs text-gray-500 animate-pulse">
+      <div className="text-xs animate-pulse" style={{ color: 'var(--sub-text-dim)' }}>
         Loading tool stats...
       </div>
     );
@@ -60,7 +60,7 @@ export function ToolStats({ toolName }: Props) {
 
   if (error) {
     return (
-      <div className="text-xs text-gray-600">
+      <div className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>
         Stats unavailable
       </div>
     );
@@ -69,15 +69,17 @@ export function ToolStats({ toolName }: Props) {
   if (!stats) return null;
 
   return (
-    <div className="bg-gray-800/50 rounded-lg border border-gray-700/50 p-3 space-y-2 text-xs">
+    <div
+      className="rounded-lg p-3 space-y-2 text-xs panel-riveted"
+    >
       {/* Token budget */}
       {stats.total_tokens != null && (
         <div className="flex items-center gap-2">
-          <span className="text-gray-500">Token budget:</span>
-          <span className="text-gray-300 font-mono">
+          <span style={{ color: 'var(--sub-text-dim)' }}>Token budget:</span>
+          <span className="font-mono" style={{ color: 'var(--sub-text)' }}>
             {stats.total_tokens} tokens
             {stats.description_tokens != null && stats.schema_tokens != null && (
-              <span className="text-gray-500">
+              <span style={{ color: 'var(--sub-text-dim)' }}>
                 {" "}(desc: {stats.description_tokens}, schema: {stats.schema_tokens})
               </span>
             )}
@@ -88,8 +90,8 @@ export function ToolStats({ toolName }: Props) {
       {/* Context window impact */}
       {stats.context_pct != null && stats.model && stats.context_window && (
         <div className="flex items-center gap-2">
-          <span className="text-gray-500">Context impact:</span>
-          <span className="text-gray-300 font-mono">
+          <span style={{ color: 'var(--sub-text-dim)' }}>Context impact:</span>
+          <span className="font-mono" style={{ color: 'var(--sub-text)' }}>
             {stats.context_pct.toFixed(2)}% of {stats.model}'s {(stats.context_window / 1000).toFixed(0)}K context
           </span>
         </div>
@@ -98,16 +100,17 @@ export function ToolStats({ toolName }: Props) {
       {/* Similar tools */}
       {stats.similar_tools && stats.similar_tools.length > 0 && (
         <div>
-          <span className="text-gray-500">Similar tools:</span>
+          <span style={{ color: 'var(--sub-text-dim)' }}>Similar tools:</span>
           <div className="flex flex-wrap gap-1 mt-1">
             {stats.similar_tools.map((t) => (
               <span
                 key={t.name}
-                className="inline-block bg-gray-700/50 text-gray-400 px-1.5 py-0.5 rounded font-mono"
+                className="inline-block px-1.5 py-0.5 rounded font-mono"
+                style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text-dim)' }}
                 title={`Edit distance: ${t.distance}`}
               >
                 {t.name}
-                <span className="text-gray-600 ml-1">d={t.distance}</span>
+                <span className="ml-1" style={{ color: 'var(--sub-text-dim)', opacity: 0.6 }}>d={t.distance}</span>
               </span>
             ))}
           </div>
@@ -117,10 +120,10 @@ export function ToolStats({ toolName }: Props) {
       {/* Cluster */}
       {stats.cluster && (
         <div className="flex items-center gap-2">
-          <span className="text-gray-500">Cluster:</span>
-          <span className="text-gray-300 font-mono">
+          <span style={{ color: 'var(--sub-text-dim)' }}>Cluster:</span>
+          <span className="font-mono" style={{ color: 'var(--sub-text)' }}>
             {stats.cluster.prefix}*
-            <span className="text-gray-500 ml-1">({stats.cluster.count} tools)</span>
+            <span className="ml-1" style={{ color: 'var(--sub-text-dim)' }}>({stats.cluster.count} tools)</span>
           </span>
         </div>
       )}

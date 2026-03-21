@@ -70,14 +70,23 @@ function ValuePicker({
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setOpenField(open ? null : fieldKey)}
-        className="text-[10px] text-blue-400 hover:text-blue-300 ml-1.5 tabular-nums"
+        className="text-[10px] ml-1.5 tabular-nums"
+        style={{ color: 'var(--sub-brass)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
+        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
         title="Pick from stored values"
       >
         {sortedEntries.length} values
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl min-w-[300px] max-h-60 overflow-y-auto">
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-gray-700">
+        <div
+          className="absolute left-0 top-full mt-1 z-50 rounded-lg shadow-xl min-w-[300px] max-h-60 overflow-y-auto"
+          style={{ backgroundColor: 'var(--sub-panel)', border: '1px solid var(--sub-rivet)' }}
+        >
+          <div
+            className="px-3 py-1.5 text-[10px] uppercase tracking-wide"
+            style={{ color: 'var(--sub-text-dim)', borderBottom: '1px solid var(--sub-rivet)' }}
+          >
             Select a value
           </div>
           {sortedEntries.map((entry, i) => {
@@ -87,29 +96,33 @@ function ValuePicker({
               <button
                 key={i}
                 type="button"
-                className={`w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-b-0 ${
-                  isSelected ? "bg-blue-900/30" : ""
-                }`}
+                className="w-full text-left px-3 py-2 transition-colors last:border-b-0"
+                style={{
+                  backgroundColor: isSelected ? 'rgba(196,154,42,0.15)' : 'transparent',
+                  borderBottom: '1px solid rgba(74,78,80,0.5)',
+                }}
                 onMouseDown={(e) => e.stopPropagation()}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = isSelected ? 'rgba(196,154,42,0.15)' : 'transparent')}
                 onClick={() => {
                   onSelect(entry.value);
                   setOpenField(null);
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-white shrink-0">
+                  <span className="text-xs font-mono shrink-0" style={{ color: 'var(--sub-text)' }}>
                     {String(entry.value).length > 40
                       ? String(entry.value).slice(0, 40) + "..."
                       : String(entry.value)}
                   </span>
                   {isSelected && (
-                    <span className="text-[10px] text-blue-400">current</span>
+                    <span className="text-[10px]" style={{ color: 'var(--sub-brass)' }}>current</span>
                   )}
                 </div>
-                <div className="text-[10px] text-gray-500 mt-0.5 truncate">
+                <div className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--sub-text-dim)' }}>
                   {hint}
                 </div>
-                <div className="text-[10px] text-gray-600 mt-0.5">
+                <div className="text-[10px] mt-0.5" style={{ color: 'var(--sub-text-dim)', opacity: 0.6 }}>
                   from {entry.source}
                 </div>
               </button>
@@ -153,7 +166,10 @@ function LinkDropdown({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="text-gray-500 hover:text-blue-400 transition-colors ml-1.5"
+        className="transition-colors ml-1.5"
+        style={{ color: 'var(--sub-text-dim)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-text-dim)')}
         title={`Map a stored parameter to "${fieldName}"`}
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -163,22 +179,30 @@ function LinkDropdown({
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl min-w-[220px] max-h-48 overflow-y-auto">
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-gray-700">
+        <div
+          className="absolute left-0 top-full mt-1 z-50 rounded-lg shadow-xl min-w-[220px] max-h-48 overflow-y-auto"
+          style={{ backgroundColor: 'var(--sub-panel)', border: '1px solid var(--sub-rivet)' }}
+        >
+          <div
+            className="px-3 py-1.5 text-[10px] uppercase tracking-wide"
+            style={{ color: 'var(--sub-text-dim)', borderBottom: '1px solid var(--sub-rivet)' }}
+          >
             Map store param to &quot;{fieldName}&quot;
           </div>
           {storeEntries.map(([storeKey, value]) => (
             <button
               key={storeKey}
               type="button"
-              className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors flex items-center gap-2"
+              className="w-full text-left px-3 py-2 transition-colors flex items-center gap-2"
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               onClick={() => {
                 onSelect(storeKey, value);
                 setOpen(false);
               }}
             >
-              <span className="text-xs font-mono text-blue-400 shrink-0">{storeKey}</span>
-              <span className="text-[11px] text-gray-500 truncate">{String(value)}</span>
+              <span className="text-xs font-mono shrink-0" style={{ color: 'var(--sub-brass)' }}>{storeKey}</span>
+              <span className="text-[11px] truncate" style={{ color: 'var(--sub-text-dim)' }}>{String(value)}</span>
             </button>
           ))}
         </div>
@@ -200,7 +224,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
     return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
   }
 
-  // Resolve the store key for each field — pick the key with the most entries
+  // Resolve the store key for each field -- pick the key with the most entries
   function resolveStoreKey(fieldKey: string): string | null {
     const candidates: [string, number][] = [];
 
@@ -215,7 +239,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
     // Alias
     const aliasKey = parameterAliases[fieldKey];
     if (aliasKey) check(aliasKey);
-    // camelCase ↔ snake_case
+    // camelCase <-> snake_case
     const camel = toCamelCase(fieldKey);
     if (camel !== fieldKey) check(camel);
     const snake = toSnakeCase(fieldKey);
@@ -245,7 +269,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
         const aliased = tryValue(aliasKey);
         if (aliased !== undefined) { out[key] = aliased; continue; }
       }
-      // Case variations — auto-create alias if not explicitly removed
+      // Case variations -- auto-create alias if not explicitly removed
       if (!removedAliases.has(key)) {
         const camel = toCamelCase(key);
         if (camel !== key) {
@@ -324,20 +348,17 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
   if (Object.keys(properties).length === 0) {
     return (
       <form onSubmit={handleSubmit}>
-        <p className="text-gray-400 text-sm mb-3">No parameters required.</p>
+        <p className="text-sm mb-3" style={{ color: 'var(--sub-text-dim)' }}>No parameters required.</p>
         <button
           type="submit"
           disabled={loading}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+          className="btn-brass disabled:opacity-50 px-4 py-2 rounded-lg text-sm font-medium"
         >
           {loading ? "Loading..." : submitLabel}
         </button>
       </form>
     );
   }
-
-  const autoClass = "border-blue-500/50";
-  const normalClass = "border-gray-600";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -349,11 +370,14 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
 
         return (
           <div key={key}>
-            <label className="flex items-center flex-wrap text-sm font-medium text-gray-300 mb-1">
+            <label className="flex items-center flex-wrap text-sm font-medium mb-1" style={{ color: 'var(--sub-text)' }}>
               {key}
-              {required.has(key) && <span className="text-red-400 ml-1">*</span>}
+              {required.has(key) && <span className="ml-1" style={{ color: 'var(--sub-red)' }}>*</span>}
               {isAutoFilled(key) && (
-                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
+                <span
+                  className="ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                  style={{ backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }}
+                >
                   auto{hasAlias ? ` (${parameterAliases[key]})` : ""}
                 </span>
               )}
@@ -373,7 +397,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
                 />
               )}
               {prop.description && (
-                <span className="text-gray-500 font-normal ml-2">
+                <span className="font-normal ml-2" style={{ color: 'var(--sub-text-dim)' }}>
                   {prop.description}
                 </span>
               )}
@@ -382,7 +406,8 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
               <select
                 value={String(values[key] ?? "")}
                 onChange={(e) => handleChange(key, e.target.value)}
-                className={`w-full bg-gray-800 border ${isAutoFilled(key) ? autoClass : normalClass} rounded-lg px-3 py-2 text-sm text-white`}
+                className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                style={isAutoFilled(key) ? { borderColor: 'var(--sub-brass-dim)' } : {}}
               >
                 <option value="">--</option>
                 <option value="true">true</option>
@@ -392,7 +417,8 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
               <select
                 value={String(values[key] ?? "")}
                 onChange={(e) => handleChange(key, e.target.value)}
-                className={`w-full bg-gray-800 border ${isAutoFilled(key) ? autoClass : normalClass} rounded-lg px-3 py-2 text-sm text-white`}
+                className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                style={isAutoFilled(key) ? { borderColor: 'var(--sub-brass-dim)' } : {}}
               >
                 <option value="">--</option>
                 {prop.enum.map((v: string) => (
@@ -411,7 +437,8 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
                 value={values[key] ?? ""}
                 onChange={(e) => handleChange(key, e.target.value)}
                 placeholder={prop.default !== undefined ? String(prop.default) : ""}
-                className={`w-full bg-gray-800 border ${isAutoFilled(key) ? autoClass : normalClass} rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500`}
+                className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                style={isAutoFilled(key) ? { borderColor: 'var(--sub-brass-dim)' } : {}}
               />
             )}
           </div>
@@ -420,7 +447,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
       <button
         type="submit"
         disabled={loading}
-        className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+        className="btn-brass disabled:opacity-50 px-4 py-2 rounded-lg text-sm font-medium"
       >
         {loading ? "Loading..." : submitLabel}
       </button>

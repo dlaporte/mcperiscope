@@ -25,7 +25,7 @@ function App() {
         {activeTab === "optimize" && connected && <OptimizeTab />}
         {activeTab === "results" && connected && <ResultsTab />}
         {!connected && activeTab !== "connect" && (
-          <div className="flex items-center justify-center h-full text-gray-500">
+          <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>
             Connect to an MCP server first
           </div>
         )}

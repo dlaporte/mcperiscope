@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 interface MetricSet {
   tool_count?: number;
   menu_tokens?: number;
@@ -67,10 +65,10 @@ const rows: RowDef[] = [
   },
 ];
 
-function deltaColor(delta: number | undefined, lowerBetter: boolean): string {
-  if (delta == null || delta === 0) return "text-gray-400";
+function deltaStyle(delta: number | undefined, lowerBetter: boolean): React.CSSProperties {
+  if (delta == null || delta === 0) return { color: 'var(--sub-text-dim)' };
   const improved = lowerBetter ? delta < 0 : delta > 0;
-  return improved ? "text-green-400" : "text-red-400";
+  return { color: improved ? 'var(--sub-phosphor)' : 'var(--sub-red)' };
 }
 
 function formatDelta(delta: number | undefined, row: RowDef): string {
@@ -88,20 +86,20 @@ function formatDelta(delta: number | undefined, row: RowDef): string {
 
 export function ComparisonTable({ data }: Props) {
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-700">
-        <h3 className="text-lg font-semibold text-white">Before / After Comparison</h3>
+    <div className="panel-riveted rounded-lg overflow-hidden">
+      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
+        <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>Before / After Comparison</h3>
         {data.accuracy_warning && (
-          <p className="text-sm text-yellow-400 mt-1">{data.accuracy_warning}</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--sub-brass)' }}>{data.accuracy_warning}</p>
         )}
       </div>
       <table className="w-full">
         <thead>
-          <tr className="text-gray-400 text-sm border-b border-gray-700">
-            <th className="text-left px-4 py-2 font-medium">Metric</th>
-            <th className="text-right px-4 py-2 font-medium">Baseline</th>
-            <th className="text-right px-4 py-2 font-medium">Optimized</th>
-            <th className="text-right px-4 py-2 font-medium">Delta</th>
+          <tr className="text-sm" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
+            <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Metric</th>
+            <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Baseline</th>
+            <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Optimized</th>
+            <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Delta</th>
           </tr>
         </thead>
         <tbody>
@@ -112,19 +110,22 @@ export function ComparisonTable({ data }: Props) {
             return (
               <tr
                 key={row.key}
-                className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                style={{ borderBottom: '1px solid rgba(74,78,80,0.5)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
-                <td className="px-4 py-2.5 text-gray-300 font-medium">
+                <td className="px-4 py-2.5 font-medium" style={{ color: 'var(--sub-text)' }}>
                   {row.label}
                 </td>
-                <td className="px-4 py-2.5 text-right text-gray-300 font-mono text-sm">
+                <td className="px-4 py-2.5 text-right font-mono text-sm" style={{ color: 'var(--sub-text)' }}>
                   {row.format(baseline)}
                 </td>
-                <td className="px-4 py-2.5 text-right text-gray-300 font-mono text-sm">
+                <td className="px-4 py-2.5 text-right font-mono text-sm" style={{ color: 'var(--sub-text)' }}>
                   {row.format(proxy)}
                 </td>
                 <td
-                  className={`px-4 py-2.5 text-right font-mono text-sm font-semibold ${deltaColor(delta, !!row.lowerBetter)}`}
+                  className="px-4 py-2.5 text-right font-mono text-sm font-semibold"
+                  style={deltaStyle(delta, !!row.lowerBetter)}
                 >
                   {formatDelta(delta, row)}
                 </td>

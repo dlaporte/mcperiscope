@@ -11,7 +11,7 @@ function DetailPanel() {
 
   if (!connected) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--sub-text-dim)' }}>
         <div className="text-center">
           <p className="text-2xl mb-2">MCP Periscope</p>
           <p className="text-sm">
@@ -24,7 +24,7 @@ function DetailPanel() {
 
   if (!selection) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--sub-text-dim)' }}>
         <p className="text-sm">Select a tool, resource, or prompt from the sidebar.</p>
       </div>
     );
