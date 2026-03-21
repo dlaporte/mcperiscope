@@ -434,8 +434,38 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       await consumeConnectSSE(response, set, get);
+
+      // Fallback: if SSE completed but we're still not connected, poll status
+      if (!get().connected) {
+        const statusRes = await api.status();
+        if (statusRes.connected) {
+          set({
+            connected: true,
+            connecting: false,
+            serverInfo: statusRes.serverInfo,
+            connectProgress: null,
+            oauthPending: false,
+          });
+          await fetchCapabilities(set);
+        }
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      // Check if backend actually connected despite the error
+      try {
+        const statusRes = await api.status();
+        if (statusRes.connected) {
+          set({
+            connected: true,
+            connecting: false,
+            serverInfo: statusRes.serverInfo,
+            connectProgress: null,
+            oauthPending: false,
+          });
+          await fetchCapabilities(set);
+          return;
+        }
+      } catch { /* ignore */ }
       set({ connecting: false, oauthPending: false, error: message, connectProgress: null });
     }
   },

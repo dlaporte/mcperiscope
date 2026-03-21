@@ -92,14 +92,35 @@ async def _do_connect():
     _tools = await _client.list_tools()
 
 
-async def complete_oauth(callback_url: str) -> dict:
-    """Complete OAuth by providing the callback URL from the frontend."""
+async def complete_oauth(callback_url_or_code: str) -> dict:
+    """Complete OAuth by providing the callback URL or bare code from the frontend."""
     global _tools
 
     if not _auth:
         raise ValueError("No OAuth flow in progress")
 
-    _auth.supply_callback_url(callback_url)
+    # Handle both full URL and bare code
+    from urllib.parse import urlparse, parse_qs, urlencode
+
+    if "://" in callback_url_or_code and "code=" in callback_url_or_code:
+        # Full callback URL — use as-is
+        _auth.supply_callback_url(callback_url_or_code)
+    else:
+        # Bare code (or URL without code param) — construct a callback URL
+        # Extract state from the pending auth URL if available
+        state = None
+        if _auth.pending_auth_url:
+            parsed_auth = urlparse(_auth.pending_auth_url)
+            auth_params = parse_qs(parsed_auth.query)
+            state = auth_params.get("state", [None])[0]
+
+        # Build a synthetic callback URL
+        code = callback_url_or_code.strip()
+        params = {"code": code}
+        if state:
+            params["state"] = state
+        synthetic_url = f"http://localhost/callback?{urlencode(params)}"
+        _auth.supply_callback_url(synthetic_url)
 
     # Wait for the connection to complete
     for _ in range(300):

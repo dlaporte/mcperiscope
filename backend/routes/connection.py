@@ -53,8 +53,8 @@ async def status():
         "connected": mcp_manager.is_connected(),
         "serverInfo": mcp_manager.server_info(),
         "oauthPending": (
-            mcp_manager._oauth_provider is not None
-            and mcp_manager._oauth_provider.pending_authorization_url is not None
+            mcp_manager._auth is not None
+            and mcp_manager._auth.pending_auth_url is not None
             and not mcp_manager.is_connected()
         ),
     }

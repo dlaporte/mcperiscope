@@ -36,17 +36,10 @@ async def auth_callback(req: OAuthCallbackRequest):
         # Step 2: Exchange OAuth code and reconnect
         yield _sse("progress", {"message": "Exchanging authorization code..."})
         try:
-            # Extract the code from the callback URL
-            from urllib.parse import urlparse, parse_qs
-            parsed = urlparse(req.callback_url)
-            params = parse_qs(parsed.query)
-            code = params.get("code", [None])[0]
-            if not code:
-                yield _sse("error", {"message": "No authorization code found in callback URL"})
-                return
-
+            # The callback_url might be a full URL or just the code
+            callback = req.callback_url
             yield _sse("progress", {"message": "Connecting to MCP server..."})
-            result = await mcp_manager.complete_oauth(code)
+            result = await mcp_manager.complete_oauth(callback)
         except Exception as e:
             yield _sse("error", {"message": f"OAuth completion failed: {e}"})
             return
@@ -71,7 +64,7 @@ async def auth_callback(req: OAuthCallbackRequest):
 async def auth_status():
     return {
         "connected": mcp_manager.is_connected(),
-        "oauthPending": mcp_manager._oauth_provider is not None
-            and mcp_manager._oauth_provider.pending_authorization_url is not None
+        "oauthPending": mcp_manager._auth is not None
+            and mcp_manager._auth.pending_auth_url is not None
             and not mcp_manager.is_connected(),
     }
