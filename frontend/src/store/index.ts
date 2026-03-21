@@ -10,7 +10,21 @@ interface Selection {
   item: any;
 }
 
+export interface ParamEntry {
+  value: string | number | boolean;
+  context: Record<string, unknown>; // sibling fields from the same object
+  source: string; // tool/resource name that produced this
+}
+
+
+export type Tab = "connect" | "explore" | "optimize" | "results";
+
 interface AppState {
+  // Navigation
+  activeTab: Tab;
+  setActiveTab: (tab: Tab) => void;
+  navigateToTool: (toolName: string, args?: Record<string, unknown>) => void;
+
   // Connection
   connected: boolean;
   connecting: boolean;
@@ -41,9 +55,10 @@ interface AppState {
   result: any;
   resultLoading: boolean;
 
-  // Parameter Store
-  parameterStore: Record<string, unknown>;
+  // Parameter Store — each key holds an array of entries with context
+  parameterStore: Record<string, ParamEntry[]>;
   parameterAliases: Record<string, string>; // field name → store key
+  removedAliases: Set<string>; // field names where user explicitly removed an auto-alias
 
   // Optimize
   evalResults: Array<{
@@ -117,6 +132,9 @@ function lsSet(key: string, value: string) {
 }
 
 const ALIASES_KEY = LS_PREFIX + "param-aliases";
+const PARAMS_KEY = LS_PREFIX + "param-store";
+
+const REMOVED_ALIASES_KEY = LS_PREFIX + "removed-aliases";
 
 function loadAliases(): Record<string, string> {
   try {
@@ -128,6 +146,62 @@ function loadAliases(): Record<string, string> {
 
 function saveAliases(aliases: Record<string, string>) {
   localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases));
+}
+
+function loadRemovedAliases(): Set<string> {
+  try {
+    const raw = localStorage.getItem(REMOVED_ALIASES_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function saveRemovedAliases(removed: Set<string>) {
+  localStorage.setItem(REMOVED_ALIASES_KEY, JSON.stringify([...removed]));
+}
+
+function loadParamStore(): Record<string, ParamEntry[]> {
+  try {
+    const raw = localStorage.getItem(PARAMS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migrate old format: Record<string, scalar> → Record<string, ParamEntry[]>
+      const migrated: Record<string, ParamEntry[]> = {};
+      for (const [key, val] of Object.entries(parsed)) {
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && "value" in val[0]) {
+          // Already new format
+          migrated[key] = val as ParamEntry[];
+        } else if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+          // Old format — wrap in ParamEntry
+          migrated[key] = [{ value: val, context: {}, source: "migrated" }];
+        }
+        // Skip non-scalar, non-array values
+      }
+      return migrated;
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveParamStore(store: Record<string, ParamEntry[]>) {
+  try {
+    localStorage.setItem(PARAMS_KEY, JSON.stringify(store));
+  } catch { /* ignore — may exceed quota */ }
+}
+
+function addParamEntry(
+  store: Record<string, ParamEntry[]>,
+  key: string,
+  entry: ParamEntry,
+): void {
+  const existing = store[key] ?? [];
+  // Don't add duplicate values
+  const isDuplicate = existing.some(
+    (e) => String(e.value) === String(entry.value)
+  );
+  if (!isDuplicate) {
+    store[key] = [...existing, entry];
+  }
 }
 
 function buildAuthConfig(state: AppState): AuthConfig | undefined {
@@ -220,6 +294,26 @@ async function consumeConnectSSE(
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  activeTab: "connect" as Tab,
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  navigateToTool: (toolName, args) => {
+    const tool = get().tools.find((t: any) => t.name === toolName);
+    if (tool) {
+      // Select the tool and switch to Explore
+      set({ selection: { type: "tool", item: tool }, activeTab: "explore", result: null });
+      // If args provided, seed them into the parameter store
+      if (args) {
+        const store = structuredClone(get().parameterStore);
+        for (const [k, v] of Object.entries(args)) {
+          if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+            addParamEntry(store, k, { value: v, context: args as Record<string, unknown>, source: "optimize" });
+          }
+        }
+        saveParamStore(store);
+        set({ parameterStore: store });
+      }
+    }
+  },
   connected: false,
   connecting: false,
   serverInfo: null,
@@ -240,8 +334,9 @@ export const useStore = create<AppState>((set, get) => ({
   selection: null,
   result: null,
   resultLoading: false,
-  parameterStore: {},
+  parameterStore: loadParamStore(),
   parameterAliases: loadAliases(),
+  removedAliases: loadRemovedAliases(),
   evalResults: [],
   selectedEvalIndex: null,
   evalLoading: false,
@@ -349,6 +444,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // ignore
     }
+    saveParamStore({});
     set({
       connected: false,
       serverInfo: null,
@@ -403,24 +499,29 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   harvestParams: (values) => {
-    const store = { ...get().parameterStore };
+    const store = structuredClone(get().parameterStore);
     for (const [k, v] of Object.entries(values)) {
-      if (v !== "" && v !== undefined && v !== null) {
-        store[k] = v;
+      if (v !== "" && v !== undefined && v !== null && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")) {
+        addParamEntry(store, k, { value: v, context: values, source: "form input" });
       }
     }
+    saveParamStore(store);
     set({ parameterStore: store });
   },
 
   harvestResultParams: (result) => {
     if (!result) return;
-    const store = { ...get().parameterStore };
-    // Handle MCP result shapes: { content: [...] }, { messages: [...] }, or direct object
+    const store = structuredClone(get().parameterStore);
+    const source = get().selection?.item?.name ?? "unknown";
+
+    // Extract text blocks from MCP result shapes
     const textBlocks: string[] = [];
     const contents = result.content ?? result.contents;
     if (Array.isArray(contents)) {
       for (const block of contents) {
         if (block.type === "text" && typeof block.text === "string") {
+          textBlocks.push(block.text);
+        } else if (typeof block.text === "string") {
           textBlocks.push(block.text);
         }
       }
@@ -432,13 +533,44 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
     }
+
+    function harvestObject(obj: Record<string, unknown>) {
+      const context: Record<string, unknown> = {};
+      // Build context from all scalar fields
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          context[k] = v;
+        }
+      }
+      // Add each scalar as a param entry with full context
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          addParamEntry(store, k, { value: v, context, source });
+        }
+      }
+    }
+
     for (const text of textBlocks) {
       try {
         const parsed = JSON.parse(text);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          for (const [k, v] of Object.entries(parsed)) {
-            if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-              store[k] = v;
+        if (Array.isArray(parsed)) {
+          // Array of objects — harvest from each item
+          for (const item of parsed) {
+            if (item && typeof item === "object" && !Array.isArray(item)) {
+              harvestObject(item as Record<string, unknown>);
+            }
+          }
+        } else if (parsed && typeof parsed === "object") {
+          // Single object — harvest directly
+          harvestObject(parsed as Record<string, unknown>);
+          // Also check nested arrays (e.g., { scouts: [...], summary: {...} })
+          for (const v of Object.values(parsed)) {
+            if (Array.isArray(v)) {
+              for (const item of v) {
+                if (item && typeof item === "object" && !Array.isArray(item)) {
+                  harvestObject(item as Record<string, unknown>);
+                }
+              }
             }
           }
         }
@@ -446,22 +578,31 @@ export const useStore = create<AppState>((set, get) => ({
         // not JSON, skip
       }
     }
+    saveParamStore(store);
     set({ parameterStore: store });
   },
 
-  clearParamStore: () => set({ parameterStore: {} }),
+  clearParamStore: () => { saveParamStore({}); set({ parameterStore: {} as Record<string, ParamEntry[]> }); },
 
   addParamAlias: (fieldName, storeKey) => {
     const aliases = { ...get().parameterAliases, [fieldName]: storeKey };
+    // Remove from the "removed" set since user is explicitly adding it
+    const removed = new Set(get().removedAliases);
+    removed.delete(fieldName);
     saveAliases(aliases);
-    set({ parameterAliases: aliases });
+    saveRemovedAliases(removed);
+    set({ parameterAliases: aliases, removedAliases: removed });
   },
 
   removeParamAlias: (fieldName) => {
     const aliases = { ...get().parameterAliases };
     delete aliases[fieldName];
+    // Track that user explicitly removed this so it won't be auto-added again
+    const removed = new Set(get().removedAliases);
+    removed.add(fieldName);
     saveAliases(aliases);
-    set({ parameterAliases: aliases });
+    saveRemovedAliases(removed);
+    set({ parameterAliases: aliases, removedAliases: removed });
   },
 
   // Optimize actions
@@ -604,10 +745,21 @@ export const useStore = create<AppState>((set, get) => ({
   runOptimize: async () => {
     set({ optimizeRunning: true });
     try {
-      await api.runOptimize();
-      set({ optimizeRunning: false });
-    } catch {
-      set({ optimizeRunning: false });
+      const result = await api.runOptimize();
+      // Fetch results and navigate to Results tab
+      const [comparison, recs] = await Promise.allSettled([
+        api.getComparison(),
+        api.getRecommendations(),
+      ]);
+      set({
+        optimizeRunning: false,
+        comparison: comparison.status === "fulfilled" ? comparison.value : null,
+        recommendations: recs.status === "fulfilled" ? (recs.value as any)?.recommendations ?? recs.value : [],
+        activeTab: "results",
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ optimizeRunning: false, error: message });
     }
   },
 

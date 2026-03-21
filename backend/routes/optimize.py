@@ -208,6 +208,7 @@ async def rate(req: RatingRequest):
     }
 
     rating_entry = {
+        "prompt_index": req.prompt_index,
         "prompt": session.eval_results[req.prompt_index]["prompt"],
         "correctness": req.correctness,
         "notes": req.notes,

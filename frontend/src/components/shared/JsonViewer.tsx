@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Props {
   data: unknown;
@@ -129,7 +130,7 @@ export function JsonViewer({ data }: Props) {
 
       {formatted && extracted ? (
         <div className="bg-gray-900 p-4 rounded-lg overflow-auto text-sm max-h-[600px] prose prose-invert prose-sm max-w-none">
-          <Markdown>{extracted.text}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]}>{extracted.text}</Markdown>
         </div>
       ) : (
         <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto text-sm max-h-[600px]">

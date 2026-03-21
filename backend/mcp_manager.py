@@ -13,16 +13,29 @@ logger = logging.getLogger(__name__)
 
 async def connect(url: str, auth_config: AuthConfig | None = None) -> dict:
     """Connect to an MCP server. Returns status dict."""
+    # Clean up any previous connection (ignore errors from broken ones)
     if session.connection:
-        await session.connection.disconnect()
+        try:
+            await session.connection.disconnect()
+        except Exception:
+            pass
+    session.connection = None
     session.reset()
 
-    session.connection = MCPConnection(url)
+    conn = MCPConnection(url)
 
-    # TODO: For bearer/header auth, extend MCPConnection to accept custom headers
-    # For now, OAuth and no-auth are supported
+    try:
+        tools, auth_url = await conn.connect_with_auth_url()
+    except Exception:
+        # Don't leave a broken connection in session
+        try:
+            await conn.disconnect()
+        except Exception:
+            pass
+        raise
 
-    tools, auth_url = await session.connection.connect_with_auth_url()
+    # Only store the connection after successful connect
+    session.connection = conn
 
     if auth_url:
         return {

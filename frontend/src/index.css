@@ -1,2 +1,21 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+/* Ensure markdown tables render properly in dark prose */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.prose th,
+.prose td {
+  border: 1px solid #374151;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.prose th {
+  background-color: rgba(55, 65, 81, 0.5);
+  font-weight: 600;
+}
+.prose tr:nth-child(even) {
+  background-color: rgba(55, 65, 81, 0.2);
+}

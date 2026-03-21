@@ -1,6 +1,21 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useStore } from "../../store";
+
+function ToolLink({ name, args }: { name: string; args?: Record<string, unknown> }) {
+  const navigateToTool = useStore((s) => s.navigateToTool);
+  return (
+    <button
+      type="button"
+      onClick={() => navigateToTool(name, args)}
+      className="text-sm font-mono font-medium text-blue-300 hover:text-blue-200 hover:underline cursor-pointer"
+      title="View in Explore tab"
+    >
+      {name}
+    </button>
+  );
+}
 
 interface ToolChainStep {
   step: number;
@@ -115,9 +130,7 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">#{step.step}</span>
-            <span className="text-sm font-mono font-medium text-blue-300">
-              {step.tool}
-            </span>
+            <ToolLink name={step.tool} args={step.input} />
           </div>
           {isLoading ? (
             <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -194,7 +207,7 @@ export function ToolChainViewer() {
             Final Answer
           </span>
           <div className="mt-2 text-sm text-gray-200 prose prose-sm prose-invert max-w-none">
-            <Markdown>{evalResult.answer}</Markdown>
+            <Markdown remarkPlugins={[remarkGfm]}>{evalResult.answer}</Markdown>
           </div>
         </div>
       ) : (

@@ -1,12 +1,26 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore } from "../../store";
+import type { ParamEntry } from "../../store";
 import { SchemaForm } from "../shared/SchemaForm";
 import { JsonViewer } from "../shared/JsonViewer";
 import { ToolStats } from "./ToolStats";
 
+/** Flatten multi-value param store to simple key→value using first entry per key */
+function flattenParamStore(store: Record<string, ParamEntry[]>): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  for (const [key, entries] of Object.entries(store)) {
+    if (entries.length > 0) {
+      flat[key] = entries[0].value;
+    }
+  }
+  return flat;
+}
+
 export function ToolDetail() {
   const { selection, callTool, result, resultLoading, parameterStore, harvestParams, harvestResultParams } = useStore();
   const tool = selection?.item;
+
+  const flatParams = useMemo(() => flattenParamStore(parameterStore), [parameterStore]);
 
   useEffect(() => {
     if (result) harvestResultParams(result);
@@ -40,7 +54,7 @@ export function ToolDetail() {
           onSubmit={handleSubmit}
           submitLabel="Invoke Tool"
           loading={resultLoading}
-          initialValues={parameterStore}
+          initialValues={flatParams}
         />
       </div>
 

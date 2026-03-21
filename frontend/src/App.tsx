@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useStore } from "./store";
 import { TabBar } from "./components/layout/TabBar";
 import { ConnectTab } from "./components/connect/ConnectTab";
@@ -7,10 +6,9 @@ import { OptimizeTab } from "./components/optimize/OptimizeTab";
 import { ResultsTab } from "./components/results/ResultsTab";
 import { OAuthCallback } from "./components/shared/OAuthCallback";
 
-type Tab = "connect" | "explore" | "optimize" | "results";
-
 function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("connect");
+  const activeTab = useStore((s) => s.activeTab);
+  const setActiveTab = useStore((s) => s.setActiveTab);
   const connected = useStore((s) => s.connected);
 
   // Handle OAuth callback route

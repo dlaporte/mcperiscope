@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../../store";
+import type { ParamEntry } from "../../store";
 
 interface JsonSchema {
   type?: string;
@@ -13,6 +14,111 @@ interface Props {
   submitLabel: string;
   loading?: boolean;
   initialValues?: Record<string, unknown>;
+}
+
+function formatContextHint(entry: ParamEntry): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(entry.context)) {
+    if (String(v) !== String(entry.value) && (typeof v === "string" || typeof v === "number")) {
+      parts.push(`${k}: ${v}`);
+    }
+  }
+  if (parts.length === 0) return String(entry.value);
+  return parts.join(", ");
+}
+
+function ValuePicker({
+  fieldKey,
+  entries,
+  currentValue,
+  onSelect,
+}: {
+  fieldKey: string;
+  entries: ParamEntry[];
+  currentValue: unknown;
+  onSelect: (value: string | number | boolean) => void;
+}) {
+  // Use a key-scoped ID to keep dropdown state stable across re-renders
+  const [openField, setOpenField] = useState<string | null>(null);
+  const open = openField === fieldKey;
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      // Delay check so the button click can process first
+      setTimeout(() => {
+        if (ref.current && !ref.current.contains(e.target as Node)) {
+          setOpenField(null);
+        }
+      }, 0);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const sortedEntries = useMemo(
+    () => [...entries].sort((a, b) => String(a.value).localeCompare(String(b.value))),
+    [entries]
+  );
+
+  if (sortedEntries.length <= 1) return null;
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => setOpenField(open ? null : fieldKey)}
+        className="text-[10px] text-blue-400 hover:text-blue-300 ml-1.5 tabular-nums"
+        title="Pick from stored values"
+      >
+        {sortedEntries.length} values
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl min-w-[300px] max-h-60 overflow-y-auto">
+          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-gray-700">
+            Select a value
+          </div>
+          {sortedEntries.map((entry, i) => {
+            const isSelected = String(entry.value) === String(currentValue);
+            const hint = formatContextHint(entry);
+            return (
+              <button
+                key={i}
+                type="button"
+                className={`w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-b-0 ${
+                  isSelected ? "bg-blue-900/30" : ""
+                }`}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => {
+                  onSelect(entry.value);
+                  setOpenField(null);
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-white shrink-0">
+                    {String(entry.value).length > 40
+                      ? String(entry.value).slice(0, 40) + "..."
+                      : String(entry.value)}
+                  </span>
+                  {isSelected && (
+                    <span className="text-[10px] text-blue-400">current</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-gray-500 mt-0.5 truncate">
+                  {hint}
+                </div>
+                <div className="text-[10px] text-gray-600 mt-0.5">
+                  from {entry.source}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function LinkDropdown({
@@ -59,7 +165,7 @@ function LinkDropdown({
       {open && (
         <div className="absolute left-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl min-w-[220px] max-h-48 overflow-y-auto">
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-gray-700">
-            Map store param to "{fieldName}"
+            Map store param to &quot;{fieldName}&quot;
           </div>
           {storeEntries.map(([storeKey, value]) => (
             <button
@@ -84,26 +190,91 @@ function LinkDropdown({
 export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValues }: Props) {
   const properties = schema.properties || {};
   const required = new Set(schema.required || []);
-  const { parameterAliases, addParamAlias } = useStore();
+  const { parameterStore, parameterAliases, removedAliases, addParamAlias } = useStore();
 
-  // Resolve values: exact match first, then alias lookup
+  // Convert between naming conventions
+  function toCamelCase(s: string): string {
+    return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  }
+  function toSnakeCase(s: string): string {
+    return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+  }
+
+  // Resolve the store key for each field — pick the key with the most entries
+  function resolveStoreKey(fieldKey: string): string | null {
+    const candidates: [string, number][] = [];
+
+    const check = (k: string) => {
+      if (k in parameterStore && parameterStore[k]?.length > 0) {
+        candidates.push([k, parameterStore[k].length]);
+      }
+    };
+
+    // Exact match
+    check(fieldKey);
+    // Alias
+    const aliasKey = parameterAliases[fieldKey];
+    if (aliasKey) check(aliasKey);
+    // camelCase ↔ snake_case
+    const camel = toCamelCase(fieldKey);
+    if (camel !== fieldKey) check(camel);
+    const snake = toSnakeCase(fieldKey);
+    if (snake !== fieldKey) check(snake);
+
+    if (candidates.length === 0) return null;
+    // Return the key with the most entries
+    candidates.sort((a, b) => b[1] - a[1]);
+    return candidates[0][0];
+  }
+
+  // Resolve values: exact match, alias, or case variation
+  // Auto-creates aliases for case-variation matches (unless user removed them)
   const seeded = useMemo(() => {
     if (!initialValues) return {};
     const out: Record<string, any> = {};
+    const tryValue = (k: string) => {
+      const v = initialValues[k];
+      return v !== undefined && v !== null && v !== "" ? v : undefined;
+    };
     for (const key of Object.keys(properties)) {
-      // Exact match
-      if (key in initialValues && initialValues[key] !== undefined && initialValues[key] !== null && initialValues[key] !== "") {
-        out[key] = initialValues[key];
-        continue;
-      }
-      // Alias match
+      const exact = tryValue(key);
+      if (exact !== undefined) { out[key] = exact; continue; }
+      // Alias
       const aliasKey = parameterAliases[key];
-      if (aliasKey && aliasKey in initialValues && initialValues[aliasKey] !== undefined && initialValues[aliasKey] !== null && initialValues[aliasKey] !== "") {
-        out[key] = initialValues[aliasKey];
+      if (aliasKey) {
+        const aliased = tryValue(aliasKey);
+        if (aliased !== undefined) { out[key] = aliased; continue; }
+      }
+      // Case variations — auto-create alias if not explicitly removed
+      if (!removedAliases.has(key)) {
+        const camel = toCamelCase(key);
+        if (camel !== key) {
+          const v = tryValue(camel);
+          if (v !== undefined) {
+            // Auto-create the alias so it shows in Mappings and can be removed
+            if (!(key in parameterAliases)) {
+              addParamAlias(key, camel);
+            }
+            out[key] = v;
+            continue;
+          }
+        }
+        const snake = toSnakeCase(key);
+        if (snake !== key) {
+          const v = tryValue(snake);
+          if (v !== undefined) {
+            if (!(key in parameterAliases)) {
+              addParamAlias(key, snake);
+            }
+            out[key] = v;
+            continue;
+          }
+        }
       }
     }
     return out;
-  }, [initialValues, properties, parameterAliases]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialValues, properties, parameterAliases, removedAliases]);
 
   const autoFilledKeys = useMemo(() => new Set(Object.keys(seeded)), [seeded]);
 
@@ -138,7 +309,6 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
   // For the link dropdown: store entries that didn't exact-match this field
   const getUnmatchedStoreEntries = (fieldKey: string): [string, unknown][] => {
     if (!initialValues) return [];
-    // Field already has an exact match or is already filled — no need to show
     if (fieldKey in initialValues) return [];
     if (values[fieldKey] !== undefined && values[fieldKey] !== "") return [];
     return Object.entries(initialValues).filter(
@@ -174,10 +344,12 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
       {Object.entries(properties).map(([key, prop]: [string, any]) => {
         const unmatchedEntries = getUnmatchedStoreEntries(key);
         const hasAlias = key in parameterAliases;
+        const storeKey = resolveStoreKey(key);
+        const multiEntries = storeKey ? (parameterStore[storeKey] ?? []) : [];
 
         return (
           <div key={key}>
-            <label className="flex items-center text-sm font-medium text-gray-300 mb-1">
+            <label className="flex items-center flex-wrap text-sm font-medium text-gray-300 mb-1">
               {key}
               {required.has(key) && <span className="text-red-400 ml-1">*</span>}
               {isAutoFilled(key) && (
@@ -185,11 +357,19 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
                   auto{hasAlias ? ` (${parameterAliases[key]})` : ""}
                 </span>
               )}
+              {multiEntries.length > 1 && (
+                <ValuePicker
+                  fieldKey={key}
+                  entries={multiEntries}
+                  currentValue={values[key]}
+                  onSelect={(v) => handleChange(key, v)}
+                />
+              )}
               {unmatchedEntries.length > 0 && (
                 <LinkDropdown
                   fieldName={key}
                   storeEntries={unmatchedEntries}
-                  onSelect={(storeKey, value) => handleMapParam(key, storeKey, value)}
+                  onSelect={(sk, value) => handleMapParam(key, sk, value)}
                 />
               )}
               {prop.description && (

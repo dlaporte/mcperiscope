@@ -110,9 +110,9 @@ export function ConnectTab() {
 
   const isOpen = showDropdown && matches.length > 0 && !connected && !connecting;
 
-  const handleConnect = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (url.trim()) {
+  // Save to history only after successful connection
+  useEffect(() => {
+    if (connected && url.trim()) {
       addToHistory(url.trim());
       cacheAuthForUrl(url.trim(), {
         method: authMethod,
@@ -121,6 +121,13 @@ export function ConnectTab() {
         headerValue: headerValue || undefined,
       });
       setHistoryVersion((v) => v + 1);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
+  const handleConnect = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (url.trim()) {
       setShowDropdown(false);
       connect(url.trim());
     }
@@ -316,20 +323,6 @@ export function ConnectTab() {
             </div>
           )}
 
-          {/* Connection Info */}
-          {connected && serverInfo != null && (
-            <div className="mt-4 p-3 bg-gray-900 rounded-lg flex items-center gap-3">
-              <div className="text-sm text-gray-300">
-                <span className="text-gray-500">Server:</span>{" "}
-                <span className="font-mono">{(serverInfo as any)?.url || "Connected"}</span>
-              </div>
-              {(serverInfo as any)?.toolCount != null && (
-                <span className="text-xs bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded-full">
-                  {(serverInfo as any).toolCount} tools
-                </span>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

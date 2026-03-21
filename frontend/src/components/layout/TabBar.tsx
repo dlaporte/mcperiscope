@@ -1,4 +1,4 @@
-type Tab = "connect" | "explore" | "optimize" | "results";
+import type { Tab } from "../../store";
 
 interface TabBarProps {
   active: Tab;

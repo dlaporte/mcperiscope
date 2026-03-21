@@ -27,7 +27,7 @@ export function ToolStats({ toolName }: Props) {
     setError(null);
     setStats(null);
 
-    fetch(`/api/analyze/tool/${encodeURIComponent(toolName)}`)
+    fetch(`/api/analysis/tool/${encodeURIComponent(toolName)}`)
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
