@@ -80,12 +80,20 @@ async def evaluate(req: EvaluateRequest):
             })
 
         # Build conversation history from previous evaluations
+        # Include the FULL message history (tool calls + results) to mirror
+        # real-world behavior where tool responses accumulate in context
         messages = []
         for prev in session.eval_results:
-            if prev.get("answer"):
+            raw = prev.get("raw_messages")
+            if raw:
+                # Replay the full conversation including tool calls/results
+                messages.extend(raw)
+            elif prev.get("answer"):
+                # Fallback: just prompt + answer (older evals without raw_messages)
                 messages.append({"role": "user", "content": prev["prompt"]})
                 messages.append({"role": "assistant", "content": prev["answer"]})
         messages.append({"role": "user", "content": req.prompt})
+        this_eval_start = len(messages) - 1  # Index where this eval's messages begin
         tool_chain: list[dict] = []
         trace_events: list[dict] = []
         step = 0
@@ -195,6 +203,16 @@ async def evaluate(req: EvaluateRequest):
         }
 
         # Capture the full context window contents for inspection
+        # At this point, `messages` contains the complete conversation:
+        # prior Q&A history + current prompt + all tool_use/tool_result rounds + final answer
+        # Add the final answer to messages
+        if final_answer:
+            messages.append({"role": "assistant", "content": final_answer})
+
+        # Extract this eval's messages (for replaying in future context)
+        this_eval_messages = messages[this_eval_start:]
+        full_messages = messages
+
         context_window = {
             "tools": [{"name": t["name"], "description": t["description"]} for t in tools],
             "tool_count": len(tools),
@@ -203,9 +221,9 @@ async def evaluate(req: EvaluateRequest):
                     "role": m["role"],
                     "content": _serialize_message_content(m["content"]),
                 }
-                for m in messages
+                for m in full_messages
             ],
-            "message_count": len(messages),
+            "message_count": len(full_messages),
         }
 
         eval_result = {
@@ -215,6 +233,7 @@ async def evaluate(req: EvaluateRequest):
             "traceEvents": trace_events,
             "usage": usage,
             "contextWindow": context_window,
+            "raw_messages": this_eval_messages,
         }
         session.eval_results.append(eval_result)
         session.traces.extend(trace_events)

@@ -1,10 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
 import { PromptInput } from "./PromptInput";
 import { EvalHistory } from "./EvalHistory";
 import { ToolChainViewer } from "./ToolChainViewer";
-import { RatingPanel } from "./RatingPanel";
+import { ContextModal } from "./ContextModal";
 
 const MODEL_CONTEXT: Record<string, number> = {
   "claude-opus-4-6": 1_000_000,
@@ -27,8 +27,11 @@ export function OptimizeTab() {
 
   const evalIncluded = useStore((s) => s.evalIncluded);
 
-  const includedRatedCount = evalResults.filter((e, i) => evalIncluded.has(i) && e.rating).length;
-  const canOptimize = includedRatedCount > 0 && !optimizeRunning;
+  const [showContext, setShowContext] = useState(false);
+
+  const includedCount = evalResults.filter((_, i) => evalIncluded.has(i)).length;
+  const canOptimize = includedCount > 0 && !optimizeRunning;
+  const latestEvalIndex = evalResults.length > 0 ? evalResults.length - 1 : null;
 
   // Compute context window usage — use peak_context_tokens from the most recent eval
   const tokenUsage = useMemo(() => {
@@ -46,11 +49,8 @@ export function OptimizeTab() {
       return { total: peakContext };
     }
 
-    // Before any prompts: the inventory estimate uses chars/4 which under-counts
-    // by ~1.6x for JSON-heavy tool definitions. Apply correction factor.
     const toolDefTokens = inventory?.total_budget_tokens ?? 0;
-    const corrected = Math.round(toolDefTokens * 1.6);
-    return { total: corrected };
+    return { total: toolDefTokens };
   }, [evalResults, inventory]);
 
   const contextWindow = MODEL_CONTEXT[model] ?? 200_000;
@@ -65,7 +65,7 @@ export function OptimizeTab() {
         <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
           Session usage
         </span>
-        <ContextGauge tokens={tokenUsage.total} max={contextWindow} />
+        <ContextGauge tokens={tokenUsage.total} max={contextWindow} onClick={latestEvalIndex !== null ? () => setShowContext(true) : undefined} />
       </div>
 
       <div className="flex-1 flex min-h-0">
@@ -85,10 +85,9 @@ export function OptimizeTab() {
           <EvalHistory />
         </div>
 
-        {/* Right panel: tool chain viewer + rating */}
+        {/* Right panel: tool chain viewer */}
         <div className="flex-1 flex flex-col min-h-0">
           <ToolChainViewer />
-          <RatingPanel />
         </div>
       </div>
 
@@ -126,9 +125,9 @@ export function OptimizeTab() {
           ) : (
             <>
               Optimize
-              {includedRatedCount > 0 && (
+              {includedCount > 0 && (
                 <span className="ml-2 text-xs opacity-75">
-                  ({includedRatedCount} included)
+                  ({includedCount} included)
                 </span>
               )}
             </>
@@ -136,6 +135,9 @@ export function OptimizeTab() {
         </button>
       </div>
 
+      {showContext && latestEvalIndex !== null && (
+        <ContextModal evalIndex={latestEvalIndex} totalTokens={tokenUsage.total} onClose={() => setShowContext(false)} />
+      )}
     </div>
   );
 }
