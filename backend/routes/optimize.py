@@ -279,6 +279,7 @@ async def run_optimize():
         proxy_port = None
         proxy_process = None
         proxy_tools = None
+        proxy_menu_tokens = 0
         if proxy_code:
             yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
             try:
@@ -291,12 +292,17 @@ async def run_optimize():
                     proxy_port = None
                     proxy_process = None
                 else:
-                    # Get proxy tool count
+                    # Get proxy tool list
                     from fastmcp import Client
                     proxy_client = Client(f"http://localhost:{proxy_port}/mcp")
                     async with proxy_client:
                         proxy_tools_list = await proxy_client.list_tools()
                         proxy_tools = len(proxy_tools_list)
+                        # Calculate proxy menu tokens
+                        proxy_menu_tokens = sum(
+                            len(f"{t.name}: {t.description or ''}") // 4 + len(json.dumps(t.inputSchema or {})) // 4
+                            for t in proxy_tools_list
+                        )
                     yield _sse("progress", {
                         "phase": "proxy",
                         "message": f"Proxy running with {proxy_tools} tools (was {len(session.tools)})"
@@ -413,60 +419,59 @@ async def run_optimize():
         # Use the same ratings for proxy (assume same correctness since same prompts)
         proxy_ratings = rated if proxy_traces else []
 
-        try:
-            comparison = compute_comparison(
-                baseline_traces=session.traces,
-                baseline_ratings=rated,
-                proxy_traces=proxy_traces,
-                proxy_ratings=proxy_ratings,
-                original_tools=session.tools,
-                proxy_tool_count=proxy_tool_count,
-            )
-            session.comparison = comparison
-        except Exception as e:
-            # Fallback: build comparison manually
-            baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in session.traces)
-            proxy_tokens = sum(t.get("tool_response_tokens_est", 0) for t in proxy_traces)
-            baseline_calls = len(session.traces)
-            proxy_calls = len(proxy_traces)
-            baseline_errors = sum(1 for t in session.traces if t.get("error_category"))
-            proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
+        # Build comparison from measured data
+        baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in session.traces)
+        proxy_tokens_total = sum(t.get("tool_response_tokens_est", 0) for t in proxy_traces)
+        baseline_calls = len(session.traces)
+        proxy_calls = len(proxy_traces)
+        baseline_errors = sum(1 for t in session.traces if t.get("error_category"))
+        proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
+        num_prompts = max(len(session.eval_results), 1)
 
-            num_prompts = len(session.eval_results) or 1
-            orig_menu = sum(len(json.dumps(t.inputSchema or {})) // 4 + len(f"{t.name}: {t.description or ''}") // 4 for t in session.tools)
+        orig_menu = sum(
+            len(f"{t.name}: {t.description or ''}") // 4 + len(json.dumps(t.inputSchema or {})) // 4
+            for t in session.tools
+        )
 
-            comparison = {
-                "baseline": {
-                    "tool_count": len(session.tools),
-                    "menu_tokens": orig_menu,
-                    "avg_tokens_per_prompt": round(baseline_tokens / num_prompts, 1),
-                    "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
-                    "accuracy": round(sum(1 for r in rated if r["correctness"] == "correct") / len(rated), 3) if rated else 0,
-                    "error_rate": round(baseline_errors / max(baseline_calls, 1), 3),
-                },
-                "proxy": {
-                    "tool_count": proxy_tool_count,
-                    "menu_tokens": 0,  # Would need proxy tool defs to calculate
-                    "avg_tokens_per_prompt": round(proxy_tokens / num_prompts, 1) if proxy_traces else 0,
-                    "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else 0,
-                    "accuracy": round(sum(1 for r in rated if r["correctness"] == "correct") / len(rated), 3) if rated else 0,
-                    "error_rate": round(proxy_errors / max(proxy_calls, 1), 3) if proxy_traces else 0,
-                },
-            }
-            # Add deltas
-            comparison["delta"] = {}
-            for key in comparison["baseline"]:
-                b = comparison["baseline"][key]
-                p = comparison["proxy"][key]
-                if isinstance(b, (int, float)) and isinstance(p, (int, float)) and b != 0:
-                    comparison["delta"][key] = {
-                        "value": round(p - b, 3),
-                        "pct": round((p - b) / b * 100, 1) if b else 0,
-                    }
+        correct_count = sum(1 for r in rated if r["correctness"] == "correct")
+        baseline_accuracy = round(correct_count / len(rated), 3) if rated else 0
 
-            if proxy_tool_count > 0 and proxy_tool_count < len(session.tools):
-                comparison["accuracy_warning"] = None
-            session.comparison = comparison
+        baseline = {
+            "tool_count": len(session.tools),
+            "menu_tokens": orig_menu,
+            "avg_tokens_per_prompt": round(baseline_tokens / num_prompts, 1),
+            "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
+            "accuracy": baseline_accuracy,
+            "error_rate": round(baseline_errors / max(baseline_calls, 1), 3),
+        }
+
+        proxy = {
+            "tool_count": proxy_tool_count if proxy_tool_count > 0 else None,
+            "menu_tokens": proxy_menu_tokens if proxy_menu_tokens > 0 else None,
+            "avg_tokens_per_prompt": round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None,
+            "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else None,
+            "accuracy": baseline_accuracy if proxy_traces else None,  # Same prompts, assume same correctness
+            "error_rate": round(proxy_errors / max(proxy_calls, 1), 3) if proxy_traces else None,
+        }
+
+        # Calculate deltas with percentages
+        delta = {}
+        for key in baseline:
+            b = baseline[key]
+            p = proxy[key]
+            if b is not None and p is not None and isinstance(b, (int, float)) and isinstance(p, (int, float)):
+                diff = round(p - b, 3)
+                pct = round((p - b) / b * 100, 1) if b != 0 else (0 if p == 0 else None)
+                delta[key] = {"value": diff, "pct": pct}
+
+        comparison = {"baseline": baseline, "proxy": proxy, "delta": delta}
+
+        # Warn if accuracy decreased
+        if proxy_traces and proxy.get("accuracy") is not None and baseline_accuracy > 0:
+            if proxy["accuracy"] < baseline_accuracy:
+                comparison["accuracy_warning"] = "Accuracy decreased after optimization — some recommendations may need to be reverted."
+
+        session.comparison = comparison
 
         yield _sse("progress", {"phase": "complete", "message": "Optimization complete!"})
 
