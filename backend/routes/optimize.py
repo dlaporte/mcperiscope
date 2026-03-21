@@ -51,6 +51,11 @@ async def evaluate(req: EvaluateRequest):
     from backend import mcp_manager as _mgr
     if not _mgr.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
+    # Use request API key/model as fallback (backend may have restarted)
+    if req.api_key and not session.api_key:
+        session.api_key = req.api_key
+    if req.model and session.model == "claude-sonnet-4-6":
+        session.model = req.model
     if not session.api_key:
         raise HTTPException(status_code=400, detail="Anthropic API key not configured")
     if not session.tools:
@@ -182,17 +187,34 @@ async def evaluate(req: EvaluateRequest):
             "total_tokens": total_input_tokens + total_output_tokens,
         }
 
+        # Capture the full context window contents for inspection
+        context_window = {
+            "tools": [{"name": t["name"], "description": t["description"]} for t in tools],
+            "tool_count": len(tools),
+            "messages": [
+                {
+                    "role": m["role"],
+                    "content": _serialize_message_content(m["content"]),
+                }
+                for m in messages
+            ],
+            "message_count": len(messages),
+        }
+
         eval_result = {
             "prompt": req.prompt,
             "answer": final_answer,
             "toolChain": tool_chain,
             "traceEvents": trace_events,
             "usage": usage,
+            "contextWindow": context_window,
         }
         session.eval_results.append(eval_result)
         session.traces.extend(trace_events)
         session.prompts.append(req.prompt)
 
+        # Don't include contextWindow in SSE — it's too large and breaks chunked parsing.
+        # It's stored in session.eval_results and can be fetched via API.
         yield _sse("done", {
             "prompt": req.prompt,
             "answer": final_answer,
@@ -207,6 +229,17 @@ async def evaluate(req: EvaluateRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/optimize/context/{index}")
+async def get_context(index: int):
+    """Get the context window data for a specific evaluation."""
+    if index < 0 or index >= len(session.eval_results):
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    ctx = session.eval_results[index].get("contextWindow")
+    if not ctx:
+        raise HTTPException(status_code=404, detail="No context window data")
+    return ctx
 
 
 @router.post("/optimize/rate")
@@ -755,6 +788,34 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen]:
     )
 
     return port, process
+
+
+def _serialize_message_content(content) -> str:
+    """Convert message content (string, list of blocks, or tool results) to readable text."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            btype = block.get("type", "")
+            if btype == "text":
+                parts.append(block.get("text", ""))
+            elif btype == "tool_use":
+                args = json.dumps(block.get("input", {}), indent=2)
+                parts.append(f"[Tool Call: {block.get('name', '?')}]\n{args}")
+            elif btype == "tool_result":
+                content_val = block.get("content", "")
+                parts.append(f"[Tool Result: {block.get('tool_use_id', '?')[:8]}...]\n{content_val}")
+            else:
+                parts.append(json.dumps(block, indent=2))
+        else:
+            parts.append(str(block))
+    return "\n\n".join(parts)
 
 
 def _sse(event: str, data: dict) -> str:

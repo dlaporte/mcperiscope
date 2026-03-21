@@ -1,9 +1,10 @@
 interface Props {
   tokens: number;
   max: number;
+  onClick?: () => void;
 }
 
-export function ContextGauge({ tokens, max }: Props) {
+export function ContextGauge({ tokens, max, onClick }: Props) {
   if (max <= 0) return null;
 
   const pct = (tokens / max) * 100;
@@ -53,9 +54,20 @@ export function ContextGauge({ tokens, max }: Props) {
       <span className="text-xs font-mono whitespace-nowrap phosphor-text">
         {pct.toFixed(1)}%
       </span>
-      <span className="text-xs whitespace-nowrap" style={{ color: "var(--sub-text-dim)" }}>
-        {tokens.toLocaleString()} / {(max / 1000).toFixed(0)}K
-      </span>
+      {onClick ? (
+        <button
+          onClick={onClick}
+          className="text-xs whitespace-nowrap cursor-pointer hover:underline"
+          style={{ color: "var(--sub-brass)" }}
+          title="View context window contents"
+        >
+          {tokens.toLocaleString()} / {(max / 1000).toFixed(0)}K
+        </button>
+      ) : (
+        <span className="text-xs whitespace-nowrap" style={{ color: "var(--sub-text-dim)" }}>
+          {tokens.toLocaleString()} / {(max / 1000).toFixed(0)}K
+        </span>
+      )}
     </div>
   );
 }

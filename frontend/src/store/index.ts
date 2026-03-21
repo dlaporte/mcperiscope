@@ -670,10 +670,11 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     try {
+      const { apiKey: storeApiKey, model: storeModel } = get();
       const response = await fetch("/api/optimize/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, api_key: storeApiKey || undefined, model: storeModel || undefined }),
       });
 
       if (!response.ok) {
@@ -740,6 +741,7 @@ export const useStore = create<AppState>((set, get) => ({
                     toolChain: data.toolChain,
                     traceEvents: data.traceEvents,
                     usage: data.usage,
+                    contextWindow: data.contextWindow,
                   };
                   return { evalResults, evalLoading: false };
                 });

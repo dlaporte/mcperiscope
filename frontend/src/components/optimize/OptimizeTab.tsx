@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
 import { PromptInput } from "./PromptInput";
 import { EvalHistory } from "./EvalHistory";
 import { ToolChainViewer } from "./ToolChainViewer";
 import { RatingPanel } from "./RatingPanel";
+import { ContextModal } from "./ContextModal";
 
 const MODEL_CONTEXT: Record<string, number> = {
   "claude-opus-4-6": 1_000_000,
@@ -25,8 +26,13 @@ export function OptimizeTab() {
   const inventory = useStore((s) => s.inventory);
   const model = useStore((s) => s.model);
 
+  const [showContext, setShowContext] = useState(false);
+
   const ratedCount = evalResults.filter((e) => e.rating).length;
   const canOptimize = ratedCount > 0 && !optimizeRunning;
+
+  // The latest eval index for context window fetch
+  const latestEvalIndex = evalResults.length > 0 ? evalResults.length - 1 : null;
 
   // Compute running token usage — use actual API counts when available
   const tokenUsage = useMemo(() => {
@@ -74,7 +80,7 @@ export function OptimizeTab() {
         <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
           Session usage
         </span>
-        <ContextGauge tokens={tokenUsage.total} max={contextWindow} />
+        <ContextGauge tokens={tokenUsage.total} max={contextWindow} onClick={latestEvalIndex !== null ? () => setShowContext(true) : undefined} />
         <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
           {tokenUsage.label}
         </span>
@@ -147,6 +153,10 @@ export function OptimizeTab() {
           )}
         </button>
       </div>
+
+      {showContext && latestEvalIndex !== null && (
+        <ContextModal evalIndex={latestEvalIndex} onClose={() => setShowContext(false)} />
+      )}
     </div>
   );
 }

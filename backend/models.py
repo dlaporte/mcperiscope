@@ -33,6 +33,8 @@ class PromptGetRequest(BaseModel):
 
 class EvaluateRequest(BaseModel):
     prompt: str
+    api_key: str | None = None
+    model: str | None = None
 
 
 class RatingRequest(BaseModel):

@@ -243,9 +243,6 @@ export function ToolChainViewer() {
                 style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
               >
                 {(() => {
-                  if (evalResult.usage?.total_tokens) {
-                    return `${evalResult.usage.total_tokens.toLocaleString()} tok`;
-                  }
                   let total = Math.ceil((evalResult.prompt?.length ?? 0) / 4);
                   for (const step of toolChain) {
                     const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});

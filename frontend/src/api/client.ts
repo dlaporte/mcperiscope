@@ -86,10 +86,10 @@ export const api = {
     request<unknown>("/analyze/tool-stats"),
 
   // === Optimize ===
-  evaluate: (prompt: string) =>
+  evaluate: (prompt: string, apiKey?: string, model?: string) =>
     request<unknown>("/optimize/evaluate", {
       method: "POST",
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, api_key: apiKey || undefined, model: model || undefined }),
     }),
 
   submitRating: (promptIndex: number, correctness: string, notes: string) =>
