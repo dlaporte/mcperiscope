@@ -139,11 +139,9 @@ async def evaluate(req: EvaluateRequest):
 
                 # Stream the LLM response — yields text deltas then final LLMResponse
                 response = None
-                streamed_text_len = 0
                 async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=max_tokens):
                     if isinstance(item, str):
-                        streamed_text_len += len(item)
-                        yield _sse("text_delta", {"text": item, "context_tokens": context_base + context_delta + streamed_text_len // 4})
+                        yield _sse("text_delta", {"text": item})
                     else:
                         # Final LLMResponse
                         response = item
