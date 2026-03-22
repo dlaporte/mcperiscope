@@ -346,24 +346,34 @@ async def rate(req: RatingRequest):
     }
 
 
+RESOURCE_REC_TYPES = {"resource_context_usage", "large_resource", "resource_consolidation"}
+
+
 def _deduplicate_recommendations():
-    """Remove quick wins that are covered by behavior recommendations."""
-    if not session.recommendations or not session.quick_wins:
+    """Remove quick wins that are covered by behavior recommendations.
+    Also remove resource recommendations if no resources are loaded."""
+    if not session.quick_wins:
         return
+
+    has_loaded_resources = bool(session.loaded_resources)
 
     # Build sets of affected tools from behavior recommendations
     rec_tools = set()
     rec_types = set()
-    for rec in session.recommendations:
+    for rec in (session.recommendations or []):
         rec_types.add(rec.get("type", ""))
         for tool in rec.get("affected_tools", []):
             rec_tools.add(tool)
 
-    # Filter quick wins: remove if same type AND same tools are covered
+    # Filter quick wins
     filtered = []
     for qw in session.quick_wins:
         qw_type = qw.get("type", "")
         qw_tools = set(qw.get("tools", []))
+
+        # Skip resource recommendations if no resources are loaded
+        if qw_type in RESOURCE_REC_TYPES and not has_loaded_resources:
+            continue
 
         # Skip if it's a consolidation/oversized recommendation and the same tools are in behavior recs
         if qw_type == "consolidation" and qw_tools and qw_tools.issubset(rec_tools):
@@ -846,12 +856,20 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / max(num_prompts, 1) * 1000, 1) if proxy_traces else None
 
         baseline_avg = round(baseline_tokens / num_prompts, 1)
+        # Use API-reported peak context from eval results (includes tools + resources + conversation)
+        baseline_peak = 0
+        for ev in session.eval_results:
+            peak = (ev.get("usage") or {}).get("peak_context_tokens", 0)
+            if peak > baseline_peak:
+                baseline_peak = peak
+        baseline_total_context = baseline_peak if baseline_peak > 0 else round(orig_menu + baseline_avg, 1)
+
         baseline = {
             "tool_count": len(session.tools),
             "menu_tokens": orig_menu,
             "avg_tokens_per_prompt": baseline_avg,
             "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
-            "total_context": round(orig_menu + baseline_avg, 1),
+            "total_context": baseline_total_context,
             "accuracy": 1.0,
             "avg_latency": baseline_avg_latency,
         }

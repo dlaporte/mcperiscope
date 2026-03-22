@@ -83,11 +83,14 @@ export function ResultsTab() {
   const baselineComparison = useMemo(() => {
     const toolTokens = inventory?.total_budget_tokens ?? inventory?.totalBudgetTokens ?? 0;
     const numPrompts = Math.max(evalResults.length, 1);
-    // Sum trace tokens from eval results
     let totalTraceTokens = 0;
     let totalCalls = 0;
     let totalLatency = 0;
+    let peakContext = 0;
     for (const ev of evalResults) {
+      // Use API-reported peak_context_tokens (includes tools + resources + conversation)
+      const peak = ev.usage?.peak_context_tokens;
+      if (peak && peak > peakContext) peakContext = peak;
       for (const step of (ev.toolChain || [])) {
         totalCalls++;
         totalTraceTokens += Math.max(1, (step.output?.length || 0) / 4);
@@ -98,6 +101,8 @@ export function ResultsTab() {
     const avgCalls = Math.round(totalCalls / numPrompts * 10) / 10;
     const avgLatency = Math.round(totalLatency / numPrompts * 1000);
     const toolCount = inventory?.tool_count ?? 0;
+    // Use real API-reported context, fall back to estimate
+    const totalContext = peakContext > 0 ? peakContext : toolTokens + avgTokens;
 
     return {
       baseline: {
@@ -105,7 +110,7 @@ export function ResultsTab() {
         menu_tokens: toolTokens,
         avg_tokens_per_prompt: avgTokens,
         avg_calls_per_prompt: avgCalls,
-        total_context: toolTokens + avgTokens,
+        total_context: totalContext,
         accuracy: 1.0,
         avg_latency: avgLatency,
       },
