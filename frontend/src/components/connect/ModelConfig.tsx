@@ -21,13 +21,6 @@ function formatContext(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
 }
 
-function detectProvider(apiKey: string): string | null {
-  if (!apiKey) return null;
-  if (apiKey.startsWith("sk-ant-")) return "anthropic";
-  if (apiKey.startsWith("sk-")) return "openai";
-  return null;
-}
-
 export function ModelConfig() {
   const {
     model, apiKey, customEndpoint, customContextWindow,
@@ -36,7 +29,6 @@ export function ModelConfig() {
   } = useStore();
 
   const disabled = connected || connecting;
-  const detectedProvider = detectProvider(apiKey);
   const isCustom = !MODELS.some((m) => m.id === model);
   const selectedModel = MODELS.find((m) => m.id === model);
 
@@ -117,30 +109,14 @@ export function ModelConfig() {
         </>
       )}
 
-      <div className="relative">
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder={isCustom ? "API key" : "API key (sk-...)"}
-          disabled={disabled}
-          className="w-full input-sub border rounded-lg px-3 py-2 text-sm  disabled:opacity-50"
-        />
-        {!isCustom && detectedProvider && (
-          <span
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
-          >
-            {detectedProvider}
-          </span>
-        )}
-      </div>
-
-      {!isCustom && detectedProvider && selectedModel && detectedProvider !== selectedModel.provider && (
-        <p className="text-xs" style={{ color: 'var(--sub-brass)' }}>
-          API key looks like {detectedProvider} but selected model is {selectedModel.provider}
-        </p>
-      )}
+      <input
+        type="password"
+        value={apiKey}
+        onChange={(e) => setApiKey(e.target.value)}
+        placeholder="API key"
+        disabled={disabled}
+        className="w-full input-sub border rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+      />
     </div>
   );
 }
