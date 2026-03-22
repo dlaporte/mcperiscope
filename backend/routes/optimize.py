@@ -130,7 +130,21 @@ async def evaluate(req: EvaluateRequest):
         total_output_tokens = 0
         peak_input_tokens = 0  # Last round's input_tokens = actual context window usage
         # Context tracking: use API-reported base + estimated delta from new content
-        context_base = 0  # Last API-reported input_tokens (accurate)
+        # Initialize base from prior eval's peak if available, otherwise estimate from messages
+        context_base = 0
+        for prev_ev in session.eval_results[:-1]:  # Exclude current (placeholder)
+            peak = (prev_ev.get("usage") or {}).get("peak_context_tokens", 0)
+            if peak:
+                context_base = peak
+        if context_base == 0:
+            # Estimate from tool definitions + messages
+            context_base = sum(
+                len(f"{t['name']}: {t['description']}") // 4 + len(json.dumps(t['input_schema'])) // 4
+                for t in tools
+            )
+            for m in messages:
+                c = m.get("content", "")
+                context_base += max(1, len(c if isinstance(c, str) else json.dumps(c)) // 4)
         context_delta = 0  # Estimated tokens added since last API report
         max_rounds = req.max_tool_rounds or 20
         max_tokens = req.max_tokens or 4096
