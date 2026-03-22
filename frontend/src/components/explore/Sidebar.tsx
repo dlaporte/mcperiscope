@@ -266,7 +266,7 @@ export function Sidebar() {
         </Section>
 
         <Section
-          title="Resources"
+          title="Resource Definitions"
           tokens={resourceTokens}
           sortable
           sortMode={resourceSort}
