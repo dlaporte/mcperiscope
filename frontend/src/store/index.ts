@@ -628,10 +628,10 @@ export const useStore = create<AppState>((set, get) => ({
         body: JSON.stringify({
           included_indices: included,
           enabled_rec_ids: [...state.enabledRecIds],
-          api_key: state.apiKey || undefined,
-          model: state.model || undefined,
+          api_key: primaryConfig?.apiKey || state.apiKey || undefined,
+          model: primaryConfig?.model || state.model || undefined,
           provider: primaryConfig?.provider || undefined,
-          custom_endpoint: state.customEndpoint || undefined,
+          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
           analyst_model: analystConfig?.model || undefined,
           analyst_provider: analystConfig?.provider || undefined,
           analyst_api_key: analystConfig?.apiKey || undefined,
@@ -921,7 +921,14 @@ export const useStore = create<AppState>((set, get) => ({
       const authConfig = buildAuthConfig(state);
       const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
       const provider = primaryConfig?.provider;
-      const res = await api.connect(url, authConfig, state.model, provider, state.apiKey, state.customEndpoint, state.customContextWindow);
+      const res = await api.connect(
+        url, authConfig,
+        primaryConfig?.model || state.model,
+        primaryConfig?.provider,
+        primaryConfig?.apiKey || state.apiKey,
+        primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
+        primaryConfig?.contextWindow || state.customContextWindow,
+      );
 
       if (res.status === "oauth_redirect" && res.authorizationUrl) {
         set({ connecting: false, oauthPending: true });
@@ -1226,10 +1233,10 @@ export const useStore = create<AppState>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          api_key: state.apiKey || undefined,
-          model: state.model || undefined,
+          api_key: primaryConfig?.apiKey || state.apiKey || undefined,
+          model: primaryConfig?.model || state.model || undefined,
           provider: primaryConfig?.provider || undefined,
-          custom_endpoint: state.customEndpoint || undefined,
+          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
           max_tool_rounds: state.maxToolRounds || undefined,
           max_tokens: state.maxTokensPerResponse || undefined,
         }),
@@ -1387,10 +1394,10 @@ export const useStore = create<AppState>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           included_indices: included,
-          api_key: state.apiKey || undefined,
-          model: state.model || undefined,
+          api_key: primaryConfig?.apiKey || state.apiKey || undefined,
+          model: primaryConfig?.model || state.model || undefined,
           provider: primaryConfig?.provider || undefined,
-          custom_endpoint: state.customEndpoint || undefined,
+          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
           analyst_model: analystConfig?.model || undefined,
           analyst_provider: analystConfig?.provider || undefined,
           analyst_api_key: analystConfig?.apiKey || undefined,
