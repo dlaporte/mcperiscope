@@ -15,6 +15,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from backend.models import EvaluateRequest, RatingRequest
 from backend.state import session
+from backend import mcp_manager
+from backend.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +55,7 @@ def _extract_fields(text: str) -> list[str]:
 @router.post("/optimize/evaluate")
 async def evaluate(req: EvaluateRequest):
     """Run an evaluation prompt with SSE streaming of tool calls."""
-    from backend import mcp_manager as _mgr
-    if not _mgr.is_connected():
+    if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
     # Always restore from request (backend may have restarted)
     if req.api_key:
@@ -69,8 +70,6 @@ async def evaluate(req: EvaluateRequest):
         raise HTTPException(status_code=400, detail="No tools available")
 
     async def event_stream():
-        from backend.llm_client import LLMClient
-
         try:
             client = LLMClient(session.api_key, session.model, session.custom_endpoint)
         except Exception as e:
@@ -176,7 +175,6 @@ async def evaluate(req: EvaluateRequest):
                     })
 
                     try:
-                        from backend import mcp_manager
                         result = await mcp_manager.call_tool(
                             tool_use.name, tool_use.input
                         )
@@ -351,7 +349,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
     Steps: analyze → generate proxy → start proxy → re-run prompts → compare → results
     """
-    from backend import mcp_manager
     if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
 
@@ -425,7 +422,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 proxy_port, proxy_process = _start_proxy(proxy_code)
 
                 # Wait for proxy to start, check health
-                proxy_started = False
                 for attempt in range(10):
                     await asyncio.sleep(1)
                     if proxy_process.poll() is not None:
@@ -442,7 +438,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                                 timeout=5.0,
                             )
                             if resp.status_code == 200:
-                                proxy_started = True
                                 break
                     except Exception:
                         pass  # Expected during startup — logged only on final failure
@@ -489,7 +484,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         else:
             _log.info("Entering proxy evaluation branch")
             try:
-                from backend.llm_client import LLMClient
                 _log.info("Creating LLM client...")
                 llm = LLMClient(session.api_key, session.model, session.custom_endpoint)
                 _log.info("LLM client created")
@@ -590,7 +584,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if proxy_answers and session.api_key:
             yield _sse("progress", {"phase": "judge", "message": "Comparing baseline vs optimized answers..."})
             try:
-                from backend.llm_client import LLMClient
                 judge = LLMClient(session.api_key, session.model, session.custom_endpoint)
 
                 for i, proxy_entry in enumerate(proxy_answers):
@@ -748,9 +741,7 @@ def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
                 break
         lookup_map[short] = name
 
-    removed_tools = set()
-
-    special_tools = set(no_param_tools) | removed_tools
+    special_tools = set(no_param_tools)
 
     # Build proxy code
     lines = [
@@ -767,9 +758,9 @@ def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
         "",
         f"LOOKUP_TOOLS = {json.dumps(lookup_map, indent=2)}",
         "",
-        f"REMOVED_TOOLS = {json.dumps(sorted(removed_tools))}",
+        f"REMOVED_TOOLS = []",
         "",
-        "SPECIAL_TOOLS = set(LOOKUP_TOOLS.values()) | set(REMOVED_TOOLS)",
+        "SPECIAL_TOOLS = set(LOOKUP_TOOLS.values())",
         "",
         f"TOKEN_DIR = {json.dumps(str(Path.home() / '.mcperiscope' / 'tokens'))}",
         "",

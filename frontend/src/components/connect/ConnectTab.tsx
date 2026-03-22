@@ -93,9 +93,9 @@ export function ConnectTab() {
   useEffect(() => {
     checkStatus();
 
-    const pendingCallback = localStorage.getItem("mcperiscope:pending-oauth-callback");
+    const pendingCallback = sessionStorage.getItem("mcperiscope:pending-oauth-callback");
     if (pendingCallback) {
-      localStorage.removeItem("mcperiscope:pending-oauth-callback");
+      sessionStorage.removeItem("mcperiscope:pending-oauth-callback");
       completeOAuth(pendingCallback);
     }
   }, [checkStatus, completeOAuth]);

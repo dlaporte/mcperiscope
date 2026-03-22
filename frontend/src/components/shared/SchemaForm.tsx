@@ -252,10 +252,11 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
   }
 
   // Resolve values: exact match, alias, or case variation
-  // Auto-creates aliases for case-variation matches (unless user removed them)
-  const seeded = useMemo(() => {
-    if (!initialValues) return {};
+  // Computes seeded values and tracks which aliases need to be created
+  const { seeded, aliasesToCreate } = useMemo(() => {
+    if (!initialValues) return { seeded: {}, aliasesToCreate: [] as [string, string][] };
     const out: Record<string, any> = {};
+    const newAliases: [string, string][] = [];
     const tryValue = (k: string) => {
       const v = initialValues[k];
       return v !== undefined && v !== null && v !== "" ? v : undefined;
@@ -269,15 +270,14 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
         const aliased = tryValue(aliasKey);
         if (aliased !== undefined) { out[key] = aliased; continue; }
       }
-      // Case variations -- auto-create alias if not explicitly removed
+      // Case variations -- track alias if not explicitly removed
       if (!removedAliases.has(key)) {
         const camel = toCamelCase(key);
         if (camel !== key) {
           const v = tryValue(camel);
           if (v !== undefined) {
-            // Auto-create the alias so it shows in Mappings and can be removed
             if (!(key in parameterAliases)) {
-              addParamAlias(key, camel);
+              newAliases.push([key, camel]);
             }
             out[key] = v;
             continue;
@@ -288,7 +288,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
           const v = tryValue(snake);
           if (v !== undefined) {
             if (!(key in parameterAliases)) {
-              addParamAlias(key, snake);
+              newAliases.push([key, snake]);
             }
             out[key] = v;
             continue;
@@ -296,9 +296,16 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
         }
       }
     }
-    return out;
+    return { seeded: out, aliasesToCreate: newAliases };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialValues, properties, parameterAliases, removedAliases]);
+
+  // Auto-create aliases for case-variation matches (side effect)
+  useEffect(() => {
+    for (const [key, target] of aliasesToCreate) {
+      addParamAlias(key, target);
+    }
+  }, [aliasesToCreate, addParamAlias]);
 
   const autoFilledKeys = useMemo(() => new Set(Object.keys(seeded)), [seeded]);
 

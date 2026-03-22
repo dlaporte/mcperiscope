@@ -22,7 +22,7 @@ export function OAuthCallback() {
 
     // Stash the full callback URL and redirect to Connect tab.
     // The Connect tab will pick it up and run completeOAuth with progress.
-    localStorage.setItem(PENDING_KEY, window.location.href);
+    sessionStorage.setItem(PENDING_KEY, window.location.href);
     window.location.replace("/");
   }, []);
 

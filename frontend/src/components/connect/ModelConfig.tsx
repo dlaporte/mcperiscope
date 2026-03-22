@@ -53,7 +53,6 @@ export function ModelConfig() {
               setModel(model === "" || MODELS.some((m) => m.id === model) ? "" : model);
             } else {
               setModel(e.target.value);
-              setCustomEndpoint("");
             }
           }}
           disabled={disabled}

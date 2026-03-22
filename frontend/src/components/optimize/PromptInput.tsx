@@ -17,11 +17,14 @@ export function PromptInput() {
       const prompts = prompt.split("\n").map((l) => l.trim()).filter(Boolean);
       if (prompts.length === 0) return;
       setBatchProgress({ current: 0, total: prompts.length });
-      for (let i = 0; i < prompts.length; i++) {
-        setBatchProgress({ current: i + 1, total: prompts.length });
-        await evaluate(prompts[i]);
+      try {
+        for (let i = 0; i < prompts.length; i++) {
+          setBatchProgress({ current: i + 1, total: prompts.length });
+          await evaluate(prompts[i]);
+        }
+      } finally {
+        setBatchProgress(null);
       }
-      setBatchProgress(null);
       setPrompt("");
     } else {
       await evaluate(prompt.trim());
