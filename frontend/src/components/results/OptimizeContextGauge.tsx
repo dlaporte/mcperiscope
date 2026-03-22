@@ -109,9 +109,11 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
             )}
           </>
         ) : (
-          <span className="text-xs font-mono" style={{ color: 'var(--sub-text-dim)' }}>
-            <span className="phosphor-text">{baselinePct.toFixed(1)}%</span>
-            {" "}{baseline.toLocaleString()} / {(max / 1000).toFixed(0)}K
+          <span className="text-xs font-mono whitespace-nowrap phosphor-text">
+            {baselinePct.toFixed(1)}%
+          </span>
+          <span className="text-xs font-mono whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
+            {baseline.toLocaleString()} / {(max / 1000).toFixed(0)}K
           </span>
         )}
       </div>
