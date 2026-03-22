@@ -205,7 +205,7 @@ class LLMClient:
                             buf["arguments"] += tc_delta.function.arguments
 
         # Finalize tool calls
-        for _idx, buf in sorted(tool_call_bufs.items()):
+        for _, buf in sorted(tool_call_bufs.items()):
             try:
                 args = json.loads(buf["arguments"]) if buf["arguments"] else {}
             except json.JSONDecodeError:

@@ -64,7 +64,5 @@ async def auth_callback(req: OAuthCallbackRequest):
 async def auth_status():
     return {
         "connected": mcp_manager.is_connected(),
-        "oauthPending": mcp_manager._auth is not None
-            and mcp_manager._auth.pending_auth_url is not None
-            and not mcp_manager.is_connected(),
+        "oauthPending": mcp_manager.is_oauth_pending(),
     }

@@ -1,6 +1,5 @@
 import { useStore } from "../../store";
 
-
 export function EvalHistory() {
   const evalResults = useStore((s) => s.evalResults);
   const selectedEvalIndex = useStore((s) => s.selectedEvalIndex);

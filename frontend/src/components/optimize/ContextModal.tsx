@@ -115,7 +115,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
                   className="flex items-center gap-1.5 px-3 py-1 text-xs rounded"
                   style={
                     activeSection === "messages"
-                      ? { backgroundColor: "var(--sub-brass)", color: "#1a1a1a", fontWeight: 700 }
+                      ? { backgroundColor: "var(--sub-brass)", color: "var(--sub-hull)", fontWeight: 700 }
                       : { color: "var(--sub-text-dim)" }
                   }
                 >
@@ -124,7 +124,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
                     className="text-[10px] font-mono px-1.5 rounded-full"
                     style={
                       activeSection === "messages"
-                        ? { backgroundColor: "rgba(0,0,0,0.2)", color: "#1a1a1a" }
+                        ? { backgroundColor: "rgba(0,0,0,0.2)", color: "var(--sub-hull)" }
                         : { backgroundColor: "var(--sub-panel-light)", color: "var(--sub-text-dim)" }
                     }
                   >
@@ -136,7 +136,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
                   className="flex items-center gap-1.5 px-3 py-1 text-xs rounded"
                   style={
                     activeSection === "tools"
-                      ? { backgroundColor: "var(--sub-brass)", color: "#1a1a1a", fontWeight: 700 }
+                      ? { backgroundColor: "var(--sub-brass)", color: "var(--sub-hull)", fontWeight: 700 }
                       : { color: "var(--sub-text-dim)" }
                   }
                 >
@@ -145,7 +145,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
                     className="text-[10px] font-mono px-1.5 rounded-full"
                     style={
                       activeSection === "tools"
-                        ? { backgroundColor: "rgba(0,0,0,0.2)", color: "#1a1a1a" }
+                        ? { backgroundColor: "rgba(0,0,0,0.2)", color: "var(--sub-hull)" }
                         : { backgroundColor: "var(--sub-panel-light)", color: "var(--sub-text-dim)" }
                     }
                   >

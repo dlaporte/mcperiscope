@@ -405,7 +405,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_code = None
         try:
             proxy_code = _generate_proxy_for_recommendations(
-                session.recommendations, session.tools, mcp_manager._url or ""
+                session.recommendations, session.tools, mcp_manager.get_url() or ""
             )
             session.proxy_code = proxy_code
         except Exception as e:

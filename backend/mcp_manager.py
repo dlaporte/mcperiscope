@@ -153,6 +153,21 @@ def is_connected() -> bool:
     return _client is not None and _tools is not None
 
 
+def get_url() -> str | None:
+    """Get the connected MCP server URL."""
+    return _url
+
+
+def is_oauth_pending() -> bool:
+    """Check if an OAuth flow is awaiting callback."""
+    return _auth is not None and _auth.pending_auth_url is not None and not is_connected()
+
+
+def get_oauth_url() -> str | None:
+    """Get the pending OAuth authorization URL."""
+    return _auth.pending_auth_url if _auth else None
+
+
 def server_info() -> dict | None:
     if not is_connected():
         return None

@@ -34,7 +34,7 @@ async def get_recommendations():
 def _build_report_data() -> dict:
     """Build the report_data dict expected by mcp_optimizer.report generators."""
     return {
-        "url": mcp_manager._url or "",
+        "url": mcp_manager.get_url() or "",
         "inventory": session.inventory,
         "analysis": session.analysis,
         "recommendations": session.recommendations,
@@ -86,7 +86,7 @@ async def get_plan():
     from mcp_optimizer.report import generate_plan_md
 
     plan_md = generate_plan_md(
-        url=mcp_manager._url or "",
+        url=mcp_manager.get_url() or "",
         inventory=session.inventory or {},
         analysis=session.analysis or {},
         recommendations=session.recommendations,
