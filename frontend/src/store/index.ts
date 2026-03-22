@@ -334,13 +334,27 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
     api.getInventory(),
   ]);
 
+  const resourceList = resources.status === "fulfilled" ? (resources.value as { resources: any[] }).resources : [];
+
   set({
     tools: tools.status === "fulfilled" ? (tools.value as { tools: any[] }).tools : [],
-    resources: resources.status === "fulfilled" ? (resources.value as { resources: any[] }).resources : [],
+    resources: resourceList,
     resourceTemplates: templates.status === "fulfilled" ? (templates.value as { resourceTemplates: any[] }).resourceTemplates : [],
     prompts: prompts.status === "fulfilled" ? (prompts.value as { prompts: any[] }).prompts : [],
     inventory: inventoryRes.status === "fulfilled" ? inventoryRes.value : null,
   });
+
+  // Auto-load all resources into the evaluation context
+  const loaded: Array<{ uri: string; name: string; tokens: number }> = [];
+  for (const r of resourceList) {
+    try {
+      const result = await api.loadResource(r.uri);
+      loaded.push({ uri: result.uri, name: result.name, tokens: result.tokens });
+    } catch { /* skip failed loads */ }
+  }
+  if (loaded.length > 0) {
+    set({ loadedResources: loaded });
+  }
 }
 
 async function consumeConnectSSE(
