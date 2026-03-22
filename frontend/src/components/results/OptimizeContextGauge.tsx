@@ -85,19 +85,6 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
           />
         )}
 
-        {/* Tick marks */}
-        {[25, 50, 75].map((tick) => (
-          <div
-            key={tick}
-            className="absolute top-0 h-full"
-            style={{
-              left: `${tick}%`,
-              width: "1px",
-              backgroundColor: "var(--sub-rivet)",
-              opacity: 0.5,
-            }}
-          />
-        ))}
       </div>
 
       {/* Readout */}
