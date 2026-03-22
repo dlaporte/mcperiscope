@@ -34,12 +34,6 @@ interface RowDef {
 
 const rows: RowDef[] = [
   {
-    label: "Total Context",
-    key: "total_context",
-    format: (v) => (v != null ? v.toLocaleString() : "\u2014"),
-    lowerBetter: true,
-  },
-  {
     label: "Tool Count",
     key: "tool_count",
     format: (v) => (v != null ? String(v) : "\u2014"),

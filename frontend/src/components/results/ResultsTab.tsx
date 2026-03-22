@@ -2,12 +2,14 @@ import { useEffect, useState, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useStore } from "../../store";
+import { MODEL_CONTEXT } from "../../config/models";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { RunSelector } from "./RunSelector";
 import { ResponsesModal } from "./ResponsesModal";
 import { ResourcesModal } from "./ResourcesModal";
+import { OptimizeContextGauge } from "./OptimizeContextGauge";
 import { ExportPanel } from "./ExportPanel";
 
 function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -43,7 +45,8 @@ export function ResultsTab() {
   const selectRun = useStore((s) => s.selectRun);
   const evalResults = useStore((s) => s.evalResults);
   const inventory = useStore((s) => s.inventory);
-  const traces = useStore((s) => s.evalResults); // for baseline metrics
+  const model = useStore((s) => s.model);
+  const customContextWindow = useStore((s) => s.customContextWindow);
 
   const [showResponses, setShowResponses] = useState(false);
   const [showResources, setShowResources] = useState(false);
@@ -157,7 +160,15 @@ export function ResultsTab() {
       </div>
 
       {/* Right panel: Results */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Context gauge */}
+        <OptimizeContextGauge
+          baseline={comparisonData?.baseline?.total_context || 0}
+          optimized={selectedRun ? (comparisonData?.proxy?.total_context ?? null) : null}
+          max={inventory?.contextWindow ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000}
+        />
+
+        <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-6">
           <ComparisonTable data={comparisonData} runSelector={runSelectorNode} />
 
@@ -208,6 +219,7 @@ export function ResultsTab() {
           )}
 
           {selectedRun && <ExportPanel runId={selectedRunId} />}
+        </div>
         </div>
       </div>
 
