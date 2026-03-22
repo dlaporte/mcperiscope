@@ -18,7 +18,7 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
       style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
     >
       <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
-        Context usage
+        Session usage
       </span>
 
       {/* Gauge bar */}
