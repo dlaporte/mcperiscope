@@ -346,7 +346,7 @@ async def rate(req: RatingRequest):
     }
 
 
-RESOURCE_REC_TYPES = {"resource_context_usage", "large_resource", "resource_consolidation"}
+RESOURCE_REC_TYPES = {"resource_context_usage"}
 
 
 def _deduplicate_recommendations():

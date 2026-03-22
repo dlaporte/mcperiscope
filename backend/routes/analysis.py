@@ -101,48 +101,31 @@ def generate_quick_wins(
 
         if md_resources and total_resource_tokens > 0:
             resource_pct = total_resource_tokens / ctx_window * 100 if ctx_window else 0
-            # Overall resource token footprint
-            if total_resource_tokens > 2000:
-                wins.append({
-                    "type": "resource_context_usage",
-                    "description": (
-                        f"{len(md_resources)} markdown resources consume ~{total_resource_tokens:,} tokens "
-                        f"({resource_pct:.1f}% of context). "
-                        f"These are loaded into context when referenced — consider trimming verbose content."
-                    ),
-                    "tools": [r["name"] for r in md_resources],
-                    "estimated_savings": None,
-                })
+            # Build detail lines for large resources
+            large = sorted(
+                [r for r in md_resources if r.get("tokens", 0) > 500],
+                key=lambda x: x.get("tokens", 0),
+                reverse=True,
+            )
+            detail_lines = []
+            for r in large[:5]:
+                detail_lines.append(f"  {r['name']}: ~{r['tokens']:,} tokens")
+            estimated_savings = sum(r["tokens"] // 3 for r in large) if large else None
 
-            # Flag individual large resources (>1000 tokens)
-            large = [r for r in md_resources if r.get("tokens", 0) > 1000]
-            if large:
-                for r in sorted(large, key=lambda x: x.get("tokens", 0), reverse=True)[:5]:
-                    wins.append({
-                        "type": "large_resource",
-                        "description": (
-                            f"'{r['name']}' is ~{r['tokens']:,} tokens ({r['char_count']:,} chars). "
-                            f"Consider trimming redundant sections, removing verbose examples, "
-                            f"or splitting into smaller focused resources."
-                        ),
-                        "tools": [r["name"]],
-                        "estimated_savings": r["tokens"] // 3,  # Estimate ~33% could be trimmed
-                    })
+            description = (
+                f"{len(md_resources)} markdown resources consume ~{total_resource_tokens:,} tokens "
+                f"({resource_pct:.1f}% of context). "
+                f"Use the analyst LLM to condense verbose content while preserving key information."
+            )
+            if detail_lines:
+                description += "\n\nLargest resources:\n" + "\n".join(detail_lines)
 
-            # Flag resources with duplicate/overlapping content patterns
-            if len(md_resources) > 3:
-                avg_tokens = total_resource_tokens // len(md_resources)
-                if avg_tokens > 400:
-                    wins.append({
-                        "type": "resource_consolidation",
-                        "description": (
-                            f"{len(md_resources)} markdown resources averaging ~{avg_tokens} tokens each. "
-                            f"Look for shared boilerplate (common headers, repeated tool references) "
-                            f"that could be factored into a single shared resource."
-                        ),
-                        "tools": [r["name"] for r in md_resources],
-                        "estimated_savings": None,
-                    })
+            wins.append({
+                "type": "resource_context_usage",
+                "description": description,
+                "tools": [r["name"] for r in md_resources],
+                "estimated_savings": estimated_savings,
+            })
 
     # Assign IDs to each quick win
     for i, win in enumerate(wins):

@@ -19,8 +19,6 @@ const TYPE_STYLES: Record<string, React.CSSProperties> = {
   no_return_info: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
   duplicate_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
   resource_context_usage: { backgroundColor: 'rgba(100,149,237,0.2)', color: '#6495ed' },
-  large_resource: { backgroundColor: 'rgba(100,149,237,0.2)', color: '#6495ed' },
-  resource_consolidation: { backgroundColor: 'rgba(100,149,237,0.15)', color: '#6495ed' },
 };
 
 export function QuickWinCard({ win }: { win: QuickWin }) {
