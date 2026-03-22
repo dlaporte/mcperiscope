@@ -54,13 +54,12 @@ export function InventoryBar() {
       style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
     >
       <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Session usage</span>
-      {!loading && inventory && (
-        <ContextGauge tokens={totalTokens} max={contextWindow} />
-      )}
-      {loading && (
+      {loading ? (
         <div className="flex-1 text-xs animate-pulse" style={{ color: 'var(--sub-text-dim)' }}>
           Calculating token budget...
         </div>
+      ) : (
+        <ContextGauge tokens={totalTokens} max={contextWindow} />
       )}
     </div>
   );
