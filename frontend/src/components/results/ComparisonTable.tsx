@@ -17,6 +17,7 @@ interface ComparisonData {
   baseline: MetricSet;
   proxy: MetricSet;
   delta?: Record<string, DeltaEntry>;
+  proxy_skip_reason?: string;
 }
 
 interface Props {
@@ -116,7 +117,11 @@ export function ComparisonTable({ data, runSelector }: Props) {
     <div className="panel-riveted rounded-lg overflow-hidden">
       <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
         <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>Before / After Comparison</h3>
-
+        {data.proxy_skip_reason && (
+          <p className="text-xs mt-1" style={{ color: 'var(--sub-red)' }}>
+            Proxy evaluation skipped: {data.proxy_skip_reason}
+          </p>
+        )}
       </div>
       <table className="w-full">
         <thead>

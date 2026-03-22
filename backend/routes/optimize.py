@@ -667,12 +667,16 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_traces = []
         proxy_answers = []  # Capture proxy answers for analyst comparison
         proxy_tool_count = proxy_tools or 0
+        proxy_skip_reason = None
         if not proxy_port:
-            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
+            proxy_skip_reason = "No proxy available"
+            yield _sse("progress", {"phase": "evaluate", "message": f"Skipping proxy evaluation ({proxy_skip_reason})"})
         elif not session.api_key:
-            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no API key)"})
+            proxy_skip_reason = "No API key"
+            yield _sse("progress", {"phase": "evaluate", "message": f"Skipping proxy evaluation ({proxy_skip_reason})"})
         elif not session.eval_results:
-            yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no evaluation prompts)"})
+            proxy_skip_reason = "No evaluation prompts"
+            yield _sse("progress", {"phase": "evaluate", "message": f"Skipping proxy evaluation ({proxy_skip_reason})"})
         else:
             try:
                 llm = LLMClient(session.api_key, session.model, session.provider, session.custom_endpoint)
@@ -909,6 +913,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 delta[key] = {"value": diff, "pct": pct}
 
         comparison = {"baseline": baseline, "proxy": proxy, "delta": delta, "analyst_results": analyst_results}
+        if proxy_skip_reason:
+            comparison["proxy_skip_reason"] = proxy_skip_reason
 
         session.comparison = comparison
 
