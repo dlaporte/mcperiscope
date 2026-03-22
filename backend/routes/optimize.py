@@ -853,7 +853,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             peak = (ev.get("usage") or {}).get("peak_context_tokens", 0)
             if peak > baseline_peak:
                 baseline_peak = peak
-        baseline_total_context = baseline_peak if baseline_peak > 0 else round(orig_menu + baseline_avg, 1)
+        # Fall back to estimate including loaded resources if API doesn't report tokens
+        loaded_resource_tokens = sum(r.get("tokens", 0) for r in session.loaded_resources.values())
+        baseline_total_context = baseline_peak if baseline_peak > 0 else round(orig_menu + baseline_avg + loaded_resource_tokens, 1)
 
         baseline = {
             "tool_count": len(session.tools),

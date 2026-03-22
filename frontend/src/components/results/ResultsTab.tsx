@@ -44,6 +44,7 @@ export function ResultsTab() {
   const selectedRunId = useStore((s) => s.selectedRunId);
   const selectRun = useStore((s) => s.selectRun);
   const evalResults = useStore((s) => s.evalResults);
+  const loadedResources = useStore((s) => s.loadedResources);
   const inventory = useStore((s) => s.inventory);
   const model = useStore((s) => s.model);
   const customContextWindow = useStore((s) => s.customContextWindow);
@@ -104,8 +105,9 @@ export function ResultsTab() {
     const avgCalls = Math.round(totalCalls / numPrompts * 10) / 10;
     const avgLatency = Math.round(totalLatency / numPrompts * 1000);
     const toolCount = inventory?.tool_count ?? 0;
-    // Use real API-reported context, fall back to estimate
-    const totalContext = peakContext > 0 ? peakContext : toolTokens + avgTokens;
+    // Use real API-reported context, fall back to estimate including loaded resources
+    const loadedResourceTokens = loadedResources.reduce((sum, r) => sum + r.tokens, 0);
+    const totalContext = peakContext > 0 ? peakContext : toolTokens + avgTokens + loadedResourceTokens;
 
     return {
       baseline: {
@@ -120,7 +122,7 @@ export function ResultsTab() {
       proxy: {},
       delta: {},
     };
-  }, [evalResults, inventory]);
+  }, [evalResults, inventory, loadedResources]);
 
   // Derive display data from selected run or baseline-only
   const selectedRun = optimizationRuns.find((r) => r.id === selectedRunId);
