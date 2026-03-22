@@ -187,7 +187,7 @@ async def evaluate(req: EvaluateRequest):
 
                     duration = time.time() - start
 
-                    # Update context delta estimate: add tool call input + result tokens
+                    # Update context delta estimate (~4 chars/token, standard BPE approximation)
                     input_str = json.dumps(tool_use.input)
                     context_delta += max(1, len(input_str) // 4) + max(1, len(result_text) // 4)
 
@@ -445,7 +445,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                                 proxy_started = True
                                 break
                     except Exception:
-                        logger.debug("Proxy health check not ready yet", exc_info=True)
+                        pass  # Expected during startup — logged only on final failure
 
                 if proxy_process.poll() is not None:
                     stderr = proxy_process.stderr.read().decode() if proxy_process.stderr else ""

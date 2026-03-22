@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MCPeriscope", lifespan=lifespan)
 
-cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
+cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
