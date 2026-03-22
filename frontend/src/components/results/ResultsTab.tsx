@@ -124,9 +124,7 @@ export function ResultsTab() {
       selectedId={selectedRunId}
       onSelect={selectRun}
     />
-  ) : (
-    <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>No runs yet</span>
-  );
+  ) : undefined;
 
   return (
     <div className="h-full flex">

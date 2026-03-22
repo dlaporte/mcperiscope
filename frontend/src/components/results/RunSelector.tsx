@@ -11,7 +11,10 @@ interface Props {
 }
 
 export function RunSelector({ runs, selectedId, onSelect }: Props) {
-  if (runs.length <= 1) return null;
+  if (runs.length === 0) return null;
+  if (runs.length === 1) {
+    return <span className="text-sm font-medium" style={{ color: 'var(--sub-text-dim)' }}>{runs[0].name}</span>;
+  }
 
   return (
     <select
