@@ -34,6 +34,7 @@ class OptimizationRun:
     comparison: dict | None = None
     proxy_answers: list[dict] = field(default_factory=list)
     analyst_results: list[dict] = field(default_factory=list)
+    condensed_resources: dict = field(default_factory=dict)  # uri -> {name, original, condensed, original_tokens, condensed_tokens}
 
 
 @dataclass

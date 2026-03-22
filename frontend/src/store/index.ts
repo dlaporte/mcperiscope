@@ -67,6 +67,7 @@ interface OptimizationRun {
   comparison: any;
   analystResults: any[];
   proxyAnswers: Array<{ prompt: string; answer: string }>;
+  condensedResources?: Record<string, {name: string; original: string; condensed: string; originalTokens: number; condensedTokens: number}>;
 }
 
 interface AppState {
@@ -677,6 +678,7 @@ export const useStore = create<AppState>((set, get) => ({
                       comparison: runData.comparison,
                       analystResults: runData.analystResults,
                       proxyAnswers: runData.proxyAnswers,
+                      condensedResources: runData.condensedResources,
                     };
                   } catch { /* ignore */ }
                 }
@@ -1433,6 +1435,7 @@ export const useStore = create<AppState>((set, get) => ({
                       comparison: runData.comparison,
                       analystResults: runData.analystResults,
                       proxyAnswers: runData.proxyAnswers,
+                      condensedResources: runData.condensedResources,
                     };
                   } catch { /* ignore */ }
                 }

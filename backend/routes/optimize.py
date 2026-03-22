@@ -346,6 +346,38 @@ async def rate(req: RatingRequest):
     }
 
 
+def _deduplicate_recommendations():
+    """Remove quick wins that are covered by behavior recommendations."""
+    if not session.recommendations or not session.quick_wins:
+        return
+
+    # Build sets of affected tools from behavior recommendations
+    rec_tools = set()
+    rec_types = set()
+    for rec in session.recommendations:
+        rec_types.add(rec.get("type", ""))
+        for tool in rec.get("affected_tools", []):
+            rec_tools.add(tool)
+
+    # Filter quick wins: remove if same type AND same tools are covered
+    filtered = []
+    for qw in session.quick_wins:
+        qw_type = qw.get("type", "")
+        qw_tools = set(qw.get("tools", []))
+
+        # Skip if it's a consolidation/oversized recommendation and the same tools are in behavior recs
+        if qw_type == "consolidation" and qw_tools and qw_tools.issubset(rec_tools):
+            continue
+        if qw_type == "oversized_schema" and qw_tools and qw_tools.issubset(rec_tools):
+            continue
+        if qw_type == "high_tool_count" and "consolidate" in rec_types:
+            continue
+
+        filtered.append(qw)
+
+    session.quick_wins = filtered
+
+
 @router.post("/optimize/analyze")
 async def analyze_tools():
     """Run analysis on tool usage traces to generate recommendations."""
@@ -360,6 +392,8 @@ async def analyze_tools():
     # Assign IDs to recommendations
     for i, rec in enumerate(session.recommendations):
         rec["id"] = f"rec_{i}"
+    # Deduplicate quick wins that overlap with behavior recommendations
+    _deduplicate_recommendations()
     return {
         "recommendations": session.recommendations,
         "quickWins": session.quick_wins,
@@ -436,6 +470,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             yield _sse("error", {"message": f"Analysis failed: {e}"})
             return
 
+        # Deduplicate quick wins that overlap with behavior recommendations
+        _deduplicate_recommendations()
+
         # Filter recommendations if enabled_rec_ids is provided
         enabled_rec_ids_set = None
         if req and req.enabled_rec_ids is not None:
@@ -461,6 +498,77 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             })
             return
 
+        # --- Step 1b: Condense resources if resource recommendations are enabled ---
+        condensed_resources = {}  # uri -> condensed_text
+        enabled_ids = set(req.enabled_rec_ids) if req and req.enabled_rec_ids else None
+        resource_recs_enabled = False
+        if enabled_ids:
+            all_recs = session.recommendations + session.quick_wins
+            for rec in all_recs:
+                if rec.get("id") in enabled_ids and rec.get("type") in ("resource_context_usage", "large_resource", "resource_consolidation"):
+                    resource_recs_enabled = True
+                    break
+
+        if resource_recs_enabled:
+            yield _sse("progress", {"phase": "resources", "message": "Condensing resources..."})
+            try:
+                resources = await mcp_manager.list_resources()
+                items = resources if isinstance(resources, list) else getattr(resources, "resources", [])
+
+                analyst_key = session.analyst_api_key or session.api_key
+                analyst_model_name = session.analyst_model or session.model
+                analyst_prov = session.analyst_provider or session.provider
+                analyst_ep = session.analyst_endpoint or session.custom_endpoint
+
+                for r in items:
+                    mime_type = getattr(r, "mimeType", "") or ""
+                    if mime_type != "text/markdown":
+                        continue
+                    uri = str(getattr(r, "uri", ""))
+                    name = getattr(r, "name", "") or ""
+
+                    try:
+                        result = await mcp_manager.read_resource(uri)
+                        text = ""
+                        contents = result if isinstance(result, list) else getattr(result, "contents", [])
+                        for c in contents:
+                            if isinstance(c, str):
+                                text += c
+                            else:
+                                text += getattr(c, "text", "") or ""
+
+                        if len(text) < 500:
+                            continue  # Too short to bother condensing
+
+                        yield _sse("progress", {"phase": "resources", "message": f"Condensing {name}..."})
+
+                        analyst = LLMClient(analyst_key, analyst_model_name, analyst_prov, analyst_ep)
+                        response = await analyst.chat(
+                            messages=[{
+                                "role": "user",
+                                "content": (
+                                    "Condense this MCP resource document while preserving all key information. "
+                                    "Keep tool names, parameter names, and workflow steps intact. "
+                                    "Remove verbose examples, redundant explanations, and boilerplate. "
+                                    "Aim for ~50% reduction in length.\n\n"
+                                    f"RESOURCE: {name}\n\n"
+                                    f"{text}"
+                                ),
+                            }],
+                            max_tokens=4096,
+                        )
+                        condensed_resources[uri] = {
+                            "name": name,
+                            "original": text,
+                            "condensed": response.text,
+                            "original_tokens": len(text) // 4,
+                            "condensed_tokens": len(response.text) // 4,
+                        }
+                    except Exception as e:
+                        logger.debug(f"Failed to condense resource {name}: {e}")
+            except Exception as e:
+                logger.debug(f"Failed to list resources for condensing: {e}")
+
         # --- Step 2: Generate proxy ---
         yield _sse("progress", {"phase": "proxy", "message": "Generating optimized proxy server..."})
         proxy_code = None
@@ -471,6 +579,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 analyst_model=session.analyst_model or session.model,
                 analyst_provider=session.analyst_provider or session.provider,
                 analyst_endpoint=session.analyst_endpoint or session.custom_endpoint,
+                condensed_resources=condensed_resources if condensed_resources else None,
             )
             session.proxy_code = proxy_code
         except Exception as e:
@@ -784,6 +893,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             comparison=comparison,
             proxy_answers=proxy_answers,
             analyst_results=analyst_results,
+            condensed_resources=condensed_resources,
         )
         session.optimization_runs.append(run)
 
@@ -808,6 +918,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 async def _generate_proxy_for_recommendations(
     recommendations, tools, upstream_url,
     analyst_key="", analyst_model="", analyst_provider="", analyst_endpoint="",
+    condensed_resources=None,
 ):
     """Generate proxy code using the Analyst LLM, with fallback to string concatenation."""
     token_dir = str(Path.home() / '.mcperiscope' / 'tokens')
@@ -818,6 +929,7 @@ async def _generate_proxy_for_recommendations(
             code = await _generate_proxy_via_llm(
                 recommendations, tools, upstream_url, token_dir,
                 analyst_key, analyst_model, analyst_provider, analyst_endpoint,
+                condensed_resources=condensed_resources,
             )
             if code and len(code.strip()) > 100:
                 # Save to file
@@ -829,12 +941,13 @@ async def _generate_proxy_for_recommendations(
             logger.warning("LLM proxy generation failed, falling back to template: %s", e)
 
     # Fallback: template-based generation
-    return _generate_proxy_template(recommendations, tools, upstream_url, token_dir)
+    return _generate_proxy_template(recommendations, tools, upstream_url, token_dir, condensed_resources=condensed_resources)
 
 
 async def _generate_proxy_via_llm(
     recommendations, tools, upstream_url, token_dir,
     analyst_key, analyst_model, analyst_provider, analyst_endpoint,
+    condensed_resources=None,
 ):
     """Use the Analyst LLM to generate proxy code from recommendations."""
     # Build tool summaries
@@ -849,6 +962,15 @@ async def _generate_proxy_via_llm(
             "parameters": list(props.keys()) if props else [],
         })
 
+    resource_instructions = ""
+    if condensed_resources:
+        resource_instructions = (
+            "\n\nCONDENSED RESOURCES TO INCLUDE:\n"
+            "For each resource below, add a @mcp.resource(uri) handler that returns the condensed text.\n"
+        )
+        for uri, data in condensed_resources.items():
+            resource_instructions += f"\nURI: {uri}\nName: {data['name']}\nCondensed text length: {len(data['condensed'])} chars\n"
+
     prompt = (
         "You are generating an optimized MCP proxy server in Python. "
         "The proxy sits between an LLM client and an upstream MCP server, "
@@ -856,6 +978,7 @@ async def _generate_proxy_via_llm(
         f"UPSTREAM URL: {upstream_url}\n\n"
         f"RECOMMENDATIONS TO IMPLEMENT:\n{json.dumps(recommendations, indent=2)}\n\n"
         f"CURRENT TOOLS ({len(tools)} total):\n{json.dumps(tool_summaries, indent=2)}\n\n"
+        f"{resource_instructions}\n"
         "Generate a complete, runnable Python proxy server using FastMCP that:\n"
         "1. Imports UpstreamClient from backend.mcp_optimizer.proxy_runtime\n"
         f"2. Connects to the upstream server with OAuth token reuse (TOKEN_DIR = {json.dumps(token_dir)})\n"
@@ -894,7 +1017,7 @@ async def _generate_proxy_via_llm(
     return code
 
 
-def _generate_proxy_template(recommendations, tools, upstream_url, token_dir):
+def _generate_proxy_template(recommendations, tools, upstream_url, token_dir, condensed_resources=None):
     """Fallback: generate proxy code via string concatenation template."""
     # Build a practical proxy: consolidate no-param lookup tools + passthrough rest
     no_param_tools = []
@@ -992,6 +1115,18 @@ def _generate_proxy_template(recommendations, tools, upstream_url, token_dir):
         lines.append(f'    result = await upstream.call("{t.name}", args)')
         lines.append(f"    return json.dumps(result) if not isinstance(result, str) else result")
         lines.append("")
+
+    # Condensed resource handlers
+    if condensed_resources:
+        lines.append("# --- Condensed resource handlers ---")
+        import re
+        for uri, data in condensed_resources.items():
+            safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', data["name"])
+            lines.append(f'@mcp.resource("{uri}")')
+            lines.append(f'async def resource_{safe_name}() -> str:')
+            lines.append(f'    """Condensed version of {data["name"]}"""')
+            lines.append(f'    return {json.dumps(data["condensed"])}')
+            lines.append("")
 
     # Entry point
     lines.extend([

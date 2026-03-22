@@ -126,6 +126,7 @@ async def get_run(run_id: str):
         "enabledRecIds": run.enabled_rec_ids,
         "comparison": run.comparison, "analystResults": run.analyst_results,
         "proxyAnswers": run.proxy_answers,
+        "condensedResources": run.condensed_resources,
     }
 
 

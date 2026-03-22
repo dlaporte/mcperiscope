@@ -7,6 +7,7 @@ import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { RunSelector } from "./RunSelector";
 import { ResponsesModal } from "./ResponsesModal";
+import { ResourcesModal } from "./ResourcesModal";
 import { ExportPanel } from "./ExportPanel";
 
 function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -45,6 +46,7 @@ export function ResultsTab() {
   const traces = useStore((s) => s.evalResults); // for baseline metrics
 
   const [showResponses, setShowResponses] = useState(false);
+  const [showResources, setShowResources] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
   // On mount, run analysis if we have eval results but no recommendations
@@ -117,6 +119,7 @@ export function ResultsTab() {
   const comparisonData = selectedRun?.comparison || baselineComparison;
   const analystResults = selectedRun?.analystResults || [];
   const proxyAnswers = selectedRun?.proxyAnswers || [];
+  const condensedResources = selectedRun?.condensedResources;
 
   const runSelectorNode = optimizationRuns.length > 0 ? (
     <RunSelector
@@ -160,7 +163,7 @@ export function ResultsTab() {
           )}
 
           {proxyAnswers.length > 0 && (
-            <div className="panel-riveted rounded-lg p-4">
+            <div className="panel-riveted rounded-lg p-4 space-y-2">
               <button
                 onClick={() => setShowResponses(true)}
                 className="flex items-center gap-2 text-sm font-medium transition-colors"
@@ -174,6 +177,20 @@ export function ResultsTab() {
                 </svg>
                 View Baseline vs Optimized Responses
               </button>
+              {condensedResources && Object.keys(condensedResources).length > 0 && (
+                <button
+                  onClick={() => setShowResources(true)}
+                  className="flex items-center gap-2 text-sm font-medium transition-colors"
+                  style={{ color: 'var(--sub-brass)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  View Baseline vs Optimized Resources
+                </button>
+              )}
             </div>
           )}
 
@@ -195,6 +212,14 @@ export function ResultsTab() {
           proxyAnswers={proxyAnswers}
           evalResults={evalResults}
           onClose={() => setShowResponses(false)}
+        />
+      )}
+
+      {/* Resources modal */}
+      {showResources && condensedResources && (
+        <ResourcesModal
+          resources={condensedResources}
+          onClose={() => setShowResources(false)}
         />
       )}
     </div>
