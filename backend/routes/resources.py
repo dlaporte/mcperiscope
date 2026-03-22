@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.models import ResourceReadRequest
 from backend import mcp_manager
 from backend.state import session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -133,7 +137,7 @@ async def load_resource(req: LoadResourceRequest):
                     name = getattr(r, "name", name) or name
                     break
         except Exception:
-            pass
+            logger.debug("Failed to look up resource name from listing", exc_info=True)
 
         entry = {
             "name": name,

@@ -1,78 +1,23 @@
 import { useState, useEffect, useMemo } from "react";
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function syntaxHighlightJson(jsonStr: string): string {
-  const escaped = escapeHtml(jsonStr);
-  return escaped
-    .replace(
-      /(&quot;(?:[^&]|&amp;)*?&quot;)\s*:/g,
-      '<span style="color:var(--sub-brass)">$1</span>:'
-    )
-    .replace(
-      /:\s*(&quot;(?:[^&]|&amp;)*?&quot;)/g,
-      ': <span style="color:var(--sub-phosphor)">$1</span>'
-    )
-    .replace(
-      /:\s*(true|false)/g,
-      ': <span style="color:var(--sub-brass)">$1</span>'
-    )
-    .replace(
-      /:\s*(\d+\.?\d*)/g,
-      ': <span style="color:#c4b5fd">$1</span>'
-    )
-    .replace(
-      /:\s*(null)/g,
-      ': <span style="color:var(--sub-text-dim)">$1</span>'
-    );
-}
-
 function formatMessageContent(content: string): string {
-  // Split content into sections by [Tool Call:] and [Tool Result:] markers
+  // Try to pretty-print JSON sections
   const sections = content.split(/(\[Tool (?:Call|Result): [^\]]+\])/g);
-
-  const htmlParts: string[] = [];
+  const parts: string[] = [];
   for (const section of sections) {
-    // Tool call header
-    const callMatch = section.match(/^\[Tool Call: ([^\]]+)\]$/);
-    if (callMatch) {
-      htmlParts.push(
-        `<div style="margin-top:12px;margin-bottom:4px;color:var(--sub-brass);font-weight:600">⚡ Tool Call: ${escapeHtml(callMatch[1])}</div>`
-      );
-      continue;
-    }
-
-    // Tool result header
-    const resultMatch = section.match(/^\[Tool Result: ([^\]]+)\]$/);
-    if (resultMatch) {
-      htmlParts.push(
-        `<div style="margin-top:12px;margin-bottom:4px;color:var(--sub-phosphor);font-weight:600">← Tool Result: ${escapeHtml(resultMatch[1])}</div>`
-      );
-      continue;
-    }
-
-    // Try to parse as JSON and pretty-print
     const trimmed = section.trim();
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         const parsed = JSON.parse(trimmed);
-        const pretty = JSON.stringify(parsed, null, 2);
-        htmlParts.push(
-          `<div style="background:var(--sub-panel);border:1px solid var(--sub-rivet);border-radius:4px;padding:8px;margin:4px 0;overflow-x:auto">${syntaxHighlightJson(pretty)}</div>`
-        );
+        parts.push(JSON.stringify(parsed, null, 2));
         continue;
       } catch { /* not valid JSON, fall through */ }
     }
-
-    // Plain text
     if (trimmed) {
-      htmlParts.push(`<div style="margin:4px 0">${escapeHtml(trimmed)}</div>`);
+      parts.push(trimmed);
     }
   }
-
-  return htmlParts.join("");
+  return parts.join("\n\n");
 }
 
 interface ContextData {
@@ -254,19 +199,18 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
                       {msg.role}
                     </span>
                   </div>
-                  <div
+                  <pre
                     className="flex-1 text-xs font-mono whitespace-pre-wrap break-words p-3 rounded overflow-auto"
                     style={{
                       backgroundColor: "var(--sub-panel)",
                       color: "var(--sub-text)",
                       border: "1px solid var(--sub-rivet)",
                     }}
-                    dangerouslySetInnerHTML={{
-                      __html: formatMessageContent(
-                        typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content, null, 2)
-                      ),
-                    }}
-                  />
+                  >
+                    {formatMessageContent(
+                      typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content, null, 2)
+                    )}
+                  </pre>
                 </div>
               ))}
               {context.messages.length === 0 && (

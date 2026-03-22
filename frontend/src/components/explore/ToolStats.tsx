@@ -2,13 +2,13 @@ import { useState, useEffect } from "react";
 
 interface ToolAnalysis {
   name: string;
-  description_tokens?: number;
-  schema_tokens?: number;
-  total_tokens?: number;
-  context_pct?: number;
+  descriptionTokens?: number;
+  schemaTokens?: number;
+  totalTokens?: number;
+  contextPct?: number;
   model?: string;
-  context_window?: number;
-  similar_tools?: Array<{ name: string; distance: number }>;
+  contextWindow?: number;
+  similarTools?: Array<{ name: string; distance: number }>;
   cluster?: { prefix: string; count: number };
 }
 
@@ -73,14 +73,14 @@ export function ToolStats({ toolName }: Props) {
       className="rounded-lg p-3 space-y-2 text-xs panel-riveted"
     >
       {/* Token budget */}
-      {stats.total_tokens != null && (
+      {stats.totalTokens != null && (
         <div className="flex items-center gap-2">
           <span style={{ color: 'var(--sub-text-dim)' }}>Token budget:</span>
           <span className="font-mono" style={{ color: 'var(--sub-text)' }}>
-            {stats.total_tokens} tokens
-            {stats.description_tokens != null && stats.schema_tokens != null && (
+            {stats.totalTokens} tokens
+            {stats.descriptionTokens != null && stats.schemaTokens != null && (
               <span style={{ color: 'var(--sub-text-dim)' }}>
-                {" "}(desc: {stats.description_tokens}, schema: {stats.schema_tokens})
+                {" "}(desc: {stats.descriptionTokens}, schema: {stats.schemaTokens})
               </span>
             )}
           </span>
@@ -88,21 +88,21 @@ export function ToolStats({ toolName }: Props) {
       )}
 
       {/* Context window impact */}
-      {stats.context_pct != null && stats.model && stats.context_window && (
+      {stats.contextPct != null && stats.model && stats.contextWindow && (
         <div className="flex items-center gap-2">
           <span style={{ color: 'var(--sub-text-dim)' }}>Context impact:</span>
           <span className="font-mono" style={{ color: 'var(--sub-text)' }}>
-            {stats.context_pct.toFixed(2)}% of {stats.model}'s {(stats.context_window / 1000).toFixed(0)}K context
+            {stats.contextPct.toFixed(2)}% of {stats.model}'s {(stats.contextWindow / 1000).toFixed(0)}K context
           </span>
         </div>
       )}
 
       {/* Similar tools */}
-      {stats.similar_tools && stats.similar_tools.length > 0 && (
+      {stats.similarTools && stats.similarTools.length > 0 && (
         <div>
           <span style={{ color: 'var(--sub-text-dim)' }}>Similar tools:</span>
           <div className="flex flex-wrap gap-1 mt-1">
-            {stats.similar_tools.map((t) => (
+            {stats.similarTools.map((t) => (
               <span
                 key={t.name}
                 className="inline-block px-1.5 py-0.5 rounded font-mono"

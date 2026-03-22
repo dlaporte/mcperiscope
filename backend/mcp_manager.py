@@ -139,7 +139,7 @@ async def disconnect() -> dict:
         try:
             await _client.__aexit__(None, None, None)
         except Exception:
-            pass
+            logger.debug("Error closing MCP client connection", exc_info=True)
     _client = None
     _auth = None
     _url = None

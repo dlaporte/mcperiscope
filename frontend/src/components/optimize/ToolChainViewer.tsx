@@ -26,25 +26,6 @@ interface ToolChainStep {
   error: string | null;
 }
 
-function syntaxHighlight(json: string): string {
-  return json.replace(
-    /("(?:\\.|[^"\\])*")\s*:/g,
-    '<span style="color:#c49a2a">$1</span>:'
-  ).replace(
-    /:\s*("(?:\\.|[^"\\])*")/g,
-    ': <span style="color:#33ff33">$1</span>'
-  ).replace(
-    /:\s*(true|false)/g,
-    ': <span style="color:#fbbf24">$1</span>'
-  ).replace(
-    /:\s*(\d+\.?\d*)/g,
-    ': <span style="color:#c4b5fd">$1</span>'
-  ).replace(
-    /:\s*(null)/g,
-    ': <span style="color:#7a7a72">$1</span>'
-  );
-}
-
 function formatData(data: unknown): string {
   if (typeof data === "string") {
     // Try to parse as JSON and pretty-print
@@ -97,8 +78,9 @@ function CollapsibleJson({
       {open && (
         <pre
           className="sonar-screen mt-1 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono"
-          dangerouslySetInnerHTML={{ __html: syntaxHighlight(text) }}
-        />
+        >
+          {text}
+        </pre>
       )}
     </div>
   );

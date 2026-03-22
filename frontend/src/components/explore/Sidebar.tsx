@@ -167,14 +167,14 @@ export function Sidebar() {
     selection?.type === type && selection.item.name === name;
 
   // Use backend-reported totals when available (matches the inventory bar); fall back to client estimates when filtering
-  const toolTokens = !query && inventory?.tool_tokens != null
-    ? inventory.tool_tokens
+  const toolTokens = !query && inventory?.toolTokens != null
+    ? inventory.toolTokens
     : filteredTools.reduce((sum: number, { tokens }: any) => sum + tokens, 0);
-  const resourceTokens = !query && inventory?.resource_tokens != null
-    ? inventory.resource_tokens
+  const resourceTokens = !query && inventory?.resourceTokens != null
+    ? inventory.resourceTokens
     : filteredResources.reduce((sum: number, { tokens }: any) => sum + tokens, 0);
-  const promptTokens = !query && inventory?.prompt_tokens != null
-    ? inventory.prompt_tokens
+  const promptTokens = !query && inventory?.promptTokens != null
+    ? inventory.promptTokens
     : filteredPrompts.reduce((sum: number, { tokens }: any) => sum + tokens, 0);
 
   return (

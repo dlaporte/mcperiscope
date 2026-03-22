@@ -28,7 +28,7 @@ async def get_comparison():
 @router.get("/results/recommendations")
 async def get_recommendations():
     _require_connected()
-    return {"recommendations": session.recommendations, "quick_wins": session.quick_wins}
+    return {"recommendations": session.recommendations, "quickWins": session.quick_wins}
 
 
 def _build_report_data() -> dict:

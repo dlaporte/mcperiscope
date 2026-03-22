@@ -16,6 +16,8 @@ from pydantic import BaseModel
 from backend.models import EvaluateRequest, RatingRequest
 from backend.state import session
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -186,9 +188,8 @@ async def evaluate(req: EvaluateRequest):
                     duration = time.time() - start
 
                     # Update context delta estimate: add tool call input + result tokens
-                    # Use //5 for a more conservative estimate (JSON is token-dense)
                     input_str = json.dumps(tool_use.input)
-                    context_delta += max(1, len(input_str) // 5) + max(1, len(result_text) // 5)
+                    context_delta += max(1, len(input_str) // 4) + max(1, len(result_text) // 4)
 
                     tool_step = {
                         "step": step,
@@ -444,7 +445,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                                 proxy_started = True
                                 break
                     except Exception:
-                        pass  # Not ready yet
+                        logger.debug("Proxy health check not ready yet", exc_info=True)
 
                 if proxy_process.poll() is not None:
                     stderr = proxy_process.stderr.read().decode() if proxy_process.stderr else ""
@@ -748,11 +749,6 @@ def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
         lookup_map[short] = name
 
     removed_tools = set()
-    # Remove v1/duplicate tools
-    tool_names = {t.name for t in tools}
-    for t in tools:
-        if t.name.endswith("_v1") or t.name == "get_profile_v1":
-            removed_tools.add(t.name)
 
     special_tools = set(no_param_tools) | removed_tools
 
@@ -900,10 +896,3 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def _block_to_dict(block) -> dict:
-    if block.type == "text":
-        return {"type": "text", "text": block.text}
-    elif block.type == "tool_use":
-        return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
-    else:
-        return {"type": block.type}

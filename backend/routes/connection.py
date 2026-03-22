@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.models import ConnectRequest
 from backend import mcp_manager
 from backend.state import session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,7 +28,7 @@ async def _validate_api_key(api_key: str) -> None:
     except anthropic.AuthenticationError:
         raise HTTPException(status_code=400, detail="Invalid Anthropic API key")
     except Exception:
-        pass  # Other errors (rate limit, etc.) mean the key is valid
+        logger.debug("Non-auth error during API key validation (key is likely valid)", exc_info=True)
 
 
 @router.post("/connect")

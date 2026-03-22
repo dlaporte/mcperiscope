@@ -395,8 +395,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   fetchRecommendations: async () => {
     try {
-      const data = await api.getRecommendations() as { recommendations: any[]; quick_wins: any[] };
-      set({ recommendations: data.recommendations, quickWins: data.quick_wins ?? [] });
+      const data = await api.getRecommendations() as { recommendations: any[]; quickWins: any[] };
+      set({ recommendations: data.recommendations, quickWins: data.quickWins ?? [] });
     } catch {
       // no recommendations yet
     }
@@ -954,7 +954,7 @@ export const useStore = create<AppState>((set, get) => ({
                   optimizeProgress: null,
                   comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
                   recommendations: recsData?.recommendations ?? [],
-                  quickWins: recsData?.quick_wins ?? [],
+                  quickWins: recsData?.quickWins ?? [],
                   planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
                   activeTab: "results",
                 });

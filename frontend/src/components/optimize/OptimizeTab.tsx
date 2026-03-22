@@ -1,22 +1,12 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../../store";
+import { MODEL_CONTEXT } from "../../config/models";
 import { ContextGauge } from "../explore/ContextGauge";
 import { PromptInput } from "./PromptInput";
 import { ResourcePicker } from "./ResourcePicker";
 import { EvalHistory } from "./EvalHistory";
 import { ToolChainViewer } from "./ToolChainViewer";
 import { ContextModal } from "./ContextModal";
-
-const MODEL_CONTEXT: Record<string, number> = {
-  "claude-opus-4-6": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5-20251001": 200_000,
-  "gpt-5.4": 1_000_000,
-  "gpt-5.4-mini": 400_000,
-  "gpt-5.2": 400_000,
-  "gpt-4o": 128_000,
-  "gpt-4o-mini": 128_000,
-};
 
 export function OptimizeTab() {
   const evalResults = useStore((s) => s.evalResults);
@@ -65,11 +55,11 @@ export function OptimizeTab() {
       return { total: peakContext };
     }
 
-    const toolDefTokens = inventory?.total_budget_tokens ?? 0;
+    const toolDefTokens = inventory?.totalBudgetTokens ?? 0;
     return { total: toolDefTokens + loadedResourceTokens };
   }, [evalResults, inventory, evalLoading, liveContextTokens, loadedResourceTokens]);
 
-  const contextWindow = inventory?.context_window ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
+  const contextWindow = inventory?.contextWindow ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
 
   return (
     <div className="h-full flex flex-col relative">

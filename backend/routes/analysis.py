@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from backend.state import MODEL_CONTEXT_WINDOWS, session
+
+logger = logging.getLogger(__name__)
 from mcp_optimizer.inventory import find_name_clusters, levenshtein, tool_token_budget
 
 router = APIRouter()
@@ -186,9 +190,9 @@ async def get_inventory():
                             "char_count": len(text),
                         })
                     except Exception:
-                        pass
+                        logger.debug("Failed to read markdown resource content", exc_info=True)
         except Exception:
-            pass
+            logger.debug("Failed to list resources for inventory", exc_info=True)
 
         try:
             prompts = await mcp_manager.list_prompts()
@@ -200,7 +204,7 @@ async def get_inventory():
                 args_text = ", ".join(getattr(a, "name", "") for a in args)
                 prompt_tokens += max(1, len(f"{name}({args_text}): {desc}") // 4)
         except Exception:
-            pass
+            logger.debug("Failed to list prompts for inventory", exc_info=True)
 
     total_budget = tool_budget + resource_tokens + prompt_tokens
 
@@ -209,14 +213,14 @@ async def get_inventory():
 
     return {
         **session.inventory,
-        "total_budget_tokens": total_budget,
-        "tool_tokens": tool_budget,
-        "resource_tokens": resource_tokens,
-        "prompt_tokens": prompt_tokens,
+        "totalBudgetTokens": total_budget,
+        "toolTokens": tool_budget,
+        "resourceTokens": resource_tokens,
+        "promptTokens": prompt_tokens,
         "model": session.model,
-        "context_window": ctx_window,
-        "context_pct": round(total_budget / ctx_window * 100, 2) if ctx_window else 0,
-        "quick_wins": quick_wins,
+        "contextWindow": ctx_window,
+        "contextPct": round(total_budget / ctx_window * 100, 2) if ctx_window else 0,
+        "quickWins": quick_wins,
     }
 
 
@@ -254,12 +258,12 @@ async def get_tool_stats(name: str):
     return {
         "name": name,
         "description": tool.description,
-        "description_tokens": budget.description_tokens,
-        "schema_tokens": budget.schema_tokens,
-        "total_tokens": budget.total_tokens,
-        "context_pct": round(budget.total_tokens / ctx_window * 100, 3) if ctx_window else 0,
+        "descriptionTokens": budget.description_tokens,
+        "schemaTokens": budget.schema_tokens,
+        "totalTokens": budget.total_tokens,
+        "contextPct": round(budget.total_tokens / ctx_window * 100, 3) if ctx_window else 0,
         "model": session.model,
-        "context_window": ctx_window,
-        "similar_tools": similar,
+        "contextWindow": ctx_window,
+        "similarTools": similar,
         "cluster": cluster,
     }

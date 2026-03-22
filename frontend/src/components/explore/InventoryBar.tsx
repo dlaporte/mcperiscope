@@ -1,28 +1,18 @@
 import { useState, useEffect } from "react";
 import { useStore } from "../../store";
+import { MODEL_CONTEXT } from "../../config/models";
 import { ContextGauge } from "./ContextGauge";
 
 interface InventoryData {
   tool_count: number;
-  total_budget_tokens: number;
-  tool_tokens?: number;
-  resource_tokens?: number;
-  prompt_tokens?: number;
-  context_window: number;
-  context_pct: number;
+  totalBudgetTokens: number;
+  toolTokens?: number;
+  resourceTokens?: number;
+  promptTokens?: number;
+  contextWindow: number;
+  contextPct: number;
   model: string;
 }
-
-const MODEL_CONTEXT: Record<string, number> = {
-  "claude-opus-4-6": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5-20251001": 200_000,
-  "gpt-5.4": 1_000_000,
-  "gpt-5.4-mini": 400_000,
-  "gpt-5.2": 400_000,
-  "gpt-4o": 128_000,
-  "gpt-4o-mini": 128_000,
-};
 
 export function InventoryBar() {
   const { tools, model, customContextWindow } = useStore();
@@ -55,8 +45,8 @@ export function InventoryBar() {
     };
   }, [tools.length]);
 
-  const totalTokens = inventory?.total_budget_tokens ?? 0;
-  const contextWindow = inventory?.context_window ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
+  const totalTokens = inventory?.totalBudgetTokens ?? 0;
+  const contextWindow = inventory?.contextWindow ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
 
   return (
     <div
