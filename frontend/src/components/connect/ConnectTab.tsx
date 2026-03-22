@@ -116,12 +116,28 @@ export function ConnectTab() {
     authMethod, authToken, headerName, headerValue,
     setAuthMethod, setAuthToken, setHeaderName, setHeaderValue,
     checkStatus,
+    mcpConfigs, selectMCPConfig, setActiveTab,
   } = useStore();
+
+  // "custom" = manual URL entry, otherwise an MCPServerConfig id
+  const [selectedConfigId, setSelectedConfigId] = useState<string>(() => {
+    // Default to first config if any exist, otherwise custom
+    if (serverInfo && typeof serverInfo === "object" && "url" in serverInfo) {
+      return "custom"; // already connected, show custom
+    }
+    return mcpConfigs.length > 0 ? mcpConfigs[0].id : "custom";
+  });
+
+  const selectedConfig = mcpConfigs.find((c) => c.id === selectedConfigId);
 
   const [url, setUrl] = useState(() => {
     // Restore URL from server info if already connected, or from most recent history
     if (serverInfo && typeof serverInfo === "object" && "url" in serverInfo) {
       return (serverInfo as { url: string }).url;
+    }
+    // If a config is selected, use its URL
+    if (mcpConfigs.length > 0) {
+      return mcpConfigs[0].url;
     }
     const history = loadHistory();
     return history.length > 0 ? history[0] : "";
@@ -153,7 +169,7 @@ export function ConnectTab() {
     ? history.filter((u) => u.toLowerCase().includes(url.toLowerCase()))
     : history;
 
-  const isOpen = showDropdown && matches.length > 0 && !connected && !connecting;
+  const isOpen = showDropdown && matches.length > 0 && !connected && !connecting && selectedConfigId === "custom";
 
   // Save to history only after successful connection
   useEffect(() => {
@@ -172,9 +188,25 @@ export function ConnectTab() {
 
   const handleConnect = (e: React.FormEvent) => {
     e.preventDefault();
-    if (url.trim()) {
+    const connectUrl = selectedConfig ? selectedConfig.url : url.trim();
+    if (connectUrl) {
       setShowDropdown(false);
-      connect(url.trim());
+      connect(connectUrl);
+    }
+  };
+
+  const handleConfigSelect = (configId: string) => {
+    setSelectedConfigId(configId);
+    if (configId === "custom") {
+      // Restore from history
+      const history = loadHistory();
+      setUrl(history.length > 0 ? history[0] : "");
+    } else {
+      const config = mcpConfigs.find((c) => c.id === configId);
+      if (config) {
+        setUrl(config.url);
+        selectMCPConfig(configId);
+      }
     }
   };
 
@@ -248,6 +280,8 @@ export function ConnectTab() {
     );
   };
 
+  const connectUrl = selectedConfig ? selectedConfig.url : url.trim();
+
   return (
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-xl">
@@ -265,74 +299,122 @@ export function ConnectTab() {
           </div>
 
           <form onSubmit={handleConnect} className="space-y-4">
-            {/* URL Input */}
-            <div ref={wrapperRef} className="relative">
-              <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Server URL</label>
-              <input
-                ref={inputRef}
-                type="text"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setShowDropdown(true);
-                  setSelectedIndex(-1);
-                }}
-                onFocus={() => setShowDropdown(true)}
-                onKeyDown={handleKeyDown}
-                placeholder="e.g. http://localhost:3000/sse"
-                disabled={connected || connecting}
-                className="w-full input-sub border rounded-lg px-3 py-2 text-sm  disabled:opacity-50"
-              />
-              {isOpen && (
-                <div
-                  className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto"
-                  style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
+            {/* Server Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm" style={{ color: 'var(--sub-text-dim)' }}>MCP Server</label>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("settings")}
+                  className="text-xs px-2 py-0.5 rounded"
+                  style={{ color: 'var(--sub-brass)', backgroundColor: 'rgba(196,154,42,0.1)' }}
                 >
-                  {matches.map((item, i) => {
-                    const cached = getCachedAuth(item);
-                    const authLabel = cached?.method && cached.method !== "none" ? cached.method : null;
-                    return (
-                      <div
-                        key={item}
-                        onMouseDown={() => selectUrl(item)}
-                        onMouseEnter={() => setSelectedIndex(i)}
-                        className="flex items-center justify-between px-3 py-2 text-sm font-mono cursor-pointer group"
-                        style={{
-                          backgroundColor: i === selectedIndex ? 'var(--sub-panel-light)' : 'transparent',
-                          color: i === selectedIndex ? 'var(--sub-text)' : 'var(--sub-text-dim)',
-                        }}
-                      >
-                        <span className="truncate">{highlightMatch(item, url)}</span>
-                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          {authLabel && (
-                            <span
-                              className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                              style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
-                            >
-                              {authLabel}
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onMouseDown={(e) => handleRemove(e, item)}
-                            className="alarm-text opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-                            title="Remove from history"
-                          >
-                            x
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                  Configure in Settings
+                </button>
+              </div>
+              <select
+                value={selectedConfigId}
+                onChange={(e) => handleConfigSelect(e.target.value)}
+                disabled={connected || connecting}
+                className="w-full input-sub border rounded-lg px-2 py-2 text-sm disabled:opacity-50"
+              >
+                {mcpConfigs.length > 0 && (
+                  <>
+                    {mcpConfigs.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                    <option disabled>{"───────────"}</option>
+                  </>
+                )}
+                <option value="custom">Custom URL...</option>
+              </select>
             </div>
 
-            {/* Auth Config */}
-            <div>
-              <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Authentication</label>
-              <AuthConfig />
-            </div>
+            {/* Selected config: show URL read-only */}
+            {selectedConfig && (
+              <div>
+                <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Server URL</label>
+                <div
+                  className="w-full rounded-lg px-3 py-2 text-sm font-mono"
+                  style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)', color: 'var(--sub-text-dim)' }}
+                >
+                  {selectedConfig.url || "(no URL configured)"}
+                </div>
+              </div>
+            )}
+
+            {/* Custom URL: show manual input with autocomplete */}
+            {selectedConfigId === "custom" && (
+              <>
+                <div ref={wrapperRef} className="relative">
+                  <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Server URL</label>
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={url}
+                    onChange={(e) => {
+                      setUrl(e.target.value);
+                      setShowDropdown(true);
+                      setSelectedIndex(-1);
+                    }}
+                    onFocus={() => setShowDropdown(true)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="e.g. http://localhost:3000/sse"
+                    disabled={connected || connecting}
+                    className="w-full input-sub border rounded-lg px-3 py-2 text-sm  disabled:opacity-50"
+                  />
+                  {isOpen && (
+                    <div
+                      className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto"
+                      style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
+                    >
+                      {matches.map((item, i) => {
+                        const cached = getCachedAuth(item);
+                        const authLabel = cached?.method && cached.method !== "none" ? cached.method : null;
+                        return (
+                          <div
+                            key={item}
+                            onMouseDown={() => selectUrl(item)}
+                            onMouseEnter={() => setSelectedIndex(i)}
+                            className="flex items-center justify-between px-3 py-2 text-sm font-mono cursor-pointer group"
+                            style={{
+                              backgroundColor: i === selectedIndex ? 'var(--sub-panel-light)' : 'transparent',
+                              color: i === selectedIndex ? 'var(--sub-text)' : 'var(--sub-text-dim)',
+                            }}
+                          >
+                            <span className="truncate">{highlightMatch(item, url)}</span>
+                            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                              {authLabel && (
+                                <span
+                                  className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
+                                >
+                                  {authLabel}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onMouseDown={(e) => handleRemove(e, item)}
+                                className="alarm-text opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+                                title="Remove from history"
+                              >
+                                x
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Auth Config — only for custom URLs */}
+                <div>
+                  <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>Authentication</label>
+                  <AuthConfig />
+                </div>
+              </>
+            )}
 
             {/* LLM Info */}
             <LLMDisplay />
@@ -351,7 +433,7 @@ export function ConnectTab() {
               ) : (
                 <button
                   type="submit"
-                  disabled={connecting || !url.trim()}
+                  disabled={connecting || !connectUrl}
                   className="btn-brass w-full px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                   {connecting ? "Connecting..." : oauthPending ? "Redirecting..." : "Connect"}

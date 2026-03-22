@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore, KNOWN_MODELS } from "../../store";
-import type { LLMConfig } from "../../store";
+import type { LLMConfig, MCPServerConfig } from "../../store";
 
 const PROVIDER_BADGE_STYLES: Record<string, React.CSSProperties> = {
   anthropic: { backgroundColor: "rgba(196,154,42,0.2)", color: "var(--sub-brass)" },
@@ -235,6 +235,191 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
   );
 }
 
+const AUTH_METHOD_LABELS: Record<string, string> = {
+  none: "None",
+  bearer: "Bearer Token",
+  header: "Custom Header",
+  oauth: "OAuth 2.0",
+};
+
+function MCPConfigCard({ config }: { config: MCPServerConfig }) {
+  const { updateMCPConfig, removeMCPConfig } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const [name, setName] = useState(config.name);
+  const [url, setUrl] = useState(config.url);
+  const [authMethod, setAuthMethod] = useState(config.authMethod);
+  const [authToken, setAuthToken] = useState(config.authToken);
+  const [headerName, setHeaderName] = useState(config.headerName);
+  const [headerValue, setHeaderValue] = useState(config.headerValue);
+
+  const handleSave = () => {
+    updateMCPConfig(config.id, { name, url, authMethod, authToken, headerName, headerValue });
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setName(config.name);
+    setUrl(config.url);
+    setAuthMethod(config.authMethod);
+    setAuthToken(config.authToken);
+    setHeaderName(config.headerName);
+    setHeaderValue(config.headerValue);
+    setEditing(false);
+  };
+
+  return (
+    <div className="panel-riveted rounded-lg p-4">
+      <div className="flex items-center justify-between">
+        <span className="font-medium" style={{ color: "var(--sub-text)" }}>{config.name}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditing(!editing)}
+            className="text-xs px-2 py-1 rounded transition-colors"
+            style={{ color: "var(--sub-brass)", backgroundColor: "rgba(196,154,42,0.1)" }}
+          >
+            {editing ? "Cancel" : "Edit"}
+          </button>
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="text-xs px-2 py-1 rounded transition-colors"
+              style={{ color: "var(--sub-red)", backgroundColor: "rgba(204,51,51,0.1)" }}
+            >
+              Delete
+            </button>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => removeMCPConfig(config.id)}
+                className="text-xs px-2 py-1 rounded font-medium"
+                style={{ color: "#fff", backgroundColor: "var(--sub-red)" }}
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs px-2 py-1 rounded"
+                style={{ color: "var(--sub-text-dim)" }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="mt-4 space-y-3 pt-3" style={{ borderTop: "1px solid var(--sub-rivet)" }}>
+          {/* Name */}
+          <div>
+            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+              placeholder="e.g. Scoutbook MCP"
+            />
+          </div>
+
+          {/* URL */}
+          <div>
+            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>URL</label>
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+              placeholder="https://example.com/mcp"
+            />
+          </div>
+
+          {/* Auth Method */}
+          <div>
+            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Auth Method</label>
+            <select
+              value={authMethod}
+              onChange={(e) => setAuthMethod(e.target.value as MCPServerConfig["authMethod"])}
+              className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
+            >
+              <option value="none">None</option>
+              <option value="bearer">Bearer Token</option>
+              <option value="header">Custom Header</option>
+              <option value="oauth">OAuth 2.0</option>
+            </select>
+          </div>
+
+          {/* Bearer Token */}
+          {authMethod === "bearer" && (
+            <div>
+              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Token</label>
+              <input
+                type="password"
+                value={authToken}
+                onChange={(e) => setAuthToken(e.target.value)}
+                className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                placeholder="Bearer token"
+              />
+            </div>
+          )}
+
+          {/* Custom Header */}
+          {authMethod === "header" && (
+            <>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Header Name</label>
+                <input
+                  type="text"
+                  value={headerName}
+                  onChange={(e) => setHeaderName(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="X-API-Key"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Header Value</label>
+                <input
+                  type="password"
+                  value={headerValue}
+                  onChange={(e) => setHeaderValue(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Header value"
+                />
+              </div>
+            </>
+          )}
+
+          {/* OAuth note */}
+          {authMethod === "oauth" && (
+            <p className="text-xs" style={{ color: "var(--sub-text-dim)" }}>
+              OAuth flow will be initiated on connect.
+            </p>
+          )}
+
+          {/* Save / Cancel */}
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleSave}
+              className="btn-brass px-4 py-1.5 rounded-lg text-sm font-medium"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-4 py-1.5 rounded-lg text-sm"
+              style={{ color: "var(--sub-text-dim)", border: "1px solid var(--sub-rivet)" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsTab() {
   const {
     llmConfigs,
@@ -247,6 +432,8 @@ export function SettingsTab() {
     maxTokensPerResponse,
     setMaxToolRounds,
     setMaxTokensPerResponse,
+    mcpConfigs,
+    addMCPConfig,
   } = useStore();
 
   const handleAddLLM = () => {
@@ -262,9 +449,50 @@ export function SettingsTab() {
     addLLMConfig(config);
   };
 
+  const handleAddMCP = () => {
+    const config: MCPServerConfig = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      name: "New Server",
+      url: "",
+      authMethod: "none",
+      authToken: "",
+      headerName: "",
+      headerValue: "",
+    };
+    addMCPConfig(config);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-2xl mx-auto space-y-8">
+        {/* MCP Servers */}
+        <section>
+          <h2 className="font-stencil text-sm font-bold mb-4" style={{ color: "var(--sub-brass)" }}>
+            MCP Servers
+          </h2>
+          <div className="space-y-3">
+            {mcpConfigs.map((config) => (
+              <MCPConfigCard key={config.id} config={config} />
+            ))}
+            {mcpConfigs.length === 0 && (
+              <p className="text-sm" style={{ color: "var(--sub-text-dim)" }}>
+                No MCP server configurations yet. Add one to get started.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleAddMCP}
+            className="mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{
+              border: "1px dashed var(--sub-brass-dim)",
+              color: "var(--sub-brass)",
+              backgroundColor: "rgba(196,154,42,0.05)",
+            }}
+          >
+            + Add Server
+          </button>
+        </section>
+
         {/* LLM Configurations */}
         <section>
           <h2 className="font-stencil text-sm font-bold mb-4" style={{ color: "var(--sub-brass)" }}>

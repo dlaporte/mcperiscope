@@ -32,6 +32,16 @@ export interface LLMConfig {
   contextWindow: number; // context window size
 }
 
+export interface MCPServerConfig {
+  id: string;
+  name: string;        // user-defined label (e.g., "Scoutbook MCP", "Local Dev")
+  url: string;         // MCP server URL
+  authMethod: "none" | "bearer" | "header" | "oauth";
+  authToken: string;   // for bearer auth
+  headerName: string;  // for header auth
+  headerValue: string; // for header auth
+}
+
 export const KNOWN_MODELS = [
   // Anthropic — Claude 4.6 family (latest)
   { id: "claude-opus-4-6", label: "Claude Opus 4.6", context: 1000000, provider: "anthropic" as const },
@@ -97,6 +107,13 @@ interface AppState {
   setPrimaryLLM: (id: string) => void;
   setAnalystLLM: (id: string) => void;
   getAnalystConfig: () => LLMConfig | null;
+
+  // MCP server configurations
+  mcpConfigs: MCPServerConfig[];
+  addMCPConfig: (config: MCPServerConfig) => void;
+  updateMCPConfig: (id: string, updates: Partial<MCPServerConfig>) => void;
+  removeMCPConfig: (id: string) => void;
+  selectMCPConfig: (id: string) => void;
 
   // Evaluation settings
   maxToolRounds: number;
@@ -417,6 +434,40 @@ function migrateToLLMConfigs(): { configs: LLMConfig[]; primaryId: string } {
   return { configs, primaryId };
 }
 
+function loadMCPConfigs(): MCPServerConfig[] {
+  try {
+    const raw = lsGet("mcpConfigs");
+    let configs: MCPServerConfig[] = [];
+    if (raw) configs = JSON.parse(raw);
+
+    // Migration: if no configs exist and there's exactly one URL in history, create a config
+    if (configs.length === 0) {
+      try {
+        const historyRaw = localStorage.getItem("mcperiscope:url-history");
+        if (historyRaw) {
+          const history = JSON.parse(historyRaw);
+          if (Array.isArray(history) && history.length === 1 && typeof history[0] === "string") {
+            const url = history[0];
+            const config: MCPServerConfig = {
+              id: generateId(),
+              name: url.replace(/^https?:\/\//, "").split("/")[0] || "MCP Server",
+              url,
+              authMethod: "none",
+              authToken: "",
+              headerName: "",
+              headerValue: "",
+            };
+            configs.push(config);
+            lsSet("mcpConfigs", JSON.stringify(configs));
+          }
+        }
+      } catch { /* ignore migration errors */ }
+    }
+
+    return configs;
+  } catch { return []; }
+}
+
 const _migrated = migrateToLLMConfigs();
 
 export const useStore = create<AppState>((set, get) => ({
@@ -457,6 +508,7 @@ export const useStore = create<AppState>((set, get) => ({
   llmConfigs: _migrated.configs,
   primaryLLM: _migrated.primaryId,
   analystLLM: lsGet("analystLLM"),
+  mcpConfigs: loadMCPConfigs(),
   maxToolRounds: parseInt(lsGet("maxToolRounds") || "20", 10),
   maxTokensPerResponse: parseInt(lsGet("maxTokensPerResponse") || "4096", 10),
   tools: [],
@@ -795,6 +847,40 @@ export const useStore = create<AppState>((set, get) => ({
   setAnalystLLM: (id) => {
     lsSet("analystLLM", id);
     set({ analystLLM: id });
+  },
+
+  addMCPConfig: (config) => {
+    const configs = [...get().mcpConfigs, config];
+    lsSet("mcpConfigs", JSON.stringify(configs));
+    set({ mcpConfigs: configs });
+  },
+
+  updateMCPConfig: (id, updates) => {
+    const configs = get().mcpConfigs.map((c) => c.id === id ? { ...c, ...updates } : c);
+    lsSet("mcpConfigs", JSON.stringify(configs));
+    set({ mcpConfigs: configs });
+  },
+
+  removeMCPConfig: (id) => {
+    const configs = get().mcpConfigs.filter((c) => c.id !== id);
+    lsSet("mcpConfigs", JSON.stringify(configs));
+    set({ mcpConfigs: configs });
+  },
+
+  selectMCPConfig: (id) => {
+    const config = get().mcpConfigs.find((c) => c.id === id);
+    if (config) {
+      set({
+        authMethod: config.authMethod,
+        authToken: config.authToken,
+        headerName: config.headerName,
+        headerValue: config.headerValue,
+      });
+      lsSet("authMethod", config.authMethod);
+      lsSet("authToken", config.authToken);
+      lsSet("headerName", config.headerName);
+      lsSet("headerValue", config.headerValue);
+    }
   },
 
   getAnalystConfig: () => {
