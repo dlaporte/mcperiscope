@@ -469,12 +469,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 yield _sse("progress", {"phase": "proxy", "message": f"Proxy start failed: {e}"})
 
         # --- Step 4: Re-run prompts through proxy ---
-        await asyncio.sleep(0)  # Yield control to flush pending SSE events
         proxy_traces = []
         proxy_answers = []  # Capture proxy answers for LLM-as-judge
         proxy_tool_count = proxy_tools or 0
-        _log = logging.getLogger("mcperiscope.optimize")
-        _log.info(f"Step 4: proxy_port={proxy_port}, api_key={'SET' if session.api_key else 'EMPTY'}, eval_results={len(session.eval_results)}")
         if not proxy_port:
             yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
         elif not session.api_key:
@@ -482,21 +479,14 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         elif not session.eval_results:
             yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no evaluation prompts)"})
         else:
-            _log.info("Entering proxy evaluation branch")
             try:
-                _log.info("Creating LLM client...")
                 llm = LLMClient(session.api_key, session.model, session.custom_endpoint)
-                _log.info("LLM client created")
                 from fastmcp import Client as McpClient
 
                 # Build tool list from proxy — keep connection open for all prompts
-                _log.info(f"Connecting to proxy at localhost:{proxy_port}...")
                 proxy_mcp = McpClient(f"http://localhost:{proxy_port}/mcp")
-                _log.info("McpClient created, entering async with...")
                 async with proxy_mcp:
-                    _log.info("Connected to proxy, listing tools...")
                     proxy_tools_defs = await proxy_mcp.list_tools()
-                    _log.info(f"Got {len(proxy_tools_defs)} proxy tools")
                     proxy_tools_list = [{
                         "name": t.name,
                         "description": t.description or "",
@@ -572,10 +562,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             })
 
             except Exception as e:
-                _log.exception("Proxy evaluation failed")
-                yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}\n{traceback.format_exc()[:300]}"})
-
-        _log.info(f"Step 4 complete. proxy_answers={len(proxy_answers)}, proxy_traces={len(proxy_traces)}")
+                logger.exception("Proxy evaluation failed")
+                yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}"})
 
         # --- Step 6: LLM-as-judge — compare baseline vs proxy answers ---
         judge_results = []
