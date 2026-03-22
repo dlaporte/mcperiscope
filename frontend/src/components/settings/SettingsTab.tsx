@@ -18,15 +18,7 @@ function formatContext(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
 }
 
-function LLMConfigCard({
-  config,
-  isPrimary,
-  isJudge,
-}: {
-  config: LLMConfig;
-  isPrimary: boolean;
-  isJudge: boolean;
-}) {
+function LLMConfigCard({ config }: { config: LLMConfig }) {
   const { updateLLMConfig, removeLLMConfig } = useStore();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -77,39 +69,10 @@ function LLMConfigCard({
     }
   };
 
-  const badgeStyle = PROVIDER_BADGE_STYLES[config.provider] || PROVIDER_BADGE_STYLES.custom;
-
   return (
     <div className="panel-riveted rounded-lg p-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="font-medium" style={{ color: "var(--sub-text)" }}>{config.name}</span>
-          <span
-            className="text-[10px] font-medium px-1.5 py-0.5 rounded uppercase"
-            style={badgeStyle}
-          >
-            {PROVIDER_LABELS[config.provider] || config.provider}
-          </span>
-          <span className="text-xs font-mono" style={{ color: "var(--sub-text-dim)" }}>
-            {config.model}
-          </span>
-          {isPrimary && (
-            <span
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-              style={{ backgroundColor: "rgba(51,255,51,0.15)", color: "var(--sub-phosphor)" }}
-            >
-              PRIMARY
-            </span>
-          )}
-          {isJudge && (
-            <span
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-              style={{ backgroundColor: "rgba(100,149,237,0.15)", color: "#6495ed" }}
-            >
-              JUDGE
-            </span>
-          )}
-        </div>
+        <span className="font-medium" style={{ color: "var(--sub-text)" }}>{config.name}</span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setEditing(!editing)}
@@ -309,12 +272,7 @@ export function SettingsTab() {
           </h2>
           <div className="space-y-3">
             {llmConfigs.map((config) => (
-              <LLMConfigCard
-                key={config.id}
-                config={config}
-                isPrimary={config.id === primaryLLM}
-                isJudge={config.id === judgeLLM}
-              />
+              <LLMConfigCard key={config.id} config={config} />
             ))}
             {llmConfigs.length === 0 && (
               <p className="text-sm" style={{ color: "var(--sub-text-dim)" }}>
@@ -343,9 +301,9 @@ export function SettingsTab() {
           <div className="panel-riveted rounded-lg p-4 space-y-4">
             <div>
               <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
-                Primary LLM
+                Agent LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
-                  Used for evaluation prompts
+                  Uses tools to answer evaluation prompts
                 </span>
               </label>
               <select
@@ -365,7 +323,7 @@ export function SettingsTab() {
               <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Judge LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
-                  Used for answer comparison during optimization
+                  Compares baseline vs optimized answers
                 </span>
               </label>
               <select
@@ -373,7 +331,7 @@ export function SettingsTab() {
                 onChange={(e) => setJudgeLLM(e.target.value)}
                 className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
               >
-                <option value="">-- Same as Primary --</option>
+                <option value="">-- Same as Agent --</option>
                 {llmConfigs.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.model})

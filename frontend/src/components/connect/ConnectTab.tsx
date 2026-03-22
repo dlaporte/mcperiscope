@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../../store";
 import { AuthConfig } from "./AuthConfig";
-import { ModelConfig } from "./ModelConfig";
 
 const STORAGE_KEY = "mcperiscope:url-history";
 const AUTH_CACHE_KEY = "mcperiscope:auth-cache";
@@ -62,6 +61,52 @@ function cacheAuthForUrl(url: string, auth: CachedAuth) {
 
 function getCachedAuth(url: string): CachedAuth | undefined {
   return loadAuthCache()[url];
+}
+
+function LLMDisplay() {
+  const { llmConfigs, primaryLLM, judgeLLM, setActiveTab } = useStore();
+  const agentConfig = llmConfigs.find((c) => c.id === primaryLLM);
+  const judgeConfig = judgeLLM ? llmConfigs.find((c) => c.id === judgeLLM) : agentConfig;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-sm" style={{ color: 'var(--sub-text-dim)' }}>LLM Configuration</label>
+        <button
+          type="button"
+          onClick={() => setActiveTab("settings")}
+          className="text-xs px-2 py-0.5 rounded"
+          style={{ color: 'var(--sub-brass)', backgroundColor: 'rgba(196,154,42,0.1)' }}
+        >
+          Settings
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        <div
+          className="rounded-lg px-3 py-2 text-sm flex items-center justify-between"
+          style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
+        >
+          <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>Agent</span>
+          {agentConfig ? (
+            <span style={{ color: 'var(--sub-text)' }}>{agentConfig.name}</span>
+          ) : (
+            <span style={{ color: 'var(--sub-text-dim)' }}>Not configured</span>
+          )}
+        </div>
+        <div
+          className="rounded-lg px-3 py-2 text-sm flex items-center justify-between"
+          style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
+        >
+          <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>Judge</span>
+          {judgeConfig ? (
+            <span style={{ color: 'var(--sub-text)' }}>{judgeConfig.name}</span>
+          ) : (
+            <span style={{ color: 'var(--sub-text-dim)' }}>Not configured</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ConnectTab() {
@@ -289,11 +334,8 @@ export function ConnectTab() {
               <AuthConfig />
             </div>
 
-            {/* Model Config */}
-            <div>
-              <label className="block text-sm mb-1" style={{ color: 'var(--sub-text-dim)' }}>LLM Configuration</label>
-              <ModelConfig />
-            </div>
+            {/* LLM Info */}
+            <LLMDisplay />
 
             {/* Connect / Disconnect Button */}
             <div className="pt-2">
