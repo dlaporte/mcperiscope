@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from backend.state import MODEL_CONTEXT_WINDOWS, session
 
 logger = logging.getLogger(__name__)
-from mcp_optimizer.inventory import find_name_clusters, levenshtein, tool_token_budget
+from backend.mcp_optimizer.inventory import find_name_clusters, levenshtein, tool_token_budget
 
 router = APIRouter()
 

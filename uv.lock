@@ -854,23 +854,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mcp-optimizer"
-version = "0.1.0"
-source = { directory = "../mcp-optimizer" }
-dependencies = [
-    { name = "fastmcp" },
-    { name = "httpx" },
-    { name = "jinja2" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastmcp", specifier = ">=3.0.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "jinja2", specifier = ">=3.1.0" },
-]
-
-[[package]]
 name = "mcperiscope"
 version = "0.1.0"
 source = { editable = "." }
@@ -879,7 +862,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "httpx" },
-    { name = "mcp-optimizer" },
+    { name = "jinja2" },
     { name = "openai" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -903,7 +886,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=3.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'dev'" },
-    { name = "mcp-optimizer", directory = "../mcp-optimizer" },
+    { name = "jinja2", specifier = ">=3.1.0" },
     { name = "openai", specifier = ">=1.50.0" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },

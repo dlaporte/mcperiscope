@@ -53,7 +53,7 @@ async def get_report_html():
             status_code=400,
             detail="No analysis data available. Run optimization first.",
         )
-    from mcp_optimizer.report import generate_report_html
+    from backend.mcp_optimizer.report import generate_report_html
 
     report_data = _build_report_data()
     html_content = generate_report_html(report_data)
@@ -68,7 +68,7 @@ async def get_report_md():
             status_code=400,
             detail="No analysis data available. Run optimization first.",
         )
-    from mcp_optimizer.report import generate_report_md
+    from backend.mcp_optimizer.report import generate_report_md
 
     report_data = _build_report_data()
     md_content = generate_report_md(report_data)
@@ -83,7 +83,7 @@ async def get_plan():
             status_code=400,
             detail="No recommendations available. Run optimization first.",
         )
-    from mcp_optimizer.report import generate_plan_md
+    from backend.mcp_optimizer.report import generate_plan_md
 
     plan_md = generate_plan_md(
         url=mcp_manager.get_url() or "",

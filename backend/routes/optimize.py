@@ -373,9 +373,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
     async def event_stream():
         import asyncio
-        from mcp_optimizer.analyze import run_analysis
-        from mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
-        from mcp_optimizer.report import compute_comparison
+        from backend.mcp_optimizer.analyze import run_analysis
+        from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
+        from backend.mcp_optimizer.report import compute_comparison
 
         # --- Step 1: Analyze ---
         yield _sse("progress", {"phase": "analyze", "message": "Analyzing tool usage patterns..."})
@@ -719,7 +719,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
 def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
     """Generate proxy code, handling the recommendation format from analyze.py."""
-    from mcp_optimizer.inventory import find_name_clusters, tool_token_budget
+    from backend.mcp_optimizer.inventory import find_name_clusters, tool_token_budget
 
     # Build a practical proxy: consolidate no-param lookup tools + passthrough rest
     no_param_tools = []
@@ -752,7 +752,7 @@ def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
         "import json",
         "from contextlib import asynccontextmanager",
         "from fastmcp import FastMCP",
-        "from mcp_optimizer.proxy_runtime import UpstreamClient",
+        "from backend.mcp_optimizer.proxy_runtime import UpstreamClient",
         "",
         f"UPSTREAM_URL = {json.dumps(upstream_url)}",
         "",
@@ -846,10 +846,13 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen]:
 
     proxy_file = session.project_dir / "proxy" / "server.py"
 
+    # Set cwd to project root so backend.mcp_optimizer imports work
+    project_root = Path(__file__).resolve().parent.parent.parent
     process = subprocess.Popen(
         [sys.executable, str(proxy_file), "--port", str(port)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        cwd=str(project_root),
     )
 
     return port, process

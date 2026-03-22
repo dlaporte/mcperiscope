@@ -9,8 +9,8 @@ from __future__ import annotations
 import os
 import logging
 
-from mcp_optimizer.connections import HeadlessOAuth
-from mcp_optimizer.token_store import FileKeyValueStore
+from backend.mcp_optimizer.connections import HeadlessOAuth
+from backend.mcp_optimizer.token_store import FileKeyValueStore
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

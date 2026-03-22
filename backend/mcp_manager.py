@@ -15,8 +15,8 @@ from typing import Any
 
 from fastmcp import Client
 from mcp.types import Tool
-from mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
-from mcp_optimizer.token_store import FileKeyValueStore
+from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
+from backend.mcp_optimizer.token_store import FileKeyValueStore
 
 from backend.auth.oauth import WebOAuth
 from backend.state import session

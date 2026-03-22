@@ -5,7 +5,7 @@ from pathlib import Path
 from subprocess import Popen
 from typing import Any
 
-from mcp_optimizer.connections import MCPConnection
+from backend.mcp_optimizer.connections import MCPConnection
 
 
 MODEL_CONTEXT_WINDOWS = {
