@@ -92,9 +92,9 @@ export function ResultsTab() {
     let totalLatency = 0;
     let peakContext = 0;
     for (const ev of evalResults) {
-      // Use API-reported peak_context_tokens (includes tools + resources + conversation)
+      // Use API-reported peak_context_tokens from most recent eval with data
       const peak = ev.usage?.peak_context_tokens;
-      if (peak && peak > peakContext) peakContext = peak;
+      if (peak) peakContext = peak;
       for (const step of (ev.toolChain || [])) {
         totalCalls++;
         totalTraceTokens += Math.max(1, (step.output?.length || 0) / 4);

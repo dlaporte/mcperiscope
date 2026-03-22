@@ -4,6 +4,12 @@ interface Props {
   max: number;
 }
 
+function fillColors(pct: number) {
+  if (pct > 15) return { fill: "#dd4040", glow: "rgba(221,64,64,0.5)" };
+  if (pct > 5) return { fill: "#c9a030", glow: "rgba(201,160,48,0.4)" };
+  return { fill: "#30cc30", glow: "rgba(48,204,48,0.4)" };
+}
+
 export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
   if (max <= 0) return null;
 
@@ -11,6 +17,9 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
   const optimizedPct = optimized != null ? (optimized / max) * 100 : null;
   const savings = optimized != null ? baseline - optimized : null;
   const savingsPct = savings != null && baseline > 0 ? (savings / baseline) * 100 : null;
+
+  const baselineColors = fillColors(baselinePct);
+  const optimizedColors = optimizedPct != null ? fillColors(optimizedPct) : null;
 
   return (
     <div
@@ -30,14 +39,14 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
           boxShadow: "inset 0 2px 4px rgba(0,0,0,0.7)",
         }}
       >
-        {/* Optimized fill (green) — shown when we have an optimized value */}
-        {optimizedPct != null && (
+        {/* Optimized fill — shown when we have an optimized value */}
+        {optimizedPct != null && optimizedColors && (
           <div
             className="absolute top-0 left-0 h-full rounded-sm"
             style={{
               width: `${Math.max(Math.min(optimizedPct, 100), 1.5)}%`,
-              background: "linear-gradient(180deg, #30cc30 0%, #20aa20 100%)",
-              boxShadow: "0 0 10px rgba(48,204,48,0.4), 0 0 20px rgba(48,204,48,0.3), inset 0 0 4px rgba(255,255,255,0.1)",
+              background: `linear-gradient(180deg, ${optimizedColors.fill} 0%, ${optimizedColors.fill} 100%)`,
+              boxShadow: `0 0 10px ${optimizedColors.glow}, 0 0 20px ${optimizedColors.glow}, inset 0 0 4px rgba(255,255,255,0.1)`,
               minWidth: "6px",
               zIndex: 2,
               transition: "width 1.2s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -45,17 +54,17 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
           />
         )}
 
-        {/* Baseline fill (dim, behind the optimized fill) */}
+        {/* Baseline fill */}
         <div
           className="absolute top-0 left-0 h-full rounded-sm"
           style={{
             width: `${Math.max(Math.min(baselinePct, 100), 1.5)}%`,
             background: optimizedPct != null
-              ? "linear-gradient(180deg, rgba(196,154,42,0.3) 0%, rgba(196,154,42,0.15) 100%)"
-              : "linear-gradient(180deg, #c9a030 0%, #a08020 100%)",
+              ? `linear-gradient(180deg, ${baselineColors.fill}40 0%, ${baselineColors.fill}20 100%)`
+              : `linear-gradient(180deg, ${baselineColors.fill} 0%, ${baselineColors.fill} 100%)`,
             boxShadow: optimizedPct != null
               ? "none"
-              : "0 0 10px rgba(201,160,48,0.4), inset 0 0 4px rgba(255,255,255,0.1)",
+              : `0 0 10px ${baselineColors.glow}, inset 0 0 4px rgba(255,255,255,0.1)`,
             minWidth: "6px",
             zIndex: 1,
           }}
@@ -68,8 +77,8 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
             style={{
               left: `${Math.min(baselinePct, 100)}%`,
               width: "2px",
-              backgroundColor: "var(--sub-brass)",
-              boxShadow: "0 0 4px rgba(196,154,42,0.6)",
+              backgroundColor: baselineColors.fill,
+              boxShadow: `0 0 4px ${baselineColors.glow}`,
               zIndex: 3,
             }}
             title={`Baseline: ${baseline.toLocaleString()} tokens`}
@@ -99,7 +108,7 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
               {optimizedPct.toFixed(1)}%
             </span>
             <span className="text-xs font-mono" style={{ color: 'var(--sub-text-dim)' }}>
-              <span style={{ color: 'var(--sub-brass)', textDecoration: 'line-through', opacity: 0.6 }}>
+              <span style={{ color: baselineColors.fill, textDecoration: 'line-through', opacity: 0.6 }}>
                 {baseline.toLocaleString()}
               </span>
               {" → "}

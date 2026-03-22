@@ -847,11 +847,11 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / max(num_prompts, 1) * 1000, 1) if proxy_traces else None
 
         baseline_avg = round(baseline_tokens / num_prompts, 1)
-        # Use API-reported peak context from eval results (includes tools + resources + conversation)
+        # Use API-reported peak context from most recent eval (matches Evaluate tab)
         baseline_peak = 0
         for ev in session.eval_results:
             peak = (ev.get("usage") or {}).get("peak_context_tokens", 0)
-            if peak > baseline_peak:
+            if peak:
                 baseline_peak = peak
         # Fall back to estimate including loaded resources if API doesn't report tokens
         loaded_resource_tokens = sum(r.get("tokens", 0) for r in session.loaded_resources.values())
