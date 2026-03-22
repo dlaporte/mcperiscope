@@ -1022,15 +1022,22 @@ async def _generate_proxy_via_llm(
         "3. Implements each recommendation above\n"
         "4. Passes through any tools not affected by recommendations\n"
         "5. Is runnable with: python server.py --port PORT\n\n"
-        "The proxy must:\n"
-        "- Use `from backend.mcp_optimizer.proxy_runtime import UpstreamClient`\n"
-        "- Create an UpstreamClient with the upstream URL and token_dir\n"
+        "CRITICAL REQUIREMENTS (use these EXACT imports and patterns):\n"
+        "```python\n"
+        "from __future__ import annotations\n"
+        "import argparse\n"
+        "import json\n"
+        "from contextlib import asynccontextmanager\n"
+        "from fastmcp import FastMCP  # NOT from mcp.server.fastmcp\n"
+        "from backend.mcp_optimizer.proxy_runtime import UpstreamClient\n"
+        "```\n\n"
+        "- Create UpstreamClient with upstream URL and token_dir\n"
         "- Use @asynccontextmanager for lifespan (connect/disconnect)\n"
-        '- Create FastMCP with lifespan: `mcp = FastMCP("mcperiscope-proxy", lifespan=lifespan)`\n'
-        "- For each tool, call `await upstream.call(tool_name, args)` to forward to upstream\n"
+        '- Create: `mcp = FastMCP("mcperiscope-proxy", lifespan=lifespan)`\n'
+        "- For each tool: `await upstream.call(tool_name, args)` to forward\n"
         "- Return results as strings (json.dumps if needed)\n"
-        '- Use `mcp.run(transport="streamable-http", port=args.port)` in __main__\n\n'
-        "Output ONLY the Python code, no explanation."
+        '- Entry point: `mcp.run(transport="streamable-http", port=args.port)`\n\n'
+        "Output ONLY valid Python code. No markdown fences, no explanations."
     )
 
     analyst = LLMClient(analyst_key, analyst_model, analyst_provider, analyst_endpoint)
@@ -1044,12 +1051,20 @@ async def _generate_proxy_via_llm(
     # Strip markdown code fences if present
     if code.startswith("```"):
         lines = code.split("\n")
-        # Remove first line (```python or ```)
         lines = lines[1:]
-        # Remove last line if it's ```
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         code = "\n".join(lines)
+
+    # Fix common LLM mistakes
+    code = code.replace("from mcp.server.fastmcp import FastMCP", "from fastmcp import FastMCP")
+    code = code.replace("from mcp.server import FastMCP", "from fastmcp import FastMCP")
+
+    # Validate syntax
+    try:
+        compile(code, "<proxy>", "exec")
+    except SyntaxError as e:
+        raise RuntimeError(f"Generated proxy has syntax error: {e}")
 
     return code
 
