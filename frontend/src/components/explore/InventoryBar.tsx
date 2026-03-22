@@ -50,14 +50,12 @@ export function InventoryBar() {
 
   return (
     <div
-      className="relative flex items-center gap-4 px-4 py-3 text-sm"
+      className="flex items-center gap-4 px-4 py-3"
       style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
     >
       <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Session usage</span>
       {!loading && inventory && (
-        <div className="flex-1 min-w-0">
-          <ContextGauge tokens={totalTokens} max={contextWindow} />
-        </div>
+        <ContextGauge tokens={totalTokens} max={contextWindow} />
       )}
       {loading && (
         <div className="flex-1 text-xs animate-pulse" style={{ color: 'var(--sub-text-dim)' }}>
