@@ -50,7 +50,7 @@ export function InventoryBar() {
 
   return (
     <div
-      className="relative flex items-center gap-4 px-4 py-2 text-sm"
+      className="relative flex items-center gap-4 px-4 py-3 text-sm"
       style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
     >
       <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>Session usage</span>
