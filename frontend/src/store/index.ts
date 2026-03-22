@@ -78,15 +78,15 @@ interface AppState {
   // LLM configurations
   llmConfigs: LLMConfig[];
   primaryLLM: string;   // ID of the primary LLM config
-  judgeLLM: string;      // ID of the judge LLM config
+  analystLLM: string;      // ID of the analyst LLM config
 
   // LLM config actions
   addLLMConfig: (config: LLMConfig) => void;
   updateLLMConfig: (id: string, updates: Partial<LLMConfig>) => void;
   removeLLMConfig: (id: string) => void;
   setPrimaryLLM: (id: string) => void;
-  setJudgeLLM: (id: string) => void;
-  getJudgeConfig: () => LLMConfig | null;
+  setAnalystLLM: (id: string) => void;
+  getAnalystConfig: () => LLMConfig | null;
 
   // Evaluation settings
   maxToolRounds: number;
@@ -434,7 +434,7 @@ export const useStore = create<AppState>((set, get) => ({
   customContextWindow: parseInt(lsGet("customContextWindow") || "128000", 10),
   llmConfigs: _migrated.configs,
   primaryLLM: _migrated.primaryId,
-  judgeLLM: lsGet("judgeLLM"),
+  analystLLM: lsGet("analystLLM"),
   maxToolRounds: parseInt(lsGet("maxToolRounds") || "20", 10),
   maxTokensPerResponse: parseInt(lsGet("maxTokensPerResponse") || "4096", 10),
   tools: [],
@@ -575,9 +575,9 @@ export const useStore = create<AppState>((set, get) => ({
       updates.primaryLLM = "";
       lsSet("primaryLLM", "");
     }
-    if (get().judgeLLM === id) {
-      updates.judgeLLM = "";
-      lsSet("judgeLLM", "");
+    if (get().analystLLM === id) {
+      updates.analystLLM = "";
+      lsSet("analystLLM", "");
     }
     set(updates);
   },
@@ -602,14 +602,14 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  setJudgeLLM: (id) => {
-    lsSet("judgeLLM", id);
-    set({ judgeLLM: id });
+  setAnalystLLM: (id) => {
+    lsSet("analystLLM", id);
+    set({ analystLLM: id });
   },
 
-  getJudgeConfig: () => {
-    const { judgeLLM, llmConfigs } = get();
-    return llmConfigs.find((c) => c.id === judgeLLM) || null;
+  getAnalystConfig: () => {
+    const { analystLLM, llmConfigs } = get();
+    return llmConfigs.find((c) => c.id === analystLLM) || null;
   },
 
   setMaxToolRounds: (n) => {
@@ -1084,7 +1084,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const state = get();
       const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
-      const judgeConfig = state.getJudgeConfig();
+      const analystConfig = state.getAnalystConfig();
       const included = [...state.evalIncluded];
       const response = await fetch("/api/optimize/run", {
         method: "POST",
@@ -1095,10 +1095,10 @@ export const useStore = create<AppState>((set, get) => ({
           model: state.model || undefined,
           provider: primaryConfig?.provider || undefined,
           custom_endpoint: state.customEndpoint || undefined,
-          judge_model: judgeConfig?.model || undefined,
-          judge_provider: judgeConfig?.provider || undefined,
-          judge_api_key: judgeConfig?.apiKey || undefined,
-          judge_endpoint: judgeConfig?.provider === "custom" ? judgeConfig?.endpoint : undefined,
+          analyst_model: analystConfig?.model || undefined,
+          analyst_provider: analystConfig?.provider || undefined,
+          analyst_api_key: analystConfig?.apiKey || undefined,
+          analyst_endpoint: analystConfig?.provider === "custom" ? analystConfig?.endpoint : undefined,
         }),
       });
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-interface JudgeResult {
+interface AnalystResult {
   prompt: string;
   verdict: "equivalent" | "partial" | "different" | "contradictory" | "error";
   explanation: string;
@@ -11,7 +11,7 @@ interface JudgeResult {
 }
 
 interface Props {
-  results: JudgeResult[];
+  results: AnalystResult[];
 }
 
 const verdictStyles: Record<string, { color: string; label: string }> = {
@@ -22,7 +22,7 @@ const verdictStyles: Record<string, { color: string; label: string }> = {
   error: { color: "var(--sub-text-dim)", label: "Error" },
 };
 
-export function JudgeResults({ results }: Props) {
+export function AnalystResults({ results }: Props) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   if (!results || results.length === 0) return null;
@@ -76,7 +76,7 @@ export function JudgeResults({ results }: Props) {
               </button>
               {isExpanded && (
                 <div className="px-4 pb-4 space-y-3">
-                  {/* Judge explanation */}
+                  {/* Analyst explanation */}
                   {result.explanation && (
                     <div className="pl-8 text-xs" style={{ color: "var(--sub-text-dim)" }}>
                       <Markdown remarkPlugins={[remarkGfm]}>{result.explanation}</Markdown>

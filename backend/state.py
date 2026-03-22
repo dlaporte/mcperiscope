@@ -39,10 +39,10 @@ class Session:
     api_key: str = ""
     custom_endpoint: str = ""
     custom_context_window: int = 128_000
-    judge_model: str = ""
-    judge_provider: str = ""
-    judge_api_key: str = ""
-    judge_endpoint: str = ""
+    analyst_model: str = ""
+    analyst_provider: str = ""
+    analyst_api_key: str = ""
+    analyst_endpoint: str = ""
     loaded_resources: dict[str, dict] = field(default_factory=dict)  # uri → {name, content, tokens}
     eval_results: list[dict] = field(default_factory=list)
     comparison: dict | None = None

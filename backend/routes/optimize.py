@@ -352,10 +352,10 @@ class OptimizeRunRequest(BaseModel):
     model: str | None = None
     provider: str | None = None
     custom_endpoint: str | None = None
-    judge_model: str | None = None
-    judge_provider: str | None = None
-    judge_api_key: str | None = None
-    judge_endpoint: str | None = None
+    analyst_model: str | None = None
+    analyst_provider: str | None = None
+    analyst_api_key: str | None = None
+    analyst_endpoint: str | None = None
 
 
 @router.post("/optimize/run")
@@ -376,14 +376,14 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         session.provider = req.provider
     if req and req.custom_endpoint:
         session.custom_endpoint = req.custom_endpoint
-    if req and req.judge_model:
-        session.judge_model = req.judge_model
-    if req and req.judge_provider:
-        session.judge_provider = req.judge_provider
-    if req and req.judge_api_key:
-        session.judge_api_key = req.judge_api_key
-    if req and req.judge_endpoint:
-        session.judge_endpoint = req.judge_endpoint
+    if req and req.analyst_model:
+        session.analyst_model = req.analyst_model
+    if req and req.analyst_provider:
+        session.analyst_provider = req.analyst_provider
+    if req and req.analyst_api_key:
+        session.analyst_api_key = req.analyst_api_key
+    if req and req.analyst_endpoint:
+        session.analyst_endpoint = req.analyst_endpoint
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
 
@@ -429,8 +429,12 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         yield _sse("progress", {"phase": "proxy", "message": "Generating optimized proxy server..."})
         proxy_code = None
         try:
-            proxy_code = _generate_proxy_for_recommendations(
-                session.recommendations, session.tools, mcp_manager.get_url() or ""
+            proxy_code = await _generate_proxy_for_recommendations(
+                session.recommendations, session.tools, mcp_manager.get_url() or "",
+                analyst_key=session.analyst_api_key or session.api_key,
+                analyst_model=session.analyst_model or session.model,
+                analyst_provider=session.analyst_provider or session.provider,
+                analyst_endpoint=session.analyst_endpoint or session.custom_endpoint,
             )
             session.proxy_code = proxy_code
         except Exception as e:
@@ -495,7 +499,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
         # --- Step 4: Re-run prompts through proxy ---
         proxy_traces = []
-        proxy_answers = []  # Capture proxy answers for LLM-as-judge
+        proxy_answers = []  # Capture proxy answers for analyst comparison
         proxy_tool_count = proxy_tools or 0
         if not proxy_port:
             yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no proxy available)"})
@@ -590,19 +594,19 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 logger.exception("Proxy evaluation failed")
                 yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}"})
 
-        # --- Step 6: LLM-as-judge — compare baseline vs proxy answers ---
-        judge_results = []
+        # --- Step 6: LLM-as-analyst — compare baseline vs proxy answers ---
+        analyst_results = []
         proxy_correct = 0
         proxy_total = 0
-        judge_key = session.judge_api_key or session.api_key
-        if proxy_answers and judge_key:
-            yield _sse("progress", {"phase": "judge", "message": "Comparing baseline vs optimized answers..."})
+        analyst_key = session.analyst_api_key or session.api_key
+        if proxy_answers and analyst_key:
+            yield _sse("progress", {"phase": "analyst", "message": "Comparing baseline vs optimized answers..."})
             try:
-                judge = LLMClient(
-                    judge_key,
-                    session.judge_model or session.model,
-                    session.judge_provider or session.provider,
-                    session.judge_endpoint or session.custom_endpoint,
+                analyst = LLMClient(
+                    analyst_key,
+                    session.analyst_model or session.model,
+                    session.analyst_provider or session.provider,
+                    session.analyst_endpoint or session.custom_endpoint,
                 )
 
                 for i, proxy_entry in enumerate(proxy_answers):
@@ -613,15 +617,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     prompt = proxy_entry.get("prompt", "")
 
                     if not baseline_answer or not proxy_answer or proxy_answer.startswith("Error:"):
-                        judge_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer", "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
+                        analyst_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer", "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
                         continue
 
                     yield _sse("progress", {
-                        "phase": "judge",
-                        "message": f"Judging prompt {i+1}/{len(proxy_answers)}: {prompt[:50]}..."
+                        "phase": "analyst",
+                        "message": f"Comparing prompt {i+1}/{len(proxy_answers)}: {prompt[:50]}..."
                     })
 
-                    judge_response = await judge.chat(
+                    analyst_response = await analyst.chat(
                         messages=[{
                             "role": "user",
                             "content": (
@@ -642,9 +646,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         max_tokens=300,
                     )
 
-                    judge_text = judge_response.text.strip()
-                    first_line = judge_text.split("\n")[0].strip().upper()
-                    explanation = "\n".join(judge_text.split("\n")[1:]).strip()
+                    analyst_text = analyst_response.text.strip()
+                    first_line = analyst_text.split("\n")[0].strip().upper()
+                    explanation = "\n".join(analyst_text.split("\n")[1:]).strip()
 
                     if "EQUIVALENT" in first_line or "IDENTICAL" in first_line:
                         verdict = "equivalent"
@@ -655,7 +659,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         verdict = "different"
 
                     proxy_total += 1
-                    judge_results.append({
+                    analyst_results.append({
                         "prompt": prompt,
                         "verdict": verdict,
                         "explanation": explanation,
@@ -664,11 +668,11 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     })
 
                 yield _sse("progress", {
-                    "phase": "judge",
+                    "phase": "analyst",
                     "message": f"Answer comparison: {proxy_correct}/{proxy_total} equivalent"
                 })
             except Exception as e:
-                yield _sse("progress", {"phase": "judge", "message": f"Answer comparison failed: {str(e)[:100]}"})
+                yield _sse("progress", {"phase": "analyst", "message": f"Answer comparison failed: {str(e)[:100]}"})
 
         # --- Step 7: Compute comparison ---
         yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
@@ -715,7 +719,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 pct = round((p - b) / b * 100, 1) if b != 0 else (0 if p == 0 else None)
                 delta[key] = {"value": diff, "pct": pct}
 
-        comparison = {"baseline": baseline, "proxy": proxy, "delta": delta, "judge_results": judge_results}
+        comparison = {"baseline": baseline, "proxy": proxy, "delta": delta, "analyst_results": analyst_results}
 
         session.comparison = comparison
 
@@ -736,10 +740,97 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     )
 
 
-def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
-    """Generate proxy code, handling the recommendation format from analyze.py."""
-    from backend.mcp_optimizer.inventory import find_name_clusters, tool_token_budget
+async def _generate_proxy_for_recommendations(
+    recommendations, tools, upstream_url,
+    analyst_key="", analyst_model="", analyst_provider="", analyst_endpoint="",
+):
+    """Generate proxy code using the Analyst LLM, with fallback to string concatenation."""
+    token_dir = str(Path.home() / '.mcperiscope' / 'tokens')
 
+    # Try LLM-based generation first
+    if analyst_key and analyst_model:
+        try:
+            code = await _generate_proxy_via_llm(
+                recommendations, tools, upstream_url, token_dir,
+                analyst_key, analyst_model, analyst_provider, analyst_endpoint,
+            )
+            if code and len(code.strip()) > 100:
+                # Save to file
+                proxy_dir = session.project_dir / "proxy"
+                proxy_dir.mkdir(parents=True, exist_ok=True)
+                (proxy_dir / "server.py").write_text(code)
+                return code
+        except Exception as e:
+            logger.warning("LLM proxy generation failed, falling back to template: %s", e)
+
+    # Fallback: template-based generation
+    return _generate_proxy_template(recommendations, tools, upstream_url, token_dir)
+
+
+async def _generate_proxy_via_llm(
+    recommendations, tools, upstream_url, token_dir,
+    analyst_key, analyst_model, analyst_provider, analyst_endpoint,
+):
+    """Use the Analyst LLM to generate proxy code from recommendations."""
+    # Build tool summaries
+    tool_summaries = []
+    for t in tools:
+        schema = t.inputSchema or {}
+        props = schema.get("properties", {})
+        desc = (t.description or "")[:200]
+        tool_summaries.append({
+            "name": t.name,
+            "description": desc,
+            "parameters": list(props.keys()) if props else [],
+        })
+
+    prompt = (
+        "You are generating an optimized MCP proxy server in Python. "
+        "The proxy sits between an LLM client and an upstream MCP server, "
+        "implementing optimizations to reduce token usage and improve tool selection.\n\n"
+        f"UPSTREAM URL: {upstream_url}\n\n"
+        f"RECOMMENDATIONS TO IMPLEMENT:\n{json.dumps(recommendations, indent=2)}\n\n"
+        f"CURRENT TOOLS ({len(tools)} total):\n{json.dumps(tool_summaries, indent=2)}\n\n"
+        "Generate a complete, runnable Python proxy server using FastMCP that:\n"
+        "1. Imports UpstreamClient from backend.mcp_optimizer.proxy_runtime\n"
+        f"2. Connects to the upstream server with OAuth token reuse (TOKEN_DIR = {json.dumps(token_dir)})\n"
+        "3. Implements each recommendation above\n"
+        "4. Passes through any tools not affected by recommendations\n"
+        "5. Is runnable with: python server.py --port PORT\n\n"
+        "The proxy must:\n"
+        "- Use `from backend.mcp_optimizer.proxy_runtime import UpstreamClient`\n"
+        "- Create an UpstreamClient with the upstream URL and token_dir\n"
+        "- Use @asynccontextmanager for lifespan (connect/disconnect)\n"
+        '- Create FastMCP with lifespan: `mcp = FastMCP("mcperiscope-proxy", lifespan=lifespan)`\n'
+        "- For each tool, call `await upstream.call(tool_name, args)` to forward to upstream\n"
+        "- Return results as strings (json.dumps if needed)\n"
+        '- Use `mcp.run(transport="streamable-http", port=args.port)` in __main__\n\n'
+        "Output ONLY the Python code, no explanation."
+    )
+
+    analyst = LLMClient(analyst_key, analyst_model, analyst_provider, analyst_endpoint)
+    response = await analyst.chat(
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=8192,
+    )
+
+    code = response.text.strip()
+
+    # Strip markdown code fences if present
+    if code.startswith("```"):
+        lines = code.split("\n")
+        # Remove first line (```python or ```)
+        lines = lines[1:]
+        # Remove last line if it's ```
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        code = "\n".join(lines)
+
+    return code
+
+
+def _generate_proxy_template(recommendations, tools, upstream_url, token_dir):
+    """Fallback: generate proxy code via string concatenation template."""
     # Build a practical proxy: consolidate no-param lookup tools + passthrough rest
     no_param_tools = []
     for t in tools:
@@ -781,7 +872,7 @@ def _generate_proxy_for_recommendations(recommendations, tools, upstream_url):
         "",
         "SPECIAL_TOOLS = set(LOOKUP_TOOLS.values())",
         "",
-        f"TOKEN_DIR = {json.dumps(str(Path.home() / '.mcperiscope' / 'tokens'))}",
+        f"TOKEN_DIR = {json.dumps(token_dir)}",
         "",
         "upstream = UpstreamClient(UPSTREAM_URL, token_dir=TOKEN_DIR)",
         "",

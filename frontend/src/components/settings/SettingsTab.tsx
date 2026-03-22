@@ -239,10 +239,10 @@ export function SettingsTab() {
   const {
     llmConfigs,
     primaryLLM,
-    judgeLLM,
+    analystLLM,
     addLLMConfig,
     setPrimaryLLM,
-    setJudgeLLM,
+    setAnalystLLM,
     maxToolRounds,
     maxTokensPerResponse,
     setMaxToolRounds,
@@ -303,7 +303,7 @@ export function SettingsTab() {
               <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Agent LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
-                  Uses tools to answer evaluation prompts
+                  Executes evaluation prompts using MCP tools to answer questions
                 </span>
               </label>
               <select
@@ -321,14 +321,14 @@ export function SettingsTab() {
             </div>
             <div>
               <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
-                Judge LLM
+                Analyst LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
-                  Compares baseline vs optimized answers
+                  Compares baseline vs optimized answers and generates proxy server code
                 </span>
               </label>
               <select
-                value={judgeLLM}
-                onChange={(e) => setJudgeLLM(e.target.value)}
+                value={analystLLM}
+                onChange={(e) => setAnalystLLM(e.target.value)}
                 className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
               >
                 <option value="">-- Same as Agent --</option>

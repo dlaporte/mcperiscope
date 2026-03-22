@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useStore } from "../../store";
 import { ComparisonTable } from "./ComparisonTable";
-import { JudgeResults } from "./JudgeResults";
+import { AnalystResults } from "./AnalystResults";
 import { RecommendationCards } from "./RecommendationCards";
 import { ExportPanel } from "./ExportPanel";
 import { QuickWinCard } from "../shared/QuickWinCard";
@@ -84,9 +84,9 @@ export function ResultsTab() {
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         {comparison && <ComparisonTable data={comparison} />}
 
-        {comparison?.judge_results?.length > 0 && (
+        {comparison?.analyst_results?.length > 0 && (
           <CollapsibleSection title="Accuracy" defaultOpen={false}>
-            <JudgeResults results={comparison.judge_results} />
+            <AnalystResults results={comparison.analyst_results} />
           </CollapsibleSection>
         )}
 

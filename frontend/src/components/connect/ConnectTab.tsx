@@ -64,9 +64,9 @@ function getCachedAuth(url: string): CachedAuth | undefined {
 }
 
 function LLMDisplay() {
-  const { llmConfigs, primaryLLM, judgeLLM, setActiveTab } = useStore();
+  const { llmConfigs, primaryLLM, analystLLM, setActiveTab } = useStore();
   const agentConfig = llmConfigs.find((c) => c.id === primaryLLM);
-  const judgeConfig = judgeLLM ? llmConfigs.find((c) => c.id === judgeLLM) : agentConfig;
+  const analystConfig = analystLLM ? llmConfigs.find((c) => c.id === analystLLM) : agentConfig;
 
   return (
     <div>
@@ -97,9 +97,9 @@ function LLMDisplay() {
           className="rounded-lg px-3 py-2 text-sm flex items-center justify-between"
           style={{ backgroundColor: 'var(--sub-hull)', border: '1px solid var(--sub-rivet)' }}
         >
-          <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>Judge</span>
-          {judgeConfig ? (
-            <span style={{ color: 'var(--sub-text)' }}>{judgeConfig.name}</span>
+          <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>Analyst</span>
+          {analystConfig ? (
+            <span style={{ color: 'var(--sub-text)' }}>{analystConfig.name}</span>
           ) : (
             <span style={{ color: 'var(--sub-text-dim)' }}>Not configured</span>
           )}
