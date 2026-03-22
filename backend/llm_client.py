@@ -28,20 +28,25 @@ class LLMResponse:
     raw: Any = None
 
 
-OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
-
-
 class LLMClient:
     """Unified async interface for calling LLMs with tool and streaming support."""
 
-    def __init__(self, api_key: str, model: str, custom_endpoint: str = ""):
+    def __init__(self, api_key: str, model: str, provider: str = "", endpoint: str = ""):
+        """Create an LLM client.
+
+        Args:
+            api_key: API key for the provider.
+            model: Model identifier.
+            provider: Explicit provider ("anthropic", "openai", "custom").
+                      If empty, inferred from endpoint presence.
+            endpoint: Custom endpoint URL (for OpenAI-compatible providers).
+        """
         self.model = model
-        is_openai_model = any(model.startswith(p) for p in OPENAI_MODEL_PREFIXES)
-        self._is_openai = bool(custom_endpoint) or is_openai_model
+        self._is_openai = provider in ("openai", "custom") or bool(endpoint)
 
         if self._is_openai:
             from openai import AsyncOpenAI
-            base_url = custom_endpoint if custom_endpoint else None
+            base_url = endpoint if endpoint else None
             self._openai = AsyncOpenAI(api_key=api_key, base_url=base_url)
             self._anthropic = None
         else:

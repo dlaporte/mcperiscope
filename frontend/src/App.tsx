@@ -4,6 +4,7 @@ import { ConnectTab } from "./components/connect/ConnectTab";
 import { ExploreTab } from "./components/explore/ExploreTab";
 import { OptimizeTab } from "./components/optimize/OptimizeTab";
 import { ResultsTab } from "./components/results/ResultsTab";
+import { SettingsTab } from "./components/settings/SettingsTab";
 import { OAuthCallback } from "./components/shared/OAuthCallback";
 
 function App() {
@@ -24,7 +25,8 @@ function App() {
         {activeTab === "explore" && connected && <ExploreTab />}
         {activeTab === "optimize" && connected && <OptimizeTab />}
         {activeTab === "results" && connected && <ResultsTab />}
-        {!connected && activeTab !== "connect" && (
+        {activeTab === "settings" && <SettingsTab />}
+        {!connected && activeTab !== "connect" && activeTab !== "settings" && (
           <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>
             Connect to an MCP server first
           </div>

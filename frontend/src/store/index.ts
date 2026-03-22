@@ -627,7 +627,9 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const state = get();
       const authConfig = buildAuthConfig(state);
-      const res = await api.connect(url, authConfig, state.model, state.apiKey, state.customEndpoint, state.customContextWindow);
+      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
+      const provider = primaryConfig?.provider;
+      const res = await api.connect(url, authConfig, state.model, provider, state.apiKey, state.customEndpoint, state.customContextWindow);
 
       if (res.status === "oauth_redirect" && res.authorizationUrl) {
         set({ connecting: false, oauthPending: true });
@@ -921,17 +923,19 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const { apiKey: storeApiKey, model: storeModel, customEndpoint, maxToolRounds, maxTokensPerResponse } = get();
+      const state = get();
+      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
       const response = await fetch("/api/optimize/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          api_key: storeApiKey || undefined,
-          model: storeModel || undefined,
-          custom_endpoint: customEndpoint || undefined,
-          max_tool_rounds: maxToolRounds || undefined,
-          max_tokens: maxTokensPerResponse || undefined,
+          api_key: state.apiKey || undefined,
+          model: state.model || undefined,
+          provider: primaryConfig?.provider || undefined,
+          custom_endpoint: state.customEndpoint || undefined,
+          max_tool_rounds: state.maxToolRounds || undefined,
+          max_tokens: state.maxTokensPerResponse || undefined,
         }),
       });
 
@@ -1078,18 +1082,21 @@ export const useStore = create<AppState>((set, get) => ({
   runOptimize: async () => {
     set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
     try {
-      const { evalIncluded, apiKey, model, customEndpoint } = get();
-      const judgeConfig = get().getJudgeConfig();
-      const included = [...evalIncluded];
+      const state = get();
+      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
+      const judgeConfig = state.getJudgeConfig();
+      const included = [...state.evalIncluded];
       const response = await fetch("/api/optimize/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           included_indices: included,
-          api_key: apiKey || undefined,
-          model: model || undefined,
-          custom_endpoint: customEndpoint || undefined,
+          api_key: state.apiKey || undefined,
+          model: state.model || undefined,
+          provider: primaryConfig?.provider || undefined,
+          custom_endpoint: state.customEndpoint || undefined,
           judge_model: judgeConfig?.model || undefined,
+          judge_provider: judgeConfig?.provider || undefined,
           judge_api_key: judgeConfig?.apiKey || undefined,
           judge_endpoint: judgeConfig?.provider === "custom" ? judgeConfig?.endpoint : undefined,
         }),

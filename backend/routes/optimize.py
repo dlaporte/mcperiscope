@@ -62,6 +62,8 @@ async def evaluate(req: EvaluateRequest):
         session.api_key = req.api_key
     if req.model:
         session.model = req.model
+    if req.provider:
+        session.provider = req.provider
     if req.custom_endpoint:
         session.custom_endpoint = req.custom_endpoint
     if not session.api_key:
@@ -71,7 +73,7 @@ async def evaluate(req: EvaluateRequest):
 
     async def event_stream():
         try:
-            client = LLMClient(session.api_key, session.model, session.custom_endpoint)
+            client = LLMClient(session.api_key, session.model, session.provider, session.custom_endpoint)
         except Exception as e:
             yield _sse("error", {"message": f"Failed to initialize LLM client: {e}"})
             return
@@ -348,8 +350,10 @@ class OptimizeRunRequest(BaseModel):
     included_indices: list[int] | None = None
     api_key: str | None = None
     model: str | None = None
+    provider: str | None = None
     custom_endpoint: str | None = None
     judge_model: str | None = None
+    judge_provider: str | None = None
     judge_api_key: str | None = None
     judge_endpoint: str | None = None
 
@@ -368,10 +372,14 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         session.api_key = req.api_key
     if req and req.model:
         session.model = req.model
+    if req and req.provider:
+        session.provider = req.provider
     if req and req.custom_endpoint:
         session.custom_endpoint = req.custom_endpoint
     if req and req.judge_model:
         session.judge_model = req.judge_model
+    if req and req.judge_provider:
+        session.judge_provider = req.judge_provider
     if req and req.judge_api_key:
         session.judge_api_key = req.judge_api_key
     if req and req.judge_endpoint:
@@ -497,7 +505,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             yield _sse("progress", {"phase": "evaluate", "message": "Skipping proxy evaluation (no evaluation prompts)"})
         else:
             try:
-                llm = LLMClient(session.api_key, session.model, session.custom_endpoint)
+                llm = LLMClient(session.api_key, session.model, session.provider, session.custom_endpoint)
                 from fastmcp import Client as McpClient
 
                 # Build tool list from proxy — keep connection open for all prompts
@@ -593,6 +601,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 judge = LLMClient(
                     judge_key,
                     session.judge_model or session.model,
+                    session.judge_provider or session.provider,
                     session.judge_endpoint or session.custom_endpoint,
                 )
 

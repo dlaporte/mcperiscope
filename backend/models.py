@@ -14,6 +14,7 @@ class ConnectRequest(BaseModel):
     url: str
     auth: AuthConfig | None = None
     model: str | None = None
+    provider: str | None = None
     api_key: str | None = None
     custom_endpoint: str | None = None
     custom_context_window: int | None = None
@@ -37,7 +38,10 @@ class EvaluateRequest(BaseModel):
     prompt: str
     api_key: str | None = None
     model: str | None = None
+    provider: str | None = None
     custom_endpoint: str | None = None
+    max_tool_rounds: int | None = None
+    max_tokens: int | None = None
 
 
 class RatingRequest(BaseModel):

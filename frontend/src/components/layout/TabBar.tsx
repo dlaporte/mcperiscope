@@ -52,6 +52,22 @@ export function TabBar({ active, onChange, connected }: TabBarProps) {
           </button>
         );
       })}
+      <div className="flex-1" />
+      <button
+        onClick={() => onChange("settings")}
+        className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+          active === "settings"
+            ? "text-white"
+            : "border-transparent cursor-pointer"
+        }`}
+        style={
+          active === "settings"
+            ? { borderColor: 'var(--sub-brass)', color: 'var(--sub-brass)', textShadow: '0 0 6px rgba(196,154,42,0.4)' }
+            : { color: 'var(--sub-text)' }
+        }
+      >
+        Settings
+      </button>
     </div>
   );
 }

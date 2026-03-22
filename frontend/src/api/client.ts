@@ -32,10 +32,10 @@ export interface ModelConfig {
 
 export const api = {
   // === Connection ===
-  connect: (url: string, auth?: AuthConfig, model?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number) =>
+  connect: (url: string, auth?: AuthConfig, model?: string, provider?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number) =>
     request<ConnectResult>("/connect", {
       method: "POST",
-      body: JSON.stringify({ url, auth, model: model || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint || undefined, custom_context_window: customContextWindow || undefined }),
+      body: JSON.stringify({ url, auth, model: model || undefined, provider: provider || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint || undefined, custom_context_window: customContextWindow || undefined }),
     }),
 
   disconnect: () =>

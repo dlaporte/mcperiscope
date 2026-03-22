@@ -35,9 +35,14 @@ class Session:
     recommendations: list[dict] = field(default_factory=list)
     prompts: list[str] = field(default_factory=list)
     model: str = "claude-sonnet-4-6"
+    provider: str = "anthropic"
     api_key: str = ""
     custom_endpoint: str = ""
     custom_context_window: int = 128_000
+    judge_model: str = ""
+    judge_provider: str = ""
+    judge_api_key: str = ""
+    judge_endpoint: str = ""
     loaded_resources: dict[str, dict] = field(default_factory=dict)  # uri → {name, content, tokens}
     eval_results: list[dict] = field(default_factory=list)
     comparison: dict | None = None

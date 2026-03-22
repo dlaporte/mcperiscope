@@ -35,18 +35,15 @@ async def _validate_api_key(api_key: str) -> None:
 async def connect(req: ConnectRequest, request: Request):
     if req.model:
         session.model = req.model
+    if req.provider:
+        session.provider = req.provider
     if req.api_key:
         session.api_key = req.api_key
     if req.custom_endpoint:
         session.custom_endpoint = req.custom_endpoint
-    # Only validate API key for known Anthropic models (no custom endpoint)
-    if req.api_key and not req.custom_endpoint and not session.custom_endpoint:
-        is_anthropic = any(
-            (req.model or session.model).startswith(p)
-            for p in ("claude-",)
-        )
-        if is_anthropic:
-            await _validate_api_key(req.api_key)
+    # Only validate API key for Anthropic provider
+    if req.api_key and (req.provider or session.provider) == "anthropic":
+        await _validate_api_key(req.api_key)
     if req.custom_context_window:
         session.custom_context_window = req.custom_context_window
     try:
