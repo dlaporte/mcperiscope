@@ -220,6 +220,7 @@ interface AppState {
   evaluate: (prompt: string) => Promise<void>;
   submitRating: (index: number, correctness: string, notes: string) => Promise<void>;
   runOptimize: () => Promise<void>;
+  removeEval: (index: number) => void;
   selectEval: (index: number) => void;
 }
 
@@ -1500,6 +1501,26 @@ export const useStore = create<AppState>((set, get) => ({
       const message = err instanceof Error ? err.message : String(err);
       set({ optimizeRunning: false, optimizeProgress: null, error: message });
     }
+  },
+
+  removeEval: (index) => {
+    set((state) => {
+      const evalResults = state.evalResults.filter((_, i) => i !== index);
+      // Rebuild evalIncluded with shifted indices
+      const included = new Set<number>();
+      for (const i of state.evalIncluded) {
+        if (i < index) included.add(i);
+        else if (i > index) included.add(i - 1);
+        // i === index is the removed one, skip
+      }
+      // Adjust selectedEvalIndex
+      let selectedEvalIndex = state.selectedEvalIndex;
+      if (selectedEvalIndex !== null) {
+        if (selectedEvalIndex === index) selectedEvalIndex = null;
+        else if (selectedEvalIndex > index) selectedEvalIndex--;
+      }
+      return { evalResults, evalIncluded: included, selectedEvalIndex };
+    });
   },
 
   selectEval: (index) => set({ selectedEvalIndex: index }),
