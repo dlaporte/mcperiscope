@@ -22,16 +22,15 @@ async def auth_callback(req: OAuthCallbackRequest):
         session.model = req.model
 
     async def event_stream():
-        # Step 1: Validate API key
+        # Step 1: Store API key (validation only for Anthropic keys)
         if req.api_key:
-            yield _sse("progress", {"message": "Validating API key..."})
+            from backend.routes.connection import _validate_api_key
             try:
-                from backend.routes.connection import _validate_api_key
                 await _validate_api_key(req.api_key)
-                session.api_key = req.api_key
             except HTTPException as e:
                 yield _sse("error", {"message": e.detail})
                 return
+            session.api_key = req.api_key
 
         # Step 2: Exchange OAuth code and reconnect
         yield _sse("progress", {"message": "Exchanging authorization code..."})

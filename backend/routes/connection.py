@@ -15,8 +15,8 @@ router = APIRouter()
 
 async def _validate_api_key(api_key: str) -> None:
     """Validate the Anthropic API key by making a lightweight API call."""
-    if not api_key:
-        return
+    if not api_key or not api_key.startswith("sk-ant-"):
+        return  # Only validate Anthropic keys
     import anthropic
     try:
         client = anthropic.Anthropic(api_key=api_key)
