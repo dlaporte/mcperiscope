@@ -54,7 +54,7 @@ function RecItem({ id, type, description, impact, checked, onToggle }: RecItemPr
       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
     >
-      <label className="flex items-start gap-2 cursor-pointer">
+      <div className="flex items-start gap-2">
         <input
           type="checkbox"
           checked={checked}
@@ -78,15 +78,12 @@ function RecItem({ id, type, description, impact, checked, onToggle }: RecItemPr
           <p
             className="text-[11px] mt-0.5 leading-snug cursor-pointer"
             style={{ color: 'var(--sub-text)' }}
-            onClick={(e) => {
-              e.preventDefault();
-              setExpanded(!expanded);
-            }}
+            onClick={() => setExpanded(!expanded)}
           >
             {expanded ? description : truncate(description, 100)}
           </p>
         </div>
-      </label>
+      </div>
     </div>
   );
 }

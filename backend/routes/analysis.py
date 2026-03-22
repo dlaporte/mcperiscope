@@ -119,6 +119,10 @@ def generate_quick_wins(
                 "estimated_savings": estimated_savings,
             })
 
+    # Assign unique IDs
+    for i, win in enumerate(wins):
+        win["id"] = f"qw_{i}"
+
     return wins
 
 
