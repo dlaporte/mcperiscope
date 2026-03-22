@@ -8,6 +8,12 @@ const PROVIDER_BADGE_STYLES: Record<string, React.CSSProperties> = {
   custom: { backgroundColor: "rgba(204,51,51,0.15)", color: "var(--sub-red)" },
 };
 
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  custom: "Custom",
+};
+
 function formatContext(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
 }
@@ -82,7 +88,7 @@ function LLMConfigCard({
             className="text-[10px] font-medium px-1.5 py-0.5 rounded uppercase"
             style={badgeStyle}
           >
-            {config.provider}
+            {PROVIDER_LABELS[config.provider] || config.provider}
           </span>
           <span className="text-xs font-mono" style={{ color: "var(--sub-text-dim)" }}>
             {config.model}
@@ -163,14 +169,14 @@ function LLMConfigCard({
                 <button
                   key={p}
                   onClick={() => handleProviderChange(p)}
-                  className="px-3 py-1.5 text-sm rounded-lg border transition-colors capitalize"
+                  className="px-3 py-1.5 text-sm rounded-lg border transition-colors"
                   style={
                     provider === p
                       ? { borderColor: "var(--sub-brass)", color: "var(--sub-brass)", backgroundColor: "rgba(196,154,42,0.1)" }
                       : { borderColor: "var(--sub-rivet)", color: "var(--sub-text-dim)", backgroundColor: "transparent" }
                   }
                 >
-                  {p}
+                  {PROVIDER_LABELS[p]}
                 </button>
               ))}
             </div>
