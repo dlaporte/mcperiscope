@@ -5,8 +5,8 @@ interface Props {
 }
 
 function fillColors(pct: number) {
-  if (pct > 15) return { fill: "#dd4040", glow: "rgba(221,64,64,0.5)" };
-  if (pct > 5) return { fill: "#c9a030", glow: "rgba(201,160,48,0.4)" };
+  if (pct > 75) return { fill: "#dd4040", glow: "rgba(221,64,64,0.5)" };
+  if (pct > 50) return { fill: "#c9a030", glow: "rgba(201,160,48,0.4)" };
   return { fill: "#30cc30", glow: "rgba(48,204,48,0.4)" };
 }
 

@@ -9,9 +9,9 @@ export function ContextGauge({ tokens, max, onClick }: Props) {
 
   const pct = (tokens / max) * 100;
   const fillColor =
-    pct > 15 ? "#dd4040" : pct > 5 ? "#c9a030" : "#30cc30";
+    pct > 75 ? "#dd4040" : pct > 50 ? "#c9a030" : "#30cc30";
   const glowColor =
-    pct > 15 ? "rgba(221,64,64,0.5)" : pct > 5 ? "rgba(201,160,48,0.4)" : "rgba(48,204,48,0.4)";
+    pct > 75 ? "rgba(221,64,64,0.5)" : pct > 50 ? "rgba(201,160,48,0.4)" : "rgba(48,204,48,0.4)";
 
   return (
     <div className="flex items-center gap-4 flex-1 min-w-0">
