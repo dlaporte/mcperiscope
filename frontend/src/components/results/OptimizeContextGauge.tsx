@@ -95,22 +95,27 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
       <div className="flex items-center gap-3 shrink-0">
         {optimizedPct != null ? (
           <>
+            <span className="text-xs font-mono phosphor-text">
+              {optimizedPct.toFixed(1)}%
+            </span>
             <span className="text-xs font-mono" style={{ color: 'var(--sub-text-dim)' }}>
               <span style={{ color: 'var(--sub-brass)', textDecoration: 'line-through', opacity: 0.6 }}>
                 {baseline.toLocaleString()}
               </span>
               {" → "}
               <span className="phosphor-text">{optimized!.toLocaleString()}</span>
+              {" / "}{(max / 1000).toFixed(0)}K
             </span>
             {savingsPct != null && savingsPct > 0 && (
               <span className="text-xs font-mono phosphor-text">
-                -{savingsPct.toFixed(1)}%
+                (-{savingsPct.toFixed(1)}%)
               </span>
             )}
           </>
         ) : (
           <span className="text-xs font-mono" style={{ color: 'var(--sub-text-dim)' }}>
-            {baseline.toLocaleString()} / {(max / 1000).toFixed(0)}K
+            <span className="phosphor-text">{baselinePct.toFixed(1)}%</span>
+            {" "}{baseline.toLocaleString()} / {(max / 1000).toFixed(0)}K
           </span>
         )}
       </div>
