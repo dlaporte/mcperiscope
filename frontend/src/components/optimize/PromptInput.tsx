@@ -5,35 +5,61 @@ export function PromptInput() {
   const [prompt, setPrompt] = useState("");
   const [batch, setBatch] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [batchConfirm, setBatchConfirm] = useState(false);
   const connected = useStore((s) => s.connected);
   const evalLoading = useStore((s) => s.evalLoading);
   const evaluate = useStore((s) => s.evaluate);
 
-  const canEvaluate = connected && prompt.trim().length > 0 && !evalLoading && !batchProgress;
+  const canEvaluate = connected && prompt.trim().length > 0 && !evalLoading && !batchProgress && !batchConfirm;
+
+  const runBatch = async () => {
+    const prompts = prompt.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (prompts.length === 0) return;
+    setBatch(true);
+    setBatchProgress({ current: 0, total: prompts.length });
+    try {
+      for (let i = 0; i < prompts.length; i++) {
+        setBatchProgress({ current: i + 1, total: prompts.length });
+        await evaluate(prompts[i]);
+      }
+    } finally {
+      setBatchProgress(null);
+    }
+    setPrompt("");
+  };
 
   const handleSubmit = async () => {
     if (!canEvaluate) return;
+
     if (batch) {
-      const prompts = prompt.split("\n").map((l) => l.trim()).filter(Boolean);
-      if (prompts.length === 0) return;
-      setBatchProgress({ current: 0, total: prompts.length });
-      try {
-        for (let i = 0; i < prompts.length; i++) {
-          setBatchProgress({ current: i + 1, total: prompts.length });
-          await evaluate(prompts[i]);
-        }
-      } finally {
-        setBatchProgress(null);
-      }
-      setPrompt("");
-    } else {
-      await evaluate(prompt.trim());
-      setPrompt("");
+      await runBatch();
+      return;
     }
+
+    // In single mode, check for newlines that suggest batch input
+    const lines = prompt.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+      setBatchConfirm(true);
+      return;
+    }
+
+    await evaluate(prompt.trim());
+    setPrompt("");
+  };
+
+  const handleBatchConfirmYes = async () => {
+    setBatchConfirm(false);
+    await runBatch();
+  };
+
+  const handleBatchConfirmNo = async () => {
+    setBatchConfirm(false);
+    await evaluate(prompt.trim());
+    setPrompt("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (batch) return; // No keyboard shortcut in batch mode (Enter is for newlines)
+    if (batch) return;
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canEvaluate) {
       handleSubmit();
     }
@@ -66,6 +92,34 @@ export function PromptInput() {
         rows={10}
         className="w-full px-3 py-2 input-sub border rounded-lg focus:outline-none resize-none disabled:opacity-50"
       />
+
+      {/* Batch confirmation */}
+      {batchConfirm && (
+        <div
+          className="mt-2 p-3 rounded-lg text-sm flex items-center justify-between"
+          style={{ backgroundColor: 'rgba(196,154,42,0.1)', border: '1px solid var(--sub-brass)' }}
+        >
+          <span style={{ color: 'var(--sub-text)' }}>
+            This looks like {prompt.split("\n").filter((l) => l.trim()).length} separate prompts. Run as batch?
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBatchConfirmYes}
+              className="px-3 py-1 text-xs font-medium rounded btn-brass"
+            >
+              Yes, batch
+            </button>
+            <button
+              onClick={handleBatchConfirmNo}
+              className="px-3 py-1 text-xs font-medium rounded"
+              style={{ color: 'var(--sub-text-dim)' }}
+            >
+              No, single
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mt-2">
         <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>
           {batchProgress
