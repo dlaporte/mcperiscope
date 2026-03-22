@@ -122,15 +122,23 @@ async def evaluate(req: EvaluateRequest):
         # Context tracking: use API-reported base + estimated delta from new content
         context_base = 0  # Last API-reported input_tokens (accurate)
         context_delta = 0  # Estimated tokens added since last API report
+        max_rounds = req.max_tool_rounds or 20
+        max_tokens = req.max_tokens or 4096
+        round_num = 0
 
         try:
             while True:
+                round_num += 1
+                if round_num > max_rounds:
+                    final_answer = f"[Stopped after {max_rounds} tool call rounds — increase limit in Settings]"
+                    yield _sse("error", {"message": f"Max tool call rounds ({max_rounds}) exceeded"})
+                    break
                 yield _sse("thinking", {"step": step, "context_tokens": context_base + context_delta})
 
                 # Stream the LLM response — yields text deltas then final LLMResponse
                 response = None
                 streamed_text_len = 0
-                async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=4096):
+                async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=max_tokens):
                     if isinstance(item, str):
                         streamed_text_len += len(item)
                         yield _sse("text_delta", {"text": item, "context_tokens": context_base + context_delta + streamed_text_len // 4})
@@ -341,6 +349,9 @@ class OptimizeRunRequest(BaseModel):
     api_key: str | None = None
     model: str | None = None
     custom_endpoint: str | None = None
+    judge_model: str | None = None
+    judge_api_key: str | None = None
+    judge_endpoint: str | None = None
 
 
 @router.post("/optimize/run")
@@ -359,6 +370,12 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         session.model = req.model
     if req and req.custom_endpoint:
         session.custom_endpoint = req.custom_endpoint
+    if req and req.judge_model:
+        session.judge_model = req.judge_model
+    if req and req.judge_api_key:
+        session.judge_api_key = req.judge_api_key
+    if req and req.judge_endpoint:
+        session.judge_endpoint = req.judge_endpoint
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
 
@@ -569,10 +586,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         judge_results = []
         proxy_correct = 0
         proxy_total = 0
-        if proxy_answers and session.api_key:
+        judge_key = session.judge_api_key or session.api_key
+        if proxy_answers and judge_key:
             yield _sse("progress", {"phase": "judge", "message": "Comparing baseline vs optimized answers..."})
             try:
-                judge = LLMClient(session.api_key, session.model, session.custom_endpoint)
+                judge = LLMClient(
+                    judge_key,
+                    session.judge_model or session.model,
+                    session.judge_endpoint or session.custom_endpoint,
+                )
 
                 for i, proxy_entry in enumerate(proxy_answers):
                     if i >= len(session.eval_results):
