@@ -2,6 +2,11 @@ import { create } from "zustand";
 import { api } from "../api/client";
 import type { AuthConfig } from "../api/client";
 
+function generateId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return generateId();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 type ItemType = "tool" | "resource" | "prompt";
 type AuthMethod = "none" | "bearer" | "header" | "oauth";
 
@@ -17,7 +22,32 @@ export interface ParamEntry {
 }
 
 
-export type Tab = "connect" | "explore" | "optimize" | "results";
+export interface LLMConfig {
+  id: string;          // unique ID (generateId())
+  name: string;        // user-defined label
+  provider: "anthropic" | "openai" | "custom";
+  model: string;       // model ID
+  apiKey: string;      // API key
+  endpoint: string;    // custom endpoint URL (empty for anthropic/openai)
+  contextWindow: number; // context window size
+}
+
+export const KNOWN_MODELS = [
+  // Anthropic — Claude 4.6 family (latest)
+  { id: "claude-opus-4-6", label: "Claude Opus 4.6", context: 1000000, provider: "anthropic" as const },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", context: 1000000, provider: "anthropic" as const },
+  // Anthropic — Claude 4.5
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", context: 200000, provider: "anthropic" as const },
+  // OpenAI — GPT-5.x family
+  { id: "gpt-5.4", label: "GPT-5.4", context: 1000000, provider: "openai" as const },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", context: 400000, provider: "openai" as const },
+  { id: "gpt-5.2", label: "GPT-5.2", context: 400000, provider: "openai" as const },
+  // OpenAI — GPT-4o family
+  { id: "gpt-4o", label: "GPT-4o", context: 128000, provider: "openai" as const },
+  { id: "gpt-4o-mini", label: "GPT-4o Mini", context: 128000, provider: "openai" as const },
+];
+
+export type Tab = "connect" | "explore" | "optimize" | "results" | "settings";
 
 interface AppState {
   // Navigation
@@ -39,11 +69,30 @@ interface AppState {
   oauthPending: boolean;
   connectProgress: string | null;
 
-  // Model config
+  // Model config (derived from primary LLM config for backward compat)
   model: string;
   apiKey: string;
   customEndpoint: string;
   customContextWindow: number;
+
+  // LLM configurations
+  llmConfigs: LLMConfig[];
+  primaryLLM: string;   // ID of the primary LLM config
+  judgeLLM: string;      // ID of the judge LLM config
+
+  // LLM config actions
+  addLLMConfig: (config: LLMConfig) => void;
+  updateLLMConfig: (id: string, updates: Partial<LLMConfig>) => void;
+  removeLLMConfig: (id: string) => void;
+  setPrimaryLLM: (id: string) => void;
+  setJudgeLLM: (id: string) => void;
+  getJudgeConfig: () => LLMConfig | null;
+
+  // Evaluation settings
+  maxToolRounds: number;
+  maxTokensPerResponse: number;
+  setMaxToolRounds: (n: number) => void;
+  setMaxTokensPerResponse: (n: number) => void;
 
   // Explore data
   tools: any[];
@@ -314,6 +363,40 @@ async function consumeConnectSSE(
   }
 }
 
+// Migration: create config from legacy settings
+function migrateToLLMConfigs(): { configs: LLMConfig[]; primaryId: string } {
+  const raw = lsGet("llmConfigs");
+  let configs: LLMConfig[] = [];
+  try { configs = JSON.parse(raw || "[]"); } catch { /* ignore */ }
+  let primaryId = lsGet("primaryLLM");
+
+  if (configs.length === 0) {
+    const oldModel = lsGet("model");
+    const oldKey = lsGet("apiKey");
+    const oldEndpoint = lsGet("customEndpoint");
+    if (oldModel || oldKey) {
+      const isCustom = !KNOWN_MODELS.some(m => m.id === oldModel);
+      const config: LLMConfig = {
+        id: generateId(),
+        name: isCustom ? (oldModel || "Custom LLM") : KNOWN_MODELS.find(m => m.id === oldModel)?.label || oldModel || "LLM",
+        provider: isCustom ? "custom" : (oldModel?.startsWith("claude-") ? "anthropic" : "openai"),
+        model: oldModel || "",
+        apiKey: oldKey || "",
+        endpoint: oldEndpoint || "",
+        contextWindow: parseInt(lsGet("customContextWindow") || "128000", 10),
+      };
+      configs.push(config);
+      primaryId = config.id;
+      lsSet("llmConfigs", JSON.stringify(configs));
+      lsSet("primaryLLM", config.id);
+    }
+  }
+
+  return { configs, primaryId };
+}
+
+const _migrated = migrateToLLMConfigs();
+
 export const useStore = create<AppState>((set, get) => ({
   activeTab: "connect" as Tab,
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -349,6 +432,11 @@ export const useStore = create<AppState>((set, get) => ({
   apiKey: lsGet("apiKey"),
   customEndpoint: lsGet("customEndpoint"),
   customContextWindow: parseInt(lsGet("customContextWindow") || "128000", 10),
+  llmConfigs: _migrated.configs,
+  primaryLLM: _migrated.primaryId,
+  judgeLLM: lsGet("judgeLLM"),
+  maxToolRounds: parseInt(lsGet("maxToolRounds") || "20", 10),
+  maxTokensPerResponse: parseInt(lsGet("maxTokensPerResponse") || "4096", 10),
   tools: [],
   resources: [],
   resourceTemplates: [],
@@ -449,6 +537,89 @@ export const useStore = create<AppState>((set, get) => ({
   setCustomContextWindow: (ctx) => {
     lsSet("customContextWindow", String(ctx));
     set({ customContextWindow: ctx });
+  },
+
+  addLLMConfig: (config) => {
+    const configs = [...get().llmConfigs, config];
+    lsSet("llmConfigs", JSON.stringify(configs));
+    set({ llmConfigs: configs });
+  },
+
+  updateLLMConfig: (id, updates) => {
+    const configs = get().llmConfigs.map((c) => c.id === id ? { ...c, ...updates } : c);
+    lsSet("llmConfigs", JSON.stringify(configs));
+    set({ llmConfigs: configs });
+    // If this is the primary config, sync derived fields
+    if (id === get().primaryLLM) {
+      const config = configs.find((c) => c.id === id);
+      if (config) {
+        set({
+          model: config.model,
+          apiKey: config.apiKey,
+          customEndpoint: config.provider === "custom" ? config.endpoint : "",
+          customContextWindow: config.contextWindow,
+        });
+        lsSet("model", config.model);
+        lsSet("apiKey", config.apiKey);
+        lsSet("customEndpoint", config.provider === "custom" ? config.endpoint : "");
+        lsSet("customContextWindow", String(config.contextWindow));
+      }
+    }
+  },
+
+  removeLLMConfig: (id) => {
+    const configs = get().llmConfigs.filter((c) => c.id !== id);
+    lsSet("llmConfigs", JSON.stringify(configs));
+    const updates: Partial<AppState> = { llmConfigs: configs };
+    if (get().primaryLLM === id) {
+      updates.primaryLLM = "";
+      lsSet("primaryLLM", "");
+    }
+    if (get().judgeLLM === id) {
+      updates.judgeLLM = "";
+      lsSet("judgeLLM", "");
+    }
+    set(updates);
+  },
+
+  setPrimaryLLM: (id) => {
+    lsSet("primaryLLM", id);
+    const config = get().llmConfigs.find((c) => c.id === id);
+    if (config) {
+      set({
+        primaryLLM: id,
+        model: config.model,
+        apiKey: config.apiKey,
+        customEndpoint: config.provider === "custom" ? config.endpoint : "",
+        customContextWindow: config.contextWindow,
+      });
+      lsSet("model", config.model);
+      lsSet("apiKey", config.apiKey);
+      lsSet("customEndpoint", config.provider === "custom" ? config.endpoint : "");
+      lsSet("customContextWindow", String(config.contextWindow));
+    } else {
+      set({ primaryLLM: id });
+    }
+  },
+
+  setJudgeLLM: (id) => {
+    lsSet("judgeLLM", id);
+    set({ judgeLLM: id });
+  },
+
+  getJudgeConfig: () => {
+    const { judgeLLM, llmConfigs } = get();
+    return llmConfigs.find((c) => c.id === judgeLLM) || null;
+  },
+
+  setMaxToolRounds: (n) => {
+    lsSet("maxToolRounds", String(n));
+    set({ maxToolRounds: n });
+  },
+
+  setMaxTokensPerResponse: (n) => {
+    lsSet("maxTokensPerResponse", String(n));
+    set({ maxTokensPerResponse: n });
   },
 
   connect: async (url: string) => {
@@ -750,11 +921,18 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const { apiKey: storeApiKey, model: storeModel, customEndpoint } = get();
+      const { apiKey: storeApiKey, model: storeModel, customEndpoint, maxToolRounds, maxTokensPerResponse } = get();
       const response = await fetch("/api/optimize/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, api_key: storeApiKey || undefined, model: storeModel || undefined, custom_endpoint: customEndpoint || undefined }),
+        body: JSON.stringify({
+          prompt,
+          api_key: storeApiKey || undefined,
+          model: storeModel || undefined,
+          custom_endpoint: customEndpoint || undefined,
+          max_tool_rounds: maxToolRounds || undefined,
+          max_tokens: maxTokensPerResponse || undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -901,6 +1079,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
     try {
       const { evalIncluded, apiKey, model, customEndpoint } = get();
+      const judgeConfig = get().getJudgeConfig();
       const included = [...evalIncluded];
       const response = await fetch("/api/optimize/run", {
         method: "POST",
@@ -910,6 +1089,9 @@ export const useStore = create<AppState>((set, get) => ({
           api_key: apiKey || undefined,
           model: model || undefined,
           custom_endpoint: customEndpoint || undefined,
+          judge_model: judgeConfig?.model || undefined,
+          judge_api_key: judgeConfig?.apiKey || undefined,
+          judge_endpoint: judgeConfig?.provider === "custom" ? judgeConfig?.endpoint : undefined,
         }),
       });
 
