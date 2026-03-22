@@ -346,6 +346,26 @@ async def rate(req: RatingRequest):
     }
 
 
+@router.post("/optimize/analyze")
+async def analyze_tools():
+    """Run analysis on tool usage traces to generate recommendations."""
+    if not mcp_manager.is_connected():
+        raise HTTPException(status_code=400, detail="Not connected")
+    if not session.traces:
+        raise HTTPException(status_code=400, detail="No evaluation traces. Run prompts on the Evaluate tab first.")
+    from backend.mcp_optimizer.analyze import run_analysis
+    analysis_result = run_analysis(session.tools, session.traces, [])
+    session.analysis = analysis_result
+    session.recommendations = analysis_result.get("recommendations", [])
+    # Assign IDs to recommendations
+    for i, rec in enumerate(session.recommendations):
+        rec["id"] = f"rec_{i}"
+    return {
+        "recommendations": session.recommendations,
+        "quickWins": session.quick_wins,
+    }
+
+
 class OptimizeRunRequest(BaseModel):
     included_indices: list[int] | None = None
     enabled_rec_ids: list[str] | None = None  # if None, use all

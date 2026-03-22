@@ -101,6 +101,11 @@ export const api = {
     request<unknown>("/analyze/tool-stats"),
 
   // === Optimize ===
+  analyzeTools: () =>
+    request<{ recommendations: any[]; quickWins: any[] }>("/optimize/analyze", {
+      method: "POST",
+    }),
+
   evaluate: (prompt: string, apiKey?: string, model?: string) =>
     request<unknown>("/optimize/evaluate", {
       method: "POST",

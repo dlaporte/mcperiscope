@@ -161,6 +161,7 @@ interface AppState {
   enabledRecIds: Set<string>;
 
   // Optimization workbench actions
+  analyzeTools: () => Promise<void>;
   toggleRecEnabled: (id: string) => void;
   setAllRecsEnabled: (enabled: boolean) => void;
   selectRun: (runId: string | null) => void;
@@ -531,6 +532,19 @@ export const useStore = create<AppState>((set, get) => ({
         selectedRunId: runId,
         enabledRecIds: new Set(run.enabledRecIds),
       });
+    }
+  },
+
+  analyzeTools: async () => {
+    try {
+      const data = await api.analyzeTools();
+      set({
+        recommendations: data.recommendations ?? [],
+        quickWins: data.quickWins ?? [],
+        enabledRecIds: new Set<string>(),  // default all OFF
+      });
+    } catch {
+      // no traces yet — that's fine
     }
   },
 
