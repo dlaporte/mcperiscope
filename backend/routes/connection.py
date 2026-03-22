@@ -39,8 +39,7 @@ async def connect(req: ConnectRequest, request: Request):
         session.provider = req.provider
     if req.api_key:
         session.api_key = req.api_key
-    if req.custom_endpoint:
-        session.custom_endpoint = req.custom_endpoint
+    session.custom_endpoint = req.custom_endpoint or ""
     # Only validate API key for Anthropic provider
     if req.api_key and (req.provider or session.provider) == "anthropic":
         await _validate_api_key(req.api_key)

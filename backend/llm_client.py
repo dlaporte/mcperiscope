@@ -42,7 +42,11 @@ class LLMClient:
             endpoint: Custom endpoint URL (for OpenAI-compatible providers).
         """
         self.model = model
-        self._is_openai = provider in ("openai", "custom") or bool(endpoint)
+        # Provider takes precedence; only fall back to endpoint detection if provider is unset
+        if provider:
+            self._is_openai = provider in ("openai", "custom")
+        else:
+            self._is_openai = bool(endpoint)
 
         if self._is_openai:
             from openai import AsyncOpenAI

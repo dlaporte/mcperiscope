@@ -64,16 +64,24 @@ async def evaluate(req: EvaluateRequest):
         session.model = req.model
     if req.provider:
         session.provider = req.provider
-    if req.custom_endpoint:
-        session.custom_endpoint = req.custom_endpoint
+    # Always update endpoint — clear it when switching away from custom
+    session.custom_endpoint = req.custom_endpoint or ""
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
     if not session.tools:
         raise HTTPException(status_code=400, detail="No tools available")
 
+    # Capture values before entering generator (req may not be available inside)
+    _api_key = session.api_key
+    _model = session.model
+    _provider = session.provider
+    _endpoint = session.custom_endpoint
+    _max_tokens = req.max_tokens or 4096
+    _max_rounds = req.max_tool_rounds or 20
+
     async def event_stream():
         try:
-            client = LLMClient(session.api_key, session.model, session.provider, session.custom_endpoint)
+            client = LLMClient(_api_key, _model, _provider, _endpoint)
         except Exception as e:
             yield _sse("error", {"message": f"Failed to initialize LLM client: {e}"})
             return
@@ -428,16 +436,16 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         session.model = req.model
     if req and req.provider:
         session.provider = req.provider
-    if req and req.custom_endpoint:
-        session.custom_endpoint = req.custom_endpoint
+    if req:
+        session.custom_endpoint = req.custom_endpoint or ""
     if req and req.analyst_model:
         session.analyst_model = req.analyst_model
     if req and req.analyst_provider:
         session.analyst_provider = req.analyst_provider
     if req and req.analyst_api_key:
         session.analyst_api_key = req.analyst_api_key
-    if req and req.analyst_endpoint:
-        session.analyst_endpoint = req.analyst_endpoint
+    if req:
+        session.analyst_endpoint = req.analyst_endpoint or ""
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
 
