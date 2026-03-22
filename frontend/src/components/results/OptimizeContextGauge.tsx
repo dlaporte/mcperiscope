@@ -30,6 +30,7 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
         Session usage
       </span>
 
+      <div className="flex items-center gap-4 flex-1 min-w-0">
       {/* Gauge bar */}
       <div
         className="flex-1 h-6 rounded-sm overflow-hidden relative"
@@ -116,6 +117,7 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
             {baseline.toLocaleString()} / {(max / 1000).toFixed(0)}K
           </span>
         )}
+      </div>
       </div>
     </div>
   );
