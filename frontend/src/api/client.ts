@@ -136,4 +136,8 @@ export const api = {
 
   getProxyCode: () =>
     request<unknown>("/results/proxy"),
+
+  // === Optimization Runs ===
+  getRuns: () => request<{ runs: any[] }>("/results/runs"),
+  getRun: (runId: string) => request<any>(`/results/runs/${runId}`),
 };

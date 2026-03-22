@@ -47,7 +47,17 @@ export const KNOWN_MODELS = [
   { id: "gpt-4o-mini", label: "GPT-4o Mini", context: 128000, provider: "openai" as const },
 ];
 
-export type Tab = "connect" | "explore" | "optimize" | "results" | "settings";
+export type Tab = "connect" | "explore" | "evaluate" | "optimize" | "settings";
+
+interface OptimizationRun {
+  id: string;
+  timestamp: number;
+  name: string;
+  enabledRecIds: string[];
+  comparison: any;
+  analystResults: any[];
+  proxyAnswers: Array<{ prompt: string; answer: string }>;
+}
 
 interface AppState {
   // Navigation
@@ -144,6 +154,17 @@ interface AppState {
   quickWins: any[];
   planMarkdown: string;
   resultsLoading: boolean;
+
+  // Optimization workbench
+  optimizationRuns: OptimizationRun[];
+  selectedRunId: string | null;
+  enabledRecIds: Set<string>;
+
+  // Optimization workbench actions
+  toggleRecEnabled: (id: string) => void;
+  setAllRecsEnabled: (enabled: boolean) => void;
+  selectRun: (runId: string | null) => void;
+  runOptimizeWithSelection: () => Promise<void>;
 
   // Actions
   fetchComparison: () => Promise<void>;
@@ -470,6 +491,161 @@ export const useStore = create<AppState>((set, get) => ({
   quickWins: [],
   planMarkdown: "",
   resultsLoading: false,
+  optimizationRuns: [],
+  selectedRunId: null,
+  enabledRecIds: new Set<string>(),
+
+  toggleRecEnabled: (id) => {
+    set((state) => {
+      const next = new Set(state.enabledRecIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { enabledRecIds: next };
+    });
+  },
+
+  setAllRecsEnabled: (enabled) => {
+    if (enabled) {
+      const state = get();
+      const allIds = new Set<string>();
+      for (const rec of state.recommendations) {
+        if (rec.id) allIds.add(rec.id);
+      }
+      for (const qw of state.quickWins) {
+        if (qw.id) allIds.add(qw.id);
+      }
+      set({ enabledRecIds: allIds });
+    } else {
+      set({ enabledRecIds: new Set<string>() });
+    }
+  },
+
+  selectRun: (runId) => {
+    if (runId === null) {
+      set({ selectedRunId: null });
+      return;
+    }
+    const run = get().optimizationRuns.find((r) => r.id === runId);
+    if (run) {
+      set({
+        selectedRunId: runId,
+        enabledRecIds: new Set(run.enabledRecIds),
+      });
+    }
+  },
+
+  runOptimizeWithSelection: async () => {
+    set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
+    try {
+      const state = get();
+      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
+      const analystConfig = state.getAnalystConfig();
+      const included = [...state.evalIncluded];
+      const response = await fetch("/api/optimize/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          included_indices: included,
+          enabled_rec_ids: [...state.enabledRecIds],
+          api_key: state.apiKey || undefined,
+          model: state.model || undefined,
+          provider: primaryConfig?.provider || undefined,
+          custom_endpoint: state.customEndpoint || undefined,
+          analyst_model: analystConfig?.model || undefined,
+          analyst_provider: analystConfig?.provider || undefined,
+          analyst_api_key: analystConfig?.apiKey || undefined,
+          analyst_endpoint: analystConfig?.provider === "custom" ? analystConfig?.endpoint : undefined,
+        }),
+      });
+
+      if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
+        const err = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(err.detail || response.statusText);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "progress") {
+                set({ optimizeProgress: data.message });
+              } else if (currentEvent === "done") {
+                // Fetch final results from backend
+                const [comparison, recs, planRes, runsRes] = await Promise.allSettled([
+                  api.getComparison(),
+                  api.getRecommendations(),
+                  fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
+                  api.getRuns(),
+                ]);
+                const recsData = recs.status === "fulfilled" ? recs.value as any : {};
+                const runsData = runsRes.status === "fulfilled" ? (runsRes.value as any).runs : [];
+
+                // Also fetch the full run data for the new run
+                const runId = data.runId;
+                let newRun: OptimizationRun | null = null;
+                if (runId) {
+                  try {
+                    const runData = await api.getRun(runId);
+                    newRun = {
+                      id: runData.id,
+                      timestamp: runData.timestamp,
+                      name: runData.name,
+                      enabledRecIds: runData.enabledRecIds,
+                      comparison: runData.comparison,
+                      analystResults: runData.analystResults,
+                      proxyAnswers: runData.proxyAnswers,
+                    };
+                  } catch { /* ignore */ }
+                }
+
+                const updatedRuns = newRun
+                  ? [...get().optimizationRuns.filter((r) => r.id !== newRun!.id), newRun]
+                  : get().optimizationRuns;
+
+                set({
+                  optimizeRunning: false,
+                  optimizeProgress: null,
+                  comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
+                  recommendations: recsData?.recommendations ?? [],
+                  quickWins: recsData?.quickWins ?? [],
+                  planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
+                  optimizationRuns: updatedRuns,
+                  selectedRunId: runId || null,
+                });
+              } else if (currentEvent === "error") {
+                set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
+              }
+            } catch { /* skip */ }
+            currentEvent = "";
+          }
+        }
+      }
+
+      if (get().optimizeRunning) {
+        set({ optimizeRunning: false, optimizeProgress: null });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ optimizeRunning: false, optimizeProgress: null, error: message });
+    }
+  },
 
   fetchComparison: async () => {
     set({ resultsLoading: true });
@@ -728,6 +904,10 @@ export const useStore = create<AppState>((set, get) => ({
       optimizeProgress: null,
       comparison: null,
       recommendations: [],
+      quickWins: [],
+      optimizationRuns: [],
+      selectedRunId: null,
+      enabledRecIds: new Set<string>(),
     });
   },
 
@@ -1138,14 +1318,47 @@ export const useStore = create<AppState>((set, get) => ({
                   fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
                 ]);
                 const recsData = recs.status === "fulfilled" ? recs.value as any : {};
+
+                // Populate optimization run
+                const runId = data.runId;
+                let newRun: OptimizationRun | null = null;
+                if (runId) {
+                  try {
+                    const runData = await api.getRun(runId);
+                    newRun = {
+                      id: runData.id,
+                      timestamp: runData.timestamp,
+                      name: runData.name,
+                      enabledRecIds: runData.enabledRecIds,
+                      comparison: runData.comparison,
+                      analystResults: runData.analystResults,
+                      proxyAnswers: runData.proxyAnswers,
+                    };
+                  } catch { /* ignore */ }
+                }
+
+                const allRecs = recsData?.recommendations ?? [];
+                const allQws = recsData?.quickWins ?? [];
+                // Enable all recs by default
+                const allIds = new Set<string>();
+                for (const rec of allRecs) { if (rec.id) allIds.add(rec.id); }
+                for (const qw of allQws) { if (qw.id) allIds.add(qw.id); }
+
+                const updatedRuns = newRun
+                  ? [...get().optimizationRuns.filter((r) => r.id !== newRun!.id), newRun]
+                  : get().optimizationRuns;
+
                 set({
                   optimizeRunning: false,
                   optimizeProgress: null,
                   comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
-                  recommendations: recsData?.recommendations ?? [],
-                  quickWins: recsData?.quickWins ?? [],
+                  recommendations: allRecs,
+                  quickWins: allQws,
                   planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
-                  activeTab: "results",
+                  activeTab: "optimize",
+                  optimizationRuns: updatedRuns,
+                  selectedRunId: runId || null,
+                  enabledRecIds: allIds,
                 });
               } else if (currentEvent === "error") {
                 set({ optimizeRunning: false, optimizeProgress: null, error: data.message });

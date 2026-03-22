@@ -25,6 +25,18 @@ MODEL_CONTEXT_WINDOWS = {
 
 
 @dataclass
+class OptimizationRun:
+    id: str
+    timestamp: float
+    name: str
+    enabled_rec_ids: list[str] = field(default_factory=list)
+    proxy_code: str | None = None
+    comparison: dict | None = None
+    proxy_answers: list[dict] = field(default_factory=list)
+    analyst_results: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class Session:
     connection: MCPConnection | None = None
     tools: list[Any] = field(default_factory=list)
@@ -49,6 +61,8 @@ class Session:
     proxy_code: str | None = None
     proxy_process: Popen | None = None
     quick_wins: list[dict] = field(default_factory=list)
+    optimization_runs: list[OptimizationRun] = field(default_factory=list)
+    run_counter: int = 0
     project_dir: Path = field(default_factory=lambda: Path.home() / ".mcperiscope" / "projects" / "default")
 
     def kill_proxy(self):
@@ -76,6 +90,8 @@ class Session:
         self.comparison = None
         self.proxy_code = None
         self.quick_wins = []
+        self.optimization_runs = []
+        self.run_counter = 0
 
 
 session = Session()

@@ -6,23 +6,48 @@ interface DownloadButton {
   filename: string;
 }
 
-const DOWNLOADS: DownloadButton[] = [
-  {
-    label: "Download Plan",
-    endpoint: "/api/results/plan",
-    filename: "optimization-plan.md",
-  },
-  {
-    label: "Download Report",
-    endpoint: "/api/results/report/html",
-    filename: "optimization-report.html",
-  },
-  {
-    label: "Download Proxy",
-    endpoint: "/api/results/proxy",
-    filename: "proxy_server.py",
-  },
-];
+interface ExportPanelProps {
+  runId?: string | null;
+}
+
+function getDownloads(runId?: string | null): DownloadButton[] {
+  if (runId) {
+    return [
+      {
+        label: "Download Plan",
+        endpoint: `/api/results/runs/${runId}/plan`,
+        filename: "optimization-plan.md",
+      },
+      {
+        label: "Download Report",
+        endpoint: "/api/results/report/html",
+        filename: "optimization-report.html",
+      },
+      {
+        label: "Download Proxy",
+        endpoint: `/api/results/runs/${runId}/proxy`,
+        filename: "proxy_server.py",
+      },
+    ];
+  }
+  return [
+    {
+      label: "Download Plan",
+      endpoint: "/api/results/plan",
+      filename: "optimization-plan.md",
+    },
+    {
+      label: "Download Report",
+      endpoint: "/api/results/report/html",
+      filename: "optimization-report.html",
+    },
+    {
+      label: "Download Proxy",
+      endpoint: "/api/results/proxy",
+      filename: "proxy_server.py",
+    },
+  ];
+}
 
 async function triggerDownload(endpoint: string, filename: string) {
   const res = await fetch(endpoint);
@@ -47,9 +72,10 @@ async function triggerDownload(endpoint: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function ExportPanel() {
+export function ExportPanel({ runId }: ExportPanelProps = {}) {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const DOWNLOADS = getDownloads(runId);
 
   async function handleDownload(dl: DownloadButton) {
     setDownloading(dl.endpoint);

@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from pydantic import BaseModel
 from backend.models import EvaluateRequest, RatingRequest
-from backend.state import session
+from backend.state import OptimizationRun, session
 from backend import mcp_manager
 from backend.llm_client import LLMClient
 
@@ -348,6 +348,7 @@ async def rate(req: RatingRequest):
 
 class OptimizeRunRequest(BaseModel):
     included_indices: list[int] | None = None
+    enabled_rec_ids: list[str] | None = None  # if None, use all
     api_key: str | None = None
     model: str | None = None
     provider: str | None = None
@@ -409,14 +410,29 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             analysis_result = run_analysis(session.tools, session.traces, [])
             session.analysis = analysis_result
             session.recommendations = analysis_result.get("recommendations", [])
+            for i, rec in enumerate(session.recommendations):
+                rec["id"] = f"rec_{i}"
         except Exception as e:
             yield _sse("error", {"message": f"Analysis failed: {e}"})
             return
 
-        rec_count = len(session.recommendations)
+        # Filter recommendations if enabled_rec_ids is provided
+        enabled_rec_ids_set = None
+        if req and req.enabled_rec_ids is not None:
+            enabled_rec_ids_set = set(req.enabled_rec_ids)
+            filtered_recs = [r for r in session.recommendations if r.get("id") in enabled_rec_ids_set]
+            filtered_qws = [q for q in session.quick_wins if q.get("id") in enabled_rec_ids_set]
+        else:
+            filtered_recs = session.recommendations
+            filtered_qws = session.quick_wins
+
+        # Track which IDs are enabled for this run
+        run_enabled_ids = [r.get("id") for r in filtered_recs if r.get("id")] + [q.get("id") for q in filtered_qws if q.get("id")]
+
+        rec_count = len(filtered_recs)
         yield _sse("progress", {"phase": "analyze", "message": f"Found {rec_count} optimization recommendations"})
 
-        if rec_count == 0:
+        if rec_count == 0 and not filtered_qws:
             yield _sse("done", {
                 "status": "complete",
                 "recommendationCount": 0,
@@ -430,7 +446,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_code = None
         try:
             proxy_code = await _generate_proxy_for_recommendations(
-                session.recommendations, session.tools, mcp_manager.get_url() or "",
+                filtered_recs + filtered_qws, session.tools, mcp_manager.get_url() or "",
                 analyst_key=session.analyst_api_key or session.api_key,
                 analyst_model=session.analyst_model or session.model,
                 analyst_provider=session.analyst_provider or session.provider,
@@ -691,6 +707,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             for t in session.tools
         )
 
+        # Accuracy from analyst results
+        analyst_correct = sum(1 for r in analyst_results if r.get("verdict") == "equivalent")
+        analyst_total = sum(1 for r in analyst_results if r.get("verdict") in ("equivalent", "partial", "different"))
+        accuracy = analyst_correct / max(analyst_total, 1) if analyst_total > 0 else None
+
+        # Avg latency per prompt
+        baseline_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in session.traces) / max(num_prompts, 1) * 1000, 1)
+        proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / max(num_prompts, 1) * 1000, 1) if proxy_traces else None
+
         baseline_avg = round(baseline_tokens / num_prompts, 1)
         baseline = {
             "tool_count": len(session.tools),
@@ -698,6 +723,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             "avg_tokens_per_prompt": baseline_avg,
             "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
             "total_context": round(orig_menu + baseline_avg, 1),
+            "accuracy": 1.0,
+            "avg_latency": baseline_avg_latency,
         }
 
         proxy_avg = round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None
@@ -707,6 +734,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             "avg_tokens_per_prompt": proxy_avg,
             "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else None,
             "total_context": round(proxy_menu_tokens + proxy_avg, 1) if proxy_menu_tokens and proxy_avg is not None else None,
+            "accuracy": accuracy,
+            "avg_latency": proxy_avg_latency,
         }
 
         # Calculate deltas with percentages
@@ -723,11 +752,27 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
         session.comparison = comparison
 
+        # Create OptimizationRun
+        session.run_counter += 1
+        run_id = f"run_{session.run_counter}"
+        run = OptimizationRun(
+            id=run_id,
+            timestamp=time.time(),
+            name=f"Run {session.run_counter}",
+            enabled_rec_ids=run_enabled_ids,
+            proxy_code=proxy_code,
+            comparison=comparison,
+            proxy_answers=proxy_answers,
+            analyst_results=analyst_results,
+        )
+        session.optimization_runs.append(run)
+
         yield _sse("progress", {"phase": "complete", "message": "Optimization complete!"})
 
         yield _sse("done", {
             "status": "complete",
-            "recommendationCount": len(session.recommendations),
+            "runId": run_id,
+            "recommendationCount": len(filtered_recs),
             "comparison": session.comparison,
             "proxyToolCount": proxy_tool_count,
             "baselineToolCount": len(session.tools),

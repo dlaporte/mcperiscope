@@ -9,8 +9,8 @@ interface TabBarProps {
 const TABS: { id: Tab; label: string; requiresConnection: boolean }[] = [
   { id: "connect", label: "Connect", requiresConnection: false },
   { id: "explore", label: "Explore", requiresConnection: true },
+  { id: "evaluate", label: "Evaluate", requiresConnection: true },
   { id: "optimize", label: "Optimize", requiresConnection: true },
-  { id: "results", label: "Results", requiresConnection: true },
 ];
 
 export function TabBar({ active, onChange, connected }: TabBarProps) {

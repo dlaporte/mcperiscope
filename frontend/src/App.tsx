@@ -23,8 +23,8 @@ function App() {
       <div className="flex-1 overflow-hidden">
         {activeTab === "connect" && <ConnectTab />}
         {activeTab === "explore" && connected && <ExploreTab />}
-        {activeTab === "optimize" && connected && <OptimizeTab />}
-        {activeTab === "results" && connected && <ResultsTab />}
+        {activeTab === "evaluate" && connected && <OptimizeTab />}
+        {activeTab === "optimize" && connected && <ResultsTab />}
         {activeTab === "settings" && <SettingsTab />}
         {!connected && activeTab !== "connect" && activeTab !== "settings" && (
           <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>

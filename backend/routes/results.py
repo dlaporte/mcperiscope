@@ -106,3 +106,56 @@ async def get_proxy():
             detail="No proxy code available. Run optimization first.",
         )
     return Response(content=session.proxy_code, media_type="text/plain")
+
+
+@router.get("/results/runs")
+async def get_runs():
+    return {"runs": [
+        {"id": r.id, "timestamp": r.timestamp, "name": r.name, "enabledRecIds": r.enabled_rec_ids}
+        for r in session.optimization_runs
+    ]}
+
+
+@router.get("/results/runs/{run_id}")
+async def get_run(run_id: str):
+    run = next((r for r in session.optimization_runs if r.id == run_id), None)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {
+        "id": run.id, "timestamp": run.timestamp, "name": run.name,
+        "enabledRecIds": run.enabled_rec_ids,
+        "comparison": run.comparison, "analystResults": run.analyst_results,
+        "proxyAnswers": run.proxy_answers,
+    }
+
+
+@router.get("/results/runs/{run_id}/proxy")
+async def get_run_proxy(run_id: str):
+    run = next((r for r in session.optimization_runs if r.id == run_id), None)
+    if not run or not run.proxy_code:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+    return Response(content=run.proxy_code, media_type="text/plain")
+
+
+@router.get("/results/runs/{run_id}/plan")
+async def get_run_plan(run_id: str):
+    _require_connected()
+    run = next((r for r in session.optimization_runs if r.id == run_id), None)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    # Filter recommendations to this run's enabled set
+    enabled_set = set(run.enabled_rec_ids)
+    recs = [r for r in session.recommendations if r.get("id") in enabled_set]
+    qws = [q for q in session.quick_wins if q.get("id") in enabled_set]
+    from backend.mcp_optimizer.report import generate_plan_md
+
+    plan_md = generate_plan_md(
+        url=mcp_manager.get_url() or "",
+        inventory=session.inventory or {},
+        analysis=session.analysis or {},
+        recommendations=recs + qws,
+        ratings=session.ratings,
+        traces=session.traces,
+        prompts=session.prompts,
+    )
+    return Response(content=plan_md, media_type="text/markdown")

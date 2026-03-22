@@ -4,6 +4,8 @@ interface MetricSet {
   avg_tokens_per_prompt?: number;
   avg_calls_per_prompt?: number;
   total_context?: number;
+  accuracy?: number;
+  avg_latency?: number;
 }
 
 interface DeltaEntry {
@@ -19,6 +21,7 @@ interface ComparisonData {
 
 interface Props {
   data: ComparisonData;
+  runSelector?: React.ReactNode;
 }
 
 interface RowDef {
@@ -58,6 +61,19 @@ const rows: RowDef[] = [
     label: "Avg Calls / Prompt",
     key: "avg_calls_per_prompt",
     format: (v) => (v != null ? Number(v).toFixed(1) : "\u2014"),
+    lowerBetter: true,
+  },
+  {
+    label: "Accuracy",
+    key: "accuracy",
+    format: (v) => (v != null ? `${(v * 100).toFixed(0)}%` : "\u2014"),
+    lowerBetter: false,
+    isPercent: true,
+  },
+  {
+    label: "Avg Latency",
+    key: "avg_latency",
+    format: (v) => (v != null ? `${v.toFixed(0)}ms` : "\u2014"),
     lowerBetter: true,
   },
 ];
@@ -101,7 +117,7 @@ function getDeltaPct(delta: DeltaEntry | undefined, baseline: number | undefined
   return ((proxy - baseline) / baseline) * 100;
 }
 
-export function ComparisonTable({ data }: Props) {
+export function ComparisonTable({ data, runSelector }: Props) {
   return (
     <div className="panel-riveted rounded-lg overflow-hidden">
       <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
@@ -113,7 +129,9 @@ export function ComparisonTable({ data }: Props) {
           <tr className="text-sm" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
             <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Metric</th>
             <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Baseline</th>
-            <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Optimized</th>
+            <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>
+              {runSelector || "Optimized"}
+            </th>
             <th className="text-right px-4 py-2 font-medium" style={{ color: 'var(--sub-text-dim)' }}>Change</th>
           </tr>
         </thead>

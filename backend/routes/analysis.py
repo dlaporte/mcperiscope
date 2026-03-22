@@ -144,6 +144,10 @@ def generate_quick_wins(
                         "estimated_savings": None,
                     })
 
+    # Assign IDs to each quick win
+    for i, win in enumerate(wins):
+        win["id"] = f"qw_{i}"
+
     return wins
 
 
