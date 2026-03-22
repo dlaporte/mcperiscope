@@ -18,107 +18,99 @@ def generate_quick_wins(
     model: str,
     resources: list[dict] | None = None,
 ) -> list[dict]:
-    """Generate static quick-win recommendations from tool and resource analysis.
+    """Generate discrete, non-overlapping recommendations from inventory analysis.
 
-    resources: optional list of dicts with keys: name, uri, mime_type, tokens, char_count
+    Each recommendation has a specific, well-defined remediation action.
+    Behavior-based recommendations (from run_analysis) handle consolidation
+    and description rewrites — inventory recommendations cover what behavior
+    analysis cannot detect statically.
     """
     wins = []
     ctx_window = MODEL_CONTEXT_WINDOWS.get(model, session.custom_context_window or 200_000)
-    context_pct = total_tokens / ctx_window * 100 if ctx_window else 0
 
-    # High tool count
-    if len(tools) > 50:
-        wins.append({
-            "type": "high_tool_count",
-            "description": f"{len(tools)} tools — most LLMs perform best with fewer than 20. Consider consolidating related tools.",
-            "tools": [],
-            "estimated_savings": None,
-        })
-
-    # Context usage
-    if context_pct > 15:
-        wins.append({
-            "type": "high_context_usage",
-            "description": f"Tool definitions consume {context_pct:.1f}% of the context window ({total_tokens:,} tokens). Significant reduction possible.",
-            "tools": [],
-            "estimated_savings": None,
-        })
-    elif context_pct > 5:
-        wins.append({
-            "type": "moderate_context_usage",
-            "description": f"Tool definitions use {context_pct:.1f}% of the context window ({total_tokens:,} tokens).",
-            "tools": [],
-            "estimated_savings": None,
-        })
-
-    # Consolidation opportunities (large prefix clusters)
-    clusters = find_name_clusters(tools)
-    large_clusters = [c for c in clusters if len(c.tools) >= 5]
-    for cluster in large_clusters[:3]:
-        wins.append({
-            "type": "consolidation",
-            "description": f"{len(cluster.tools)} tools share the '{cluster.prefix}' prefix — could be consolidated into a single tool with a type parameter.",
-            "tools": cluster.tools,
-            "estimated_savings": None,
-        })
-
-    # Oversized token budgets
+    # 1. Trim verbose descriptions — tools with oversized token footprints
+    #    Action: use analyst LLM to rewrite descriptions more concisely
     budgets = [(t, tool_token_budget(t)) for t in tools]
-    oversized = [(t.name, b.total_tokens) for t, b in budgets if b.total_tokens > 300]
+    oversized = [(t.name, b.total_tokens, b.description_tokens) for t, b in budgets if b.total_tokens > 300]
     if oversized:
-        total_excess = sum(tokens - 100 for _, tokens in oversized)
+        total_excess = sum(tokens - 100 for _, tokens, _ in oversized)
+        detail_lines = [f"  {name}: {tokens} tokens ({desc_tokens} description)" for name, tokens, desc_tokens in sorted(oversized, key=lambda x: -x[1])[:10]]
         wins.append({
-            "type": "oversized_schema",
-            "description": f"{len(oversized)} tools have large token footprints (>300 tokens each). Trimming descriptions/schemas could save ~{total_excess:,} tokens.",
-            "tools": [name for name, _ in oversized],
+            "type": "trim_descriptions",
+            "description": (
+                f"{len(oversized)} tools have token footprints over 300 tokens each. "
+                f"The analyst LLM will rewrite their descriptions to be more concise "
+                f"while preserving tool selection accuracy.\n\n"
+                + "\n".join(detail_lines)
+            ),
+            "tools": [name for name, _, _ in oversized],
             "estimated_savings": total_excess,
         })
 
-    # Missing descriptions
-    missing_desc = [t.name for t in tools if not t.description]
-    if missing_desc:
+    # 2. Remove unused tools — tools never called across all evaluation prompts
+    #    Action: omit these tools from the proxy entirely
+    if session.traces:
+        called_tools = {t.get("tool_name") for t in session.traces}
+        all_tool_names = {t.name for t in tools}
+        unused = sorted(all_tool_names - called_tools)
+        if unused and len(unused) < len(tools):  # Don't remove all tools
+            unused_tokens = sum(
+                b.total_tokens for t, b in budgets if t.name in unused
+            )
+            wins.append({
+                "type": "remove_unused",
+                "description": (
+                    f"{len(unused)} tools were never called during evaluation. "
+                    f"Removing them from the proxy saves ~{unused_tokens:,} menu tokens."
+                ),
+                "tools": list(unused),
+                "estimated_savings": unused_tokens,
+            })
+
+    # 3. Consolidate no-parameter lookup tools — tools with no inputs
+    #    Action: merge into a single lookup(table) tool
+    no_param = []
+    for t in tools:
+        schema = t.inputSchema or {}
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not props and not required:
+            no_param.append(t.name)
+    if len(no_param) >= 3:
+        no_param_tokens = sum(b.total_tokens for t, b in budgets if t.name in no_param)
         wins.append({
-            "type": "missing_description",
-            "description": f"{len(missing_desc)} tools have no description — LLMs cannot effectively select them without descriptions.",
-            "tools": missing_desc,
-            "estimated_savings": None,
+            "type": "consolidate_lookups",
+            "description": (
+                f"{len(no_param)} tools take no parameters (reference data lookups). "
+                f"Consolidate into a single lookup(table) tool to save ~{no_param_tokens - 50:,} menu tokens."
+            ),
+            "tools": no_param,
+            "estimated_savings": max(0, no_param_tokens - 50),
         })
 
-    # Terse descriptions
-    terse = [t.name for t in tools if t.description and len(t.description.strip()) < 20]
-    if terse:
-        wins.append({
-            "type": "terse_description",
-            "description": f"{len(terse)} tools have very short descriptions (<20 chars). Add return value info and usage examples.",
-            "tools": terse,
-            "estimated_savings": None,
-        })
-
-    # --- Resource analysis ---
+    # 4. Condense resources — markdown resources loaded into context
+    #    Action: use analyst LLM to condense resource content
     if resources:
         md_resources = [r for r in resources if r.get("mime_type") == "text/markdown"]
         total_resource_tokens = sum(r.get("tokens", 0) for r in md_resources)
 
-        if md_resources and total_resource_tokens > 0:
+        if md_resources and total_resource_tokens > 500:
             resource_pct = total_resource_tokens / ctx_window * 100 if ctx_window else 0
-            # Build detail lines for large resources
             large = sorted(
                 [r for r in md_resources if r.get("tokens", 0) > 500],
                 key=lambda x: x.get("tokens", 0),
                 reverse=True,
             )
-            detail_lines = []
-            for r in large[:5]:
-                detail_lines.append(f"  {r['name']}: ~{r['tokens']:,} tokens")
+            detail_lines = [f"  {r['name']}: ~{r['tokens']:,} tokens" for r in large[:5]]
             estimated_savings = sum(r["tokens"] // 3 for r in large) if large else None
 
             description = (
                 f"{len(md_resources)} markdown resources consume ~{total_resource_tokens:,} tokens "
                 f"({resource_pct:.1f}% of context). "
-                f"Use the analyst LLM to condense verbose content while preserving key information."
+                f"The analyst LLM will condense content while preserving key information."
             )
             if detail_lines:
-                description += "\n\nLargest resources:\n" + "\n".join(detail_lines)
+                description += "\n\n" + "\n".join(detail_lines)
 
             wins.append({
                 "type": "resource_context_usage",
@@ -126,10 +118,6 @@ def generate_quick_wins(
                 "tools": [r["name"] for r in md_resources],
                 "estimated_savings": estimated_savings,
             })
-
-    # Assign IDs to each quick win
-    for i, win in enumerate(wins):
-        win["id"] = f"qw_{i}"
 
     return wins
 

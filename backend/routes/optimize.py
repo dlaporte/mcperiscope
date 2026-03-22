@@ -350,7 +350,7 @@ RESOURCE_REC_TYPES = {"resource_context_usage"}
 
 
 def _deduplicate_recommendations():
-    """Remove quick wins that are covered by behavior recommendations.
+    """Remove inventory recommendations that overlap with behavior recommendations.
     Also remove resource recommendations if no resources are loaded."""
     if not session.quick_wins:
         return
@@ -365,7 +365,6 @@ def _deduplicate_recommendations():
         for tool in rec.get("affected_tools", []):
             rec_tools.add(tool)
 
-    # Filter quick wins
     filtered = []
     for qw in session.quick_wins:
         qw_type = qw.get("type", "")
@@ -373,14 +372,6 @@ def _deduplicate_recommendations():
 
         # Skip resource recommendations if no resources are loaded
         if qw_type in RESOURCE_REC_TYPES and not has_loaded_resources:
-            continue
-
-        # Skip if it's a consolidation/oversized recommendation and the same tools are in behavior recs
-        if qw_type == "consolidation" and qw_tools and qw_tools.issubset(rec_tools):
-            continue
-        if qw_type == "oversized_schema" and qw_tools and qw_tools.issubset(rec_tools):
-            continue
-        if qw_type == "high_tool_count" and "consolidate" in rec_types:
             continue
 
         filtered.append(qw)
