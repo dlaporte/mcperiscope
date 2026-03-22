@@ -2,6 +2,18 @@
 set -e
 cd "$(dirname "$0")"
 
+# Install dependencies if needed
+if command -v uv &>/dev/null; then
+  uv sync --quiet
+else
+  pip install -q -e .
+fi
+
+if [ ! -d frontend/node_modules ]; then
+  echo "Installing frontend dependencies..."
+  (cd frontend && npm install)
+fi
+
 echo "Starting MCPeriscope..."
 
 # Start FastAPI backend
