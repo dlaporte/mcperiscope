@@ -62,7 +62,7 @@ cd mcperiscope
 1. Go to **Connect**, select your MCP server, and click Connect
 2. Switch to **Explore** to browse tools, resources, and prompts with token costs
 3. Switch to **Evaluate** to run test prompts and watch the LLM chain tool calls in real time
-4. Switch to **Optimize** to see recommendations, select optimizations, and generate a proxy
+4. Switch to **Optimize** to see recommendations, select optimizations, and generate a proxy to see real-world results
 
 ## Environment variables
 
