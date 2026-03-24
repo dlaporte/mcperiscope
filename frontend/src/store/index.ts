@@ -627,7 +627,7 @@ export const useStore = create<AppState>((set, get) => ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          included_indices: included,
+          included_indices: included.length > 0 ? included : undefined,
           enabled_rec_ids: [...state.enabledRecIds],
           api_key: primaryConfig?.apiKey || state.apiKey || undefined,
           model: primaryConfig?.model || state.model || undefined,

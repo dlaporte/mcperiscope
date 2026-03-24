@@ -44,15 +44,17 @@ function RecItem({ id, type, description, impact, checked, onToggle }: RecItemPr
 
   return (
     <div
-      className="py-1.5 px-1 rounded transition-colors"
+      className="py-1.5 px-1 rounded transition-colors cursor-pointer"
       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+      onClick={onToggle}
     >
       <div className="flex items-start gap-2">
         <input
           type="checkbox"
           checked={checked}
           onChange={onToggle}
+          onClick={(e) => e.stopPropagation()}
           className="w-3 h-3 mt-0.5 rounded cursor-pointer accent-amber-600 shrink-0"
         />
         <div className="flex-1 min-w-0">
@@ -72,7 +74,7 @@ function RecItem({ id, type, description, impact, checked, onToggle }: RecItemPr
           <p
             className="text-[11px] mt-0.5 leading-snug cursor-pointer"
             style={{ color: 'var(--sub-text)' }}
-            onClick={() => setExpanded(!expanded)}
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
           >
             {expanded ? description : truncate(description, 100)}
           </p>
@@ -90,6 +92,7 @@ export function RecommendationsPanel() {
   const setAllRecsEnabled = useStore((s) => s.setAllRecsEnabled);
   const optimizeRunning = useStore((s) => s.optimizeRunning);
   const optimizeProgress = useStore((s) => s.optimizeProgress);
+  const error = useStore((s) => s.error);
   const runOptimizeWithSelection = useStore((s) => s.runOptimizeWithSelection);
 
   const hasAny = recommendations.length > 0 || quickWins.length > 0;
@@ -196,6 +199,9 @@ export function RecommendationsPanel() {
             `Optimize (${enabledCount} selected)`
           )}
         </button>
+        {error && (
+          <p className="text-xs mt-2" style={{ color: 'var(--sub-red)' }}>{error}</p>
+        )}
       </div>
     </div>
   );
