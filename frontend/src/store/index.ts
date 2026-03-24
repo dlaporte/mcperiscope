@@ -640,9 +640,14 @@ export const useStore = create<AppState>((set, get) => ({
         }),
       });
 
-      if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
-        const err = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(err.detail || response.statusText);
+      if (!response.ok) {
+        let detail = response.statusText;
+        try {
+          const body = await response.text();
+          const parsed = JSON.parse(body);
+          detail = parsed.detail || detail;
+        } catch { /* use statusText */ }
+        throw new Error(detail);
       }
 
       const reader = response.body?.getReader();
