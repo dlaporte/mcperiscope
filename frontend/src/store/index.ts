@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import type { AuthConfig } from "../api/client";
 
 function generateId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return generateId();
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
@@ -1383,124 +1383,11 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Dead code marker - keeping interface declaration but removing implementation
+  // runOptimize was replaced by runOptimizeWithSelection
   runOptimize: async () => {
-    set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
-    try {
-      const state = get();
-      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
-      const analystConfig = state.getAnalystConfig();
-      const included = [...state.evalIncluded];
-      const response = await fetch("/api/optimize/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          included_indices: included,
-          api_key: primaryConfig?.apiKey || state.apiKey || undefined,
-          model: primaryConfig?.model || state.model || undefined,
-          provider: primaryConfig?.provider || undefined,
-          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
-          analyst_model: analystConfig?.model || undefined,
-          analyst_provider: analystConfig?.provider || undefined,
-          analyst_api_key: analystConfig?.apiKey || undefined,
-          analyst_endpoint: analystConfig?.provider === "custom" ? analystConfig?.endpoint : undefined,
-        }),
-      });
-
-      if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
-        const err = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(err.detail || response.statusText);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (currentEvent === "progress") {
-                set({ optimizeProgress: data.message });
-              } else if (currentEvent === "done") {
-                // Fetch final results from backend
-                const [comparison, recs, planRes] = await Promise.allSettled([
-                  api.getComparison(),
-                  api.getRecommendations(),
-                  fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
-                ]);
-                const recsData = recs.status === "fulfilled" ? recs.value as any : {};
-
-                // Populate optimization run
-                const runId = data.runId;
-                let newRun: OptimizationRun | null = null;
-                if (runId) {
-                  try {
-                    const runData = await api.getRun(runId);
-                    newRun = {
-                      id: runData.id,
-                      timestamp: runData.timestamp,
-                      name: runData.name,
-                      enabledRecIds: runData.enabledRecIds,
-                      comparison: runData.comparison,
-                      analystResults: runData.analystResults,
-                      proxyAnswers: runData.proxyAnswers,
-                      condensedResources: runData.condensedResources,
-                    };
-                  } catch { /* ignore */ }
-                }
-
-                const allRecs = recsData?.recommendations ?? [];
-                const allQws = recsData?.quickWins ?? [];
-                // Enable all recs by default
-                const allIds = new Set<string>();
-                for (const rec of allRecs) { if (rec.id) allIds.add(rec.id); }
-                for (const qw of allQws) { if (qw.id) allIds.add(qw.id); }
-
-                const updatedRuns = newRun
-                  ? [...get().optimizationRuns.filter((r) => r.id !== newRun!.id), newRun]
-                  : get().optimizationRuns;
-
-                set({
-                  optimizeRunning: false,
-                  optimizeProgress: null,
-                  comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
-                  recommendations: allRecs,
-                  quickWins: allQws,
-                  planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
-                  activeTab: "optimize",
-                  optimizationRuns: updatedRuns,
-                  selectedRunId: runId || null,
-                  enabledRecIds: allIds,
-                });
-              } else if (currentEvent === "error") {
-                set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
-              }
-            } catch { /* skip */ }
-            currentEvent = "";
-          }
-        }
-      }
-
-      if (get().optimizeRunning) {
-        set({ optimizeRunning: false, optimizeProgress: null });
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      set({ optimizeRunning: false, optimizeProgress: null, error: message });
-    }
+    // Delegate to runOptimizeWithSelection
+    return get().runOptimizeWithSelection();
   },
 
   removeEval: (index) => {

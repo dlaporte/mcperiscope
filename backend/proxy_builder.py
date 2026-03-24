@@ -265,31 +265,37 @@ def _gen_passthrough(
     required_set = set(schema.get("required", []))
 
     # Use rewritten description if available, otherwise truncate original
-    desc = ""
     if rewritten_descriptions and tool.name in rewritten_descriptions:
         desc = rewritten_descriptions[tool.name]
     else:
         desc = (tool.description or "")[:500]
-    desc = desc.replace('"', '\\"').replace("\n", " ")
+    desc = desc.replace("\n", " ")
+    desc_json = json.dumps(desc)
+
+    # Sanitize tool name for use as Python function name
+    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', tool.name)
+    if safe_name[0:1].isdigit():
+        safe_name = f"tool_{safe_name}"
 
     params = []
     args_entries = []
     for pname, pschema in props.items():
         ptype = _py_type(pschema)
+        safe_pname = re.sub(r'[^a-zA-Z0-9_]', '_', pname)
         if pname in required_set:
-            params.append(f"{pname}: {ptype}")
+            params.append(f"{safe_pname}: {ptype}")
         else:
-            params.append(f"{pname}: {ptype} | None = None")
-        args_entries.append(f'"{pname}": {pname}')
+            params.append(f"{safe_pname}: {ptype} | None = None")
+        args_entries.append(f'{json.dumps(pname)}: {safe_pname}')
 
     param_str = ", ".join(params)
     args_str = "{" + ", ".join(args_entries) + "}" if args_entries else "{}"
 
     lines = [
-        f'@mcp.tool(description="{desc}")',
-        f"async def {tool.name}({param_str}) -> str:",
+        f'@mcp.tool(description={desc_json})',
+        f"async def {safe_name}({param_str}) -> str:",
         f"    args = {{k: v for k, v in {args_str}.items() if v is not None}}",
-        f'    result = await upstream.call("{tool.name}", args)',
+        f'    result = await upstream.call({json.dumps(tool.name)}, args)',
         f"    return json.dumps(result) if not isinstance(result, str) else result",
         "",
     ]

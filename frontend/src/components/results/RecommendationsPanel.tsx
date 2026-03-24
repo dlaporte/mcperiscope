@@ -8,23 +8,17 @@ const IMPACT_STYLES: Record<string, React.CSSProperties> = {
 };
 
 const TYPE_STYLES: Record<string, React.CSSProperties> = {
-  consolidate: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
-  trim: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-  remove: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-  rewrite: { backgroundColor: 'rgba(51,255,51,0.15)', color: 'var(--sub-phosphor)' },
-  high_tool_count: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-  high_context_usage: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-  moderate_context_usage: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-  consolidation: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
-  duplicate: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-  oversized_schema: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-  missing_description: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
-  terse_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
-  no_return_info: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
-  duplicate_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+  // Inventory recommendations
+  trim_descriptions: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+  remove_unused: { backgroundColor: 'rgba(204,51,51,0.2)', color: 'var(--sub-red)' },
+  consolidate_lookups: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
   resource_context_usage: { backgroundColor: 'rgba(100,149,237,0.2)', color: '#6495ed' },
-  large_resource: { backgroundColor: 'rgba(100,149,237,0.2)', color: '#6495ed' },
-  resource_consolidation: { backgroundColor: 'rgba(100,149,237,0.15)', color: '#6495ed' },
+  // Behavior recommendations (from run_analysis)
+  consolidate: { backgroundColor: 'rgba(196,154,42,0.15)', color: 'var(--sub-brass-glow)' },
+  rewrite_description: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+  trim_response: { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' },
+  batch: { backgroundColor: 'rgba(51,255,51,0.15)', color: 'var(--sub-phosphor)' },
+  add_defaults: { backgroundColor: 'rgba(51,255,51,0.15)', color: 'var(--sub-phosphor)' },
 };
 
 const defaultBadgeStyle: React.CSSProperties = { backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' };
