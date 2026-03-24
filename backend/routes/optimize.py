@@ -254,7 +254,21 @@ async def evaluate(req: EvaluateRequest):
                 messages.append({"role": "user", "content": tool_results})
 
         except Exception as e:
-            final_answer = f"Evaluation error: {e}\n{traceback.format_exc()}"
+            logger.exception("Evaluation error")
+            # Show a clean error message without the full traceback
+            err_msg = str(e)
+            if "Bad Gateway" in err_msg or "502" in err_msg:
+                final_answer = "Error: LLM provider returned Bad Gateway (502). The service may be down or overloaded."
+            elif "401" in err_msg or "Unauthorized" in err_msg or "AuthenticationError" in err_msg:
+                final_answer = "Error: Authentication failed. Check your API key in Settings."
+            elif "429" in err_msg or "rate" in err_msg.lower():
+                final_answer = "Error: Rate limit exceeded. Wait a moment and try again."
+            elif "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+                final_answer = "Error: Request timed out. The LLM provider may be slow or unreachable."
+            elif "connect" in err_msg.lower():
+                final_answer = "Error: Could not connect to the LLM provider. Check the endpoint in Settings."
+            else:
+                final_answer = f"Error: {err_msg}"
 
         usage = {
             "input_tokens": total_input_tokens,
