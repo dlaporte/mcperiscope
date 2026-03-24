@@ -679,11 +679,14 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             try:
                 proxy_port, proxy_process = _start_proxy(proxy_code)
 
-                # Wait for proxy to start, check health
-                for attempt in range(10):
+                # Wait for proxy to start, check health (up to 30 seconds)
+                proxy_started = False
+                for attempt in range(30):
                     await asyncio.sleep(1)
                     if proxy_process.poll() is not None:
                         break  # Process died
+                    if attempt > 0 and attempt % 5 == 0:
+                        yield _sse("progress", {"phase": "proxy", "message": f"Waiting for proxy to start ({attempt}s)..."})
                     try:
                         import httpx
                         async with httpx.AsyncClient() as hc:
@@ -696,13 +699,22 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                                 timeout=5.0,
                             )
                             if resp.status_code == 200:
+                                proxy_started = True
                                 break
                     except Exception:
-                        pass  # Expected during startup — logged only on final failure
+                        pass  # Expected during startup
 
-                if proxy_process.poll() is not None:
-                    stderr = proxy_process.stderr.read().decode() if proxy_process.stderr else ""
-                    yield _sse("progress", {"phase": "proxy", "message": f"Proxy failed to start: {stderr[:200]}"})
+                if not proxy_started:
+                    if proxy_process.poll() is not None:
+                        stderr = ""
+                        try:
+                            stderr = proxy_process.stderr.read().decode(errors="replace") if proxy_process.stderr else ""
+                        except Exception:
+                            pass
+                        yield _sse("progress", {"phase": "proxy", "message": f"Proxy crashed on startup: {stderr[:300]}"})
+                    else:
+                        proxy_process.terminate()
+                        yield _sse("progress", {"phase": "proxy", "message": "Proxy failed to respond within 30 seconds"})
                     proxy_port = None
                     proxy_process = None
                     session.proxy_process = None
