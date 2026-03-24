@@ -666,6 +666,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 ),
             })
         except Exception as e:
+            logger.exception("Proxy generation failed")
             yield _sse("progress", {"phase": "proxy", "message": f"Proxy generation failed: {e}"})
 
         # --- Step 3: Start proxy ---

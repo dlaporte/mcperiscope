@@ -67,38 +67,38 @@ def _classify_tools(
         source_tools = rec.get("source_tools", []) or rec.get("tools", [])
         affected_tools = rec.get("affected_tools", [])
 
-        if rec_type == "remove":
+        # Remove tools (behavior "remove" or inventory "remove_unused")
+        if rec_type in ("remove", "remove_unused"):
             for name in source_tools:
                 if name in classification:
                     classification[name] = {"status": "removed", "rec": rec}
 
+        # Consolidate lookups (inventory "consolidate_lookups")
+        elif rec_type == "consolidate_lookups":
+            for name in source_tools:
+                if name in classification:
+                    classification[name] = {"status": "consolidated_lookup", "rec": rec}
+
+        # Consolidate by prefix (behavior "consolidate")
         elif rec_type == "consolidate":
-            # Check if this is a lookup-style consolidation (table parameter)
             target = rec.get("target_tool") or {}
             params = target.get("parameters", {})
             props = params.get("properties", {}) if isinstance(params, dict) else {}
 
-            # Lookup consolidation: single "table" param with enum of tool names
             if "table" in props and "enum" in props.get("table", {}):
                 for name in source_tools:
                     if name in classification:
                         classification[name] = {"status": "consolidated_lookup", "rec": rec}
             else:
-                # Prefix/schema consolidation with action discriminator
                 for name in source_tools:
                     if name in classification:
                         classification[name] = {"status": "consolidated_prefix", "rec": rec}
 
+        # Rewrite descriptions (behavior "rewrite_description" or inventory "trim_descriptions")
         elif rec_type in ("rewrite_description", "trim_descriptions"):
             for name in source_tools:
                 if name in classification:
                     classification[name] = {"status": "description_rewritten", "rec": rec}
-
-        # Quick win types that map to consolidation
-        elif rec_type == "consolidation":
-            for name in source_tools:
-                if name in classification:
-                    classification[name] = {"status": "consolidated_prefix", "rec": rec}
 
     return classification
 
