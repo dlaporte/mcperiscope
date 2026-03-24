@@ -110,7 +110,7 @@ export function ConnectTab() {
                   className="text-xs px-2 py-0.5 rounded"
                   style={{ color: 'var(--sub-brass)', backgroundColor: 'rgba(196,154,42,0.1)' }}
                 >
-                  Configure in Settings
+                  Settings
                 </button>
               </div>
               {mcpConfigs.length > 0 ? (
