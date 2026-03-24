@@ -383,26 +383,13 @@ async def rate(req: RatingRequest):
 RESOURCE_REC_TYPES = {"resource_context_usage"}
 
 
-def _deduplicate_recommendations():
-    """Remove inventory recommendations that overlap with behavior recommendations.
-    Also remove resource recommendations if no resources are loaded."""
-    if not session.quick_wins:
-        return
-
+def _get_visible_quick_wins() -> list[dict]:
+    """Return quick wins filtered for display, WITHOUT mutating session.quick_wins."""
     has_loaded_resources = bool(session.loaded_resources)
-
-    # Build sets of affected tools from behavior recommendations
-    rec_tools = set()
-    rec_types = set()
-    for rec in (session.recommendations or []):
-        rec_types.add(rec.get("type", ""))
-        for tool in rec.get("affected_tools", []):
-            rec_tools.add(tool)
 
     filtered = []
     for qw in session.quick_wins:
         qw_type = qw.get("type", "")
-        qw_tools = set(qw.get("tools", []))
 
         # Skip resource recommendations if no resources are loaded
         if qw_type in RESOURCE_REC_TYPES and not has_loaded_resources:
@@ -410,7 +397,7 @@ def _deduplicate_recommendations():
 
         filtered.append(qw)
 
-    session.quick_wins = filtered
+    return filtered
 
 
 @router.post("/optimize/analyze")
@@ -427,11 +414,9 @@ async def analyze_tools():
     # Assign IDs to recommendations
     for i, rec in enumerate(session.recommendations):
         rec["id"] = f"rec_{i}"
-    # Deduplicate quick wins that overlap with behavior recommendations
-    _deduplicate_recommendations()
     return {
         "recommendations": session.recommendations,
-        "quickWins": session.quick_wins,
+        "quickWins": _get_visible_quick_wins(),
     }
 
 
@@ -504,9 +489,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             except Exception as e:
                 yield _sse("error", {"message": f"Analysis failed: {e}"})
                 return
-
-            # Deduplicate quick wins that overlap with behavior recommendations
-            _deduplicate_recommendations()
         else:
             yield _sse("progress", {"phase": "analyze", "message": f"Using existing analysis ({len(session.recommendations)} recommendations)"})
 
