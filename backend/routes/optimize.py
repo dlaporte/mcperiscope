@@ -523,16 +523,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         # Track which IDs are enabled for this run
         run_enabled_ids = [r.get("id") for r in filtered_recs if r.get("id")] + [q.get("id") for q in filtered_qws if q.get("id")]
 
-        # Debug: show what we're working with
-        all_rec_ids = [r.get("id") for r in session.recommendations]
-        all_qw_ids = [q.get("id") for q in session.quick_wins]
-        yield _sse("progress", {"phase": "analyze", "message": (
-            f"Recs: {len(filtered_recs)}/{len(session.recommendations)}, "
-            f"QWs: {len(filtered_qws)}/{len(session.quick_wins)}, "
-            f"Requested IDs: {list(enabled_rec_ids_set) if enabled_rec_ids_set else 'all'}, "
-            f"Available rec IDs: {all_rec_ids}, "
-            f"Available QW IDs: {all_qw_ids}"
-        )})
+        rec_count = len(filtered_recs)
+        qw_count = len(filtered_qws)
+        yield _sse("progress", {"phase": "analyze", "message": f"Selected {rec_count + qw_count} optimizations ({rec_count} behavior, {qw_count} inventory)"})
 
         if rec_count == 0 and not filtered_qws:
             yield _sse("done", {
