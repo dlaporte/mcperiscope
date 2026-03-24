@@ -1045,7 +1045,7 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen]:
     project_root = Path(__file__).resolve().parent.parent.parent
     process = subprocess.Popen(
         [sys.executable, str(proxy_file), "--port", str(port)],
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         cwd=str(project_root),
     )
