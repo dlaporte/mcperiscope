@@ -643,7 +643,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     yield _sse("progress", {"phase": "proxy", "message": f"Description rewriting skipped: {e}"})
 
         # Step 2b: Assemble proxy code (deterministic, fast)
-        yield _sse("progress", {"phase": "proxy", "message": "Assembling proxy code..."})
+        yield _sse("progress", {"phase": "proxy", "message": f"Assembling proxy ({len(session.tools)} tools, {len(filtered_recs)} recs, {len(filtered_qws)} qws)..."})
         try:
             proxy_code, proxy_stats = await build_proxy(
                 tools=session.tools,
@@ -678,9 +678,10 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_tools = None
         proxy_menu_tokens = 0
         if proxy_code:
-            yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
+            yield _sse("progress", {"phase": "proxy", "message": f"Starting proxy server ({len(proxy_code)} chars)..."})
             try:
                 proxy_port, proxy_process = _start_proxy(proxy_code)
+                yield _sse("progress", {"phase": "proxy", "message": f"Proxy process started on port {proxy_port}, waiting for health check..."})
 
                 # Wait for proxy to start, check health (up to 30 seconds)
                 proxy_started = False
