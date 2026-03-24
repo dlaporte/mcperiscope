@@ -591,20 +591,68 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 logger.debug(f"Failed to list resources for condensing: {e}")
 
         # --- Step 2: Generate proxy ---
-        yield _sse("progress", {"phase": "proxy", "message": "Generating optimized proxy server..."})
+        from backend.proxy_builder import build_proxy, batch_rewrite_descriptions
+
         proxy_code = None
+        token_dir = str(Path.home() / '.mcperiscope' / 'tokens')
+
+        # Step 2a: Batch rewrite descriptions if needed (ONE LLM call)
+        rewritten_descriptions: dict[str, str] = {}
+        desc_rewrite_recs = [
+            r for r in (filtered_recs + filtered_qws)
+            if r.get("type") in ("rewrite_description", "trim_descriptions")
+        ]
+        if desc_rewrite_recs:
+            affected_names = set()
+            for r in desc_rewrite_recs:
+                for name in r.get("source_tools", []) + r.get("tools", []):
+                    affected_names.add(name)
+            tools_to_rewrite = [t for t in session.tools if t.name in affected_names]
+
+            analyst_key = session.analyst_api_key or session.api_key
+            analyst_model_name = session.analyst_model or session.model
+            analyst_prov = session.analyst_provider or session.provider
+            analyst_ep = session.analyst_endpoint or session.custom_endpoint
+
+            if tools_to_rewrite and analyst_key and analyst_model_name:
+                yield _sse("progress", {"phase": "proxy", "message": f"Rewriting {len(tools_to_rewrite)} tool descriptions..."})
+                try:
+                    rewritten_descriptions = await batch_rewrite_descriptions(
+                        tools_to_rewrite, analyst_key, analyst_model_name,
+                        analyst_prov, analyst_ep,
+                    )
+                except Exception as e:
+                    logger.warning("Description rewriting failed, using originals: %s", e)
+                    yield _sse("progress", {"phase": "proxy", "message": f"Description rewriting skipped: {e}"})
+
+        # Step 2b: Assemble proxy code (deterministic, fast)
+        yield _sse("progress", {"phase": "proxy", "message": "Assembling proxy code..."})
         try:
-            proxy_code = await _generate_proxy_for_recommendations(
-                filtered_recs + filtered_qws, session.tools, mcp_manager.get_url() or "",
-                analyst_key=session.analyst_api_key or session.api_key,
-                analyst_model=session.analyst_model or session.model,
-                analyst_provider=session.analyst_provider or session.provider,
-                analyst_endpoint=session.analyst_endpoint or session.custom_endpoint,
+            proxy_code, proxy_stats = await build_proxy(
+                tools=session.tools,
+                upstream_url=mcp_manager.get_url() or "",
+                token_dir=token_dir,
+                recommendations=filtered_recs,
+                quick_wins=filtered_qws,
                 condensed_resources=condensed_resources if condensed_resources else None,
+                rewritten_descriptions=rewritten_descriptions if rewritten_descriptions else None,
             )
+
+            # Save to file
+            proxy_dir = session.project_dir / "proxy"
+            proxy_dir.mkdir(parents=True, exist_ok=True)
+            (proxy_dir / "server.py").write_text(proxy_code)
+
             session.proxy_code = proxy_code
+            yield _sse("progress", {
+                "phase": "proxy",
+                "message": (
+                    f"Proxy generated: {proxy_stats['total']} tools "
+                    f"({proxy_stats['removed']} removed, {proxy_stats['consolidated']} consolidated)"
+                ),
+            })
         except Exception as e:
-            yield _sse("progress", {"phase": "proxy", "message": f"Proxy generation skipped: {e}"})
+            yield _sse("progress", {"phase": "proxy", "message": f"Proxy generation failed: {e}"})
 
         # --- Step 3: Start proxy ---
         proxy_port = None
@@ -952,251 +1000,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     )
 
 
-async def _generate_proxy_for_recommendations(
-    recommendations, tools, upstream_url,
-    analyst_key="", analyst_model="", analyst_provider="", analyst_endpoint="",
-    condensed_resources=None,
-):
-    """Generate proxy code using the Analyst LLM, with fallback to string concatenation."""
-    token_dir = str(Path.home() / '.mcperiscope' / 'tokens')
-
-    # Try LLM-based generation first
-    if analyst_key and analyst_model:
-        try:
-            code = await _generate_proxy_via_llm(
-                recommendations, tools, upstream_url, token_dir,
-                analyst_key, analyst_model, analyst_provider, analyst_endpoint,
-                condensed_resources=condensed_resources,
-            )
-            if code and len(code.strip()) > 100:
-                # Save to file
-                proxy_dir = session.project_dir / "proxy"
-                proxy_dir.mkdir(parents=True, exist_ok=True)
-                (proxy_dir / "server.py").write_text(code)
-                return code
-        except Exception as e:
-            logger.warning("LLM proxy generation failed, falling back to template: %s", e)
-
-    # Fallback: template-based generation
-    return _generate_proxy_template(recommendations, tools, upstream_url, token_dir, condensed_resources=condensed_resources)
-
-
-async def _generate_proxy_via_llm(
-    recommendations, tools, upstream_url, token_dir,
-    analyst_key, analyst_model, analyst_provider, analyst_endpoint,
-    condensed_resources=None,
-):
-    """Use the Analyst LLM to generate proxy code from recommendations."""
-    # Build tool summaries
-    tool_summaries = []
-    for t in tools:
-        schema = t.inputSchema or {}
-        props = schema.get("properties", {})
-        desc = (t.description or "")[:200]
-        tool_summaries.append({
-            "name": t.name,
-            "description": desc,
-            "parameters": list(props.keys()) if props else [],
-        })
-
-    resource_instructions = ""
-    if condensed_resources:
-        resource_instructions = (
-            "\n\nCONDENSED RESOURCES TO INCLUDE:\n"
-            "For each resource below, add a @mcp.resource(uri) handler that returns the condensed text.\n"
-        )
-        for uri, data in condensed_resources.items():
-            resource_instructions += f"\nURI: {uri}\nName: {data['name']}\nCondensed text length: {len(data['condensed'])} chars\n"
-
-    prompt = (
-        "You are generating an optimized MCP proxy server in Python. "
-        "The proxy sits between an LLM client and an upstream MCP server, "
-        "implementing optimizations to reduce token usage and improve tool selection.\n\n"
-        f"UPSTREAM URL: {upstream_url}\n\n"
-        f"RECOMMENDATIONS TO IMPLEMENT:\n{json.dumps(recommendations, indent=2)}\n\n"
-        f"CURRENT TOOLS ({len(tools)} total):\n{json.dumps(tool_summaries, indent=2)}\n\n"
-        f"{resource_instructions}\n"
-        "Generate a complete, runnable Python proxy server using FastMCP that:\n"
-        "1. Imports UpstreamClient from backend.mcp_optimizer.proxy_runtime\n"
-        f"2. Connects to the upstream server with OAuth token reuse (TOKEN_DIR = {json.dumps(token_dir)})\n"
-        "3. Implements each recommendation above\n"
-        "4. Passes through any tools not affected by recommendations\n"
-        "5. Is runnable with: python server.py --port PORT\n\n"
-        "CRITICAL REQUIREMENTS (use these EXACT imports and patterns):\n"
-        "```python\n"
-        "from __future__ import annotations\n"
-        "import argparse\n"
-        "import json\n"
-        "from contextlib import asynccontextmanager\n"
-        "from fastmcp import FastMCP  # NOT from mcp.server.fastmcp\n"
-        "from backend.mcp_optimizer.proxy_runtime import UpstreamClient\n"
-        "```\n\n"
-        "- Create UpstreamClient with upstream URL and token_dir\n"
-        "- Use @asynccontextmanager for lifespan (connect/disconnect)\n"
-        '- Create: `mcp = FastMCP("mcperiscope-proxy", lifespan=lifespan)`\n'
-        "- For each tool: `await upstream.call(tool_name, args)` to forward\n"
-        "- Return results as strings (json.dumps if needed)\n"
-        '- Entry point: `mcp.run(transport="streamable-http", port=args.port)`\n\n'
-        "Output ONLY valid Python code. No markdown fences, no explanations."
-    )
-
-    analyst = LLMClient(analyst_key, analyst_model, analyst_provider, analyst_endpoint)
-    response = await analyst.chat(
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=8192,
-    )
-
-    code = response.text.strip()
-
-    # Strip markdown code fences if present
-    if code.startswith("```"):
-        lines = code.split("\n")
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        code = "\n".join(lines)
-
-    # Fix common LLM mistakes
-    code = code.replace("from mcp.server.fastmcp import FastMCP", "from fastmcp import FastMCP")
-    code = code.replace("from mcp.server import FastMCP", "from fastmcp import FastMCP")
-
-    # Validate syntax
-    try:
-        compile(code, "<proxy>", "exec")
-    except SyntaxError as e:
-        raise RuntimeError(f"Generated proxy has syntax error: {e}")
-
-    return code
-
-
-def _generate_proxy_template(recommendations, tools, upstream_url, token_dir, condensed_resources=None):
-    """Fallback: generate proxy code via string concatenation template."""
-    # Build a practical proxy: consolidate no-param lookup tools + passthrough rest
-    no_param_tools = []
-    for t in tools:
-        schema = t.inputSchema or {}
-        props = schema.get("properties", {})
-        required = schema.get("required", [])
-        if not props and not required:
-            no_param_tools.append(t.name)
-
-    # Generate proxy code directly (simpler than going through proxy_generator)
-    lookup_map = {}
-    for name in no_param_tools:
-        # Strip common prefixes to make table names
-        short = name
-        for prefix in ["get_", "list_", "fetch_"]:
-            if short.startswith(prefix):
-                short = short[len(prefix):]
-                break
-        lookup_map[short] = name
-
-    special_tools = set(no_param_tools)
-
-    # Build proxy code
-    lines = [
-        '"""Auto-generated MCP proxy server by MCPeriscope."""',
-        "",
-        "from __future__ import annotations",
-        "import argparse",
-        "import json",
-        "from contextlib import asynccontextmanager",
-        "from fastmcp import FastMCP",
-        "from backend.mcp_optimizer.proxy_runtime import UpstreamClient",
-        "",
-        f"UPSTREAM_URL = {json.dumps(upstream_url)}",
-        "",
-        f"LOOKUP_TOOLS = {json.dumps(lookup_map, indent=2)}",
-        "",
-        f"REMOVED_TOOLS = []",
-        "",
-        "SPECIAL_TOOLS = set(LOOKUP_TOOLS.values())",
-        "",
-        f"TOKEN_DIR = {json.dumps(token_dir)}",
-        "",
-        "upstream = UpstreamClient(UPSTREAM_URL, token_dir=TOKEN_DIR)",
-        "",
-        "@asynccontextmanager",
-        "async def lifespan(app):",
-        "    await upstream.connect()",
-        "    try:",
-        "        yield",
-        "    finally:",
-        "        await upstream.disconnect()",
-        "",
-        'mcp = FastMCP("mcperiscope-proxy", lifespan=lifespan)',
-        "",
-        "@mcp.tool()",
-        "async def lookup(table: str) -> str:",
-        '    """Look up reference data by table name. Available tables: ' + ", ".join(sorted(lookup_map.keys())) + '"""',
-        "    if table not in LOOKUP_TOOLS:",
-        '        return json.dumps({"error": f"Unknown table: {table}. Available: {sorted(LOOKUP_TOOLS.keys())}"})',
-        "    result = await upstream.call(LOOKUP_TOOLS[table], {})",
-        "    return json.dumps(result) if not isinstance(result, str) else result",
-        "",
-    ]
-
-    # Generate passthrough tools
-    for t in tools:
-        if t.name in special_tools:
-            continue
-        schema = t.inputSchema or {}
-        props = schema.get("properties", {})
-        required_set = set(schema.get("required", []))
-        desc = (t.description or "").replace('"', '\\"').replace("\n", " ")
-
-        # Build params
-        params = []
-        args_entries = []
-        for pname, pschema in props.items():
-            ptype = {"string": "str", "integer": "int", "number": "float", "boolean": "bool"}.get(
-                pschema.get("type", "string"), "str"
-            )
-            if pname in required_set:
-                params.append(f"{pname}: {ptype}")
-            else:
-                params.append(f"{pname}: {ptype} | None = None")
-            args_entries.append(f'"{pname}": {pname}')
-
-        param_str = ", ".join(params)
-        args_str = "{" + ", ".join(args_entries) + "}" if args_entries else "{}"
-
-        lines.append(f'@mcp.tool(description="{desc[:500]}")')
-        lines.append(f"async def {t.name}({param_str}) -> str:")
-        lines.append(f"    args = {{k: v for k, v in {args_str}.items() if v is not None}}")
-        lines.append(f'    result = await upstream.call("{t.name}", args)')
-        lines.append(f"    return json.dumps(result) if not isinstance(result, str) else result")
-        lines.append("")
-
-    # Condensed resource handlers
-    if condensed_resources:
-        lines.append("# --- Condensed resource handlers ---")
-        import re
-        for uri, data in condensed_resources.items():
-            safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', data["name"])
-            lines.append(f'@mcp.resource("{uri}")')
-            lines.append(f'async def resource_{safe_name}() -> str:')
-            lines.append(f'    """Condensed version of {data["name"]}"""')
-            lines.append(f'    return {json.dumps(data["condensed"])}')
-            lines.append("")
-
-    # Entry point
-    lines.extend([
-        'if __name__ == "__main__":',
-        '    parser = argparse.ArgumentParser()',
-        '    parser.add_argument("--port", type=int, default=8000)',
-        '    args = parser.parse_args()',
-        '    mcp.run(transport="streamable-http", port=args.port)',
-    ])
-
-    code = "\n".join(lines)
-
-    # Save to file
-    proxy_dir = session.project_dir / "proxy"
-    proxy_dir.mkdir(parents=True, exist_ok=True)
-    (proxy_dir / "server.py").write_text(code)
-
-    return code
 
 
 def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen]:
