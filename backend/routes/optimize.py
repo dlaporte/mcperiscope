@@ -680,7 +680,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if proxy_code:
             yield _sse("progress", {"phase": "proxy", "message": f"Starting proxy server ({len(proxy_code)} chars)..."})
             try:
-                proxy_port, proxy_process = _start_proxy(proxy_code)
+                proxy_port, proxy_process, proxy_stderr_file = _start_proxy(proxy_code)
                 yield _sse("progress", {"phase": "proxy", "message": f"Proxy process started on port {proxy_port}, waiting for health check..."})
 
                 # Wait for proxy to start, check health (up to 30 seconds)
@@ -709,16 +709,16 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         pass  # Expected during startup
 
                 if not proxy_started:
+                    stderr = ""
+                    try:
+                        stderr = proxy_stderr_file.read_text(errors="replace")[-500:]
+                    except Exception:
+                        pass
                     if proxy_process.poll() is not None:
-                        stderr = ""
-                        try:
-                            stderr = proxy_process.stderr.read().decode(errors="replace") if proxy_process.stderr else ""
-                        except Exception:
-                            pass
-                        yield _sse("progress", {"phase": "proxy", "message": f"Proxy crashed on startup: {stderr[:300]}"})
+                        yield _sse("progress", {"phase": "proxy", "message": f"Proxy crashed: {stderr}"})
                     else:
                         proxy_process.terminate()
-                        yield _sse("progress", {"phase": "proxy", "message": "Proxy failed to respond within 30 seconds"})
+                        yield _sse("progress", {"phase": "proxy", "message": f"Proxy timed out (30s). Last stderr: {stderr}"})
                     proxy_port = None
                     proxy_process = None
                     session.proxy_process = None
@@ -1033,25 +1033,27 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
 
 
-def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen]:
-    """Start the proxy server on a random port. Returns (port, process)."""
+def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
+    """Start the proxy server on a random port. Returns (port, process, stderr_file)."""
     # Find available port
     with socket.socket() as s:
         s.bind(("", 0))
         port = s.getsockname()[1]
 
     proxy_file = session.project_dir / "proxy" / "server.py"
+    stderr_file = session.project_dir / "proxy" / "stderr.log"
 
     # Set cwd to project root so backend.mcp_optimizer imports work
     project_root = Path(__file__).resolve().parent.parent.parent
-    process = subprocess.Popen(
-        [sys.executable, str(proxy_file), "--port", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        cwd=str(project_root),
-    )
+    with open(stderr_file, "w") as err_fh:
+        process = subprocess.Popen(
+            [sys.executable, str(proxy_file), "--port", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=err_fh,
+            cwd=str(project_root),
+        )
 
-    return port, process
+    return port, process, stderr_file
 
 
 def _serialize_message_content(content) -> str:
