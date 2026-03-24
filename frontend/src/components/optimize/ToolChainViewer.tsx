@@ -204,11 +204,16 @@ export function ToolChainViewer() {
       )}
 
       {/* Final answer */}
-      {evalResult.answer ? (
-        <div className="p-4 rounded-lg" style={{ border: '2px solid var(--sub-phosphor)', backgroundColor: 'rgba(51,255,51,0.05)' }}>
+      {evalResult.answer ? (() => {
+        const isError = evalResult.answer.startsWith("Error:");
+        return (
+        <div className="p-4 rounded-lg" style={{
+          border: isError ? '2px solid var(--sub-red)' : '2px solid var(--sub-phosphor)',
+          backgroundColor: isError ? 'rgba(204,51,51,0.05)' : 'rgba(51,255,51,0.05)',
+        }}>
           <div className="flex items-center justify-between">
-            <span className="phosphor-text text-xs uppercase tracking-wider font-medium">
-              Final Answer
+            <span className="text-xs uppercase tracking-wider font-medium" style={{ color: isError ? 'var(--sub-red)' : 'var(--sub-phosphor)' }}>
+              {isError ? "Error" : "Final Answer"}
             </span>
             <div className="flex items-center gap-2">
               <span
@@ -240,7 +245,8 @@ export function ToolChainViewer() {
             <Markdown remarkPlugins={[remarkGfm]}>{evalResult.answer}</Markdown>
           </div>
         </div>
-      ) : (
+        );
+      })() : (
         <div className="p-4 rounded-lg flex items-center gap-3 panel-riveted">
           <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--sub-brass)', borderTopColor: 'transparent' }} />
           <span className="text-sm" style={{ color: 'var(--sub-text-dim)' }}>LLM is working...</span>
