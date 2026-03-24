@@ -492,21 +492,23 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
         from backend.mcp_optimizer.report import compute_comparison
 
-        # --- Step 1: Analyze ---
-        yield _sse("progress", {"phase": "analyze", "message": "Analyzing tool usage patterns..."})
-        try:
-            # Pass empty ratings — rating is no longer used
-            analysis_result = run_analysis(session.tools, session.traces, [])
-            session.analysis = analysis_result
-            session.recommendations = analysis_result.get("recommendations", [])
-            for i, rec in enumerate(session.recommendations):
-                rec["id"] = f"rec_{i}"
-        except Exception as e:
-            yield _sse("error", {"message": f"Analysis failed: {e}"})
-            return
+        # --- Step 1: Analyze (only if not already done) ---
+        if not session.analysis:
+            yield _sse("progress", {"phase": "analyze", "message": "Analyzing tool usage patterns..."})
+            try:
+                analysis_result = run_analysis(session.tools, session.traces, [])
+                session.analysis = analysis_result
+                session.recommendations = analysis_result.get("recommendations", [])
+                for i, rec in enumerate(session.recommendations):
+                    rec["id"] = f"rec_{i}"
+            except Exception as e:
+                yield _sse("error", {"message": f"Analysis failed: {e}"})
+                return
 
-        # Deduplicate quick wins that overlap with behavior recommendations
-        _deduplicate_recommendations()
+            # Deduplicate quick wins that overlap with behavior recommendations
+            _deduplicate_recommendations()
+        else:
+            yield _sse("progress", {"phase": "analyze", "message": f"Using existing analysis ({len(session.recommendations)} recommendations)"})
 
         # Filter recommendations if enabled_rec_ids is provided
         enabled_rec_ids_set = None
