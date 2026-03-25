@@ -13,6 +13,73 @@ import { ResourcesModal } from "./ResourcesModal";
 import { OptimizeContextGauge } from "./OptimizeContextGauge";
 import { ExportPanel } from "./ExportPanel";
 
+function InventorySection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full text-left px-3 py-2 flex items-center justify-between"
+        style={{ borderBottom: '1px solid var(--sub-rivet)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
+        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+      >
+        <h3 className="text-sm font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
+          Inventory
+        </h3>
+        <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>{open ? "\u25BE" : "\u25B8"}</span>
+      </button>
+      {open && (
+        <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
+          <InventoryPanel />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OptimizeButton() {
+  const enabledRecIds = useStore((s) => s.enabledRecIds);
+  const recommendations = useStore((s) => s.recommendations);
+  const quickWins = useStore((s) => s.quickWins);
+  const optimizeRunning = useStore((s) => s.optimizeRunning);
+  const optimizeProgress = useStore((s) => s.optimizeProgress);
+  const error = useStore((s) => s.error);
+  const runOptimizeWithSelection = useStore((s) => s.runOptimizeWithSelection);
+
+  const hasAny = recommendations.length > 0 || quickWins.length > 0;
+  const enabledCount = enabledRecIds.size;
+
+  return (
+    <div className="px-3 py-3 shrink-0" style={{ borderTop: '1px solid var(--sub-rivet)' }}>
+      <button
+        onClick={runOptimizeWithSelection}
+        disabled={!hasAny || enabledCount === 0 || optimizeRunning}
+        className="w-full py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{
+          backgroundColor: optimizeRunning ? 'var(--sub-panel-light)' : 'var(--sub-brass)',
+          color: optimizeRunning ? 'var(--sub-text)' : 'var(--sub-hull)',
+        }}
+      >
+        {optimizeRunning ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            {optimizeProgress || "Optimizing..."}
+          </span>
+        ) : (
+          `Optimize (${enabledCount} selected)`
+        )}
+      </button>
+      {error && (
+        <p className="text-xs mt-2" style={{ color: 'var(--sub-red)' }}>{error}</p>
+      )}
+    </div>
+  );
+}
+
 function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -150,17 +217,13 @@ export function ResultsTab() {
       />
 
       <div className="flex-1 flex min-h-0">
-      {/* Left panel: Recommendations */}
+      {/* Left panel: Inventory + Recommendations + Optimize button */}
       <div
         className="w-80 shrink-0 h-full overflow-hidden flex flex-col"
         style={{ borderRight: '1px solid var(--sub-rivet)', backgroundColor: 'var(--sub-panel)' }}
       >
         <div className="flex-1 overflow-y-auto">
-          <CollapsibleSection title="Inventory" defaultOpen={false}>
-            <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
-              <InventoryPanel />
-            </div>
-          </CollapsibleSection>
+          <InventorySection />
           {analyzing ? (
             <div className="flex items-center justify-center py-8">
               <div className="flex items-center gap-3" style={{ color: 'var(--sub-text-dim)' }}>
@@ -175,6 +238,7 @@ export function ResultsTab() {
             <RecommendationsPanel />
           )}
         </div>
+        <OptimizeButton />
       </div>
 
       {/* Right panel: Results */}
