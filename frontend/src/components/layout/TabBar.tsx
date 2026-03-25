@@ -23,7 +23,7 @@ export function TabBar({ active, onChange, connected }: TabBarProps) {
       }}
     >
       <span className="font-stencil font-bold mr-6 py-3" style={{ color: 'var(--sub-brass)' }}>
-        <span className="text-sm">MCP</span><span className="text-[10px]">eriscope</span>
+        <span className="text-lg">MCP</span><span className="text-xs">eriscope</span>
       </span>
       {TABS.map((tab) => {
         const disabled = tab.requiresConnection && !connected;
