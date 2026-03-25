@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useStore } from "../../store";
 
 const IMPACT_STYLES: Record<string, React.CSSProperties> = {
@@ -84,6 +84,22 @@ function RecItem({ id, type, description, impact, checked, onToggle }: RecItemPr
   );
 }
 
+function isRecFullyDisabled(
+  rec: any,
+  disabledTools: Set<string>,
+  disabledResources: Set<string>,
+): boolean {
+  const affectedTools: string[] = rec.source_tools || rec.tools || [];
+  const affectedResources: string[] = rec.affected_resources || [];
+  if (affectedTools.length === 0 && affectedResources.length === 0) return false;
+  const allToolsDisabled = affectedTools.length > 0 && affectedTools.every((t: string) => disabledTools.has(t));
+  const allResourcesDisabled = affectedResources.length > 0 && affectedResources.every((r: string) => disabledResources.has(r));
+  if (affectedTools.length > 0 && affectedResources.length > 0) {
+    return allToolsDisabled && allResourcesDisabled;
+  }
+  return allToolsDisabled || allResourcesDisabled;
+}
+
 export function RecommendationsPanel() {
   const recommendations = useStore((s) => s.recommendations);
   const quickWins = useStore((s) => s.quickWins);
@@ -94,9 +110,22 @@ export function RecommendationsPanel() {
   const optimizeProgress = useStore((s) => s.optimizeProgress);
   const error = useStore((s) => s.error);
   const runOptimizeWithSelection = useStore((s) => s.runOptimizeWithSelection);
+  const disabledTools = useStore((s) => s.disabledTools);
+  const disabledResources = useStore((s) => s.disabledResources);
 
   const hasAny = recommendations.length > 0 || quickWins.length > 0;
   const enabledCount = enabledRecIds.size;
+
+  // Determine which recommendations are fully disabled by inventory
+  const fullyDisabledRecIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const rec of [...recommendations, ...quickWins]) {
+      if (rec.id && isRecFullyDisabled(rec, disabledTools, disabledResources)) {
+        ids.add(rec.id);
+      }
+    }
+    return ids;
+  }, [recommendations, quickWins, disabledTools, disabledResources]);
 
   return (
     <div className="h-full flex flex-col">
@@ -142,15 +171,16 @@ export function RecommendationsPanel() {
               </span>
             </div>
             {recommendations.map((rec: any) => (
-              <RecItem
-                key={rec.id}
-                id={rec.id}
-                type={rec.type}
-                description={rec.description}
-                impact={rec.impact}
-                checked={enabledRecIds.has(rec.id)}
-                onToggle={() => toggleRecEnabled(rec.id)}
-              />
+              <div key={rec.id} style={fullyDisabledRecIds.has(rec.id) ? { opacity: 0.4 } : undefined}>
+                <RecItem
+                  id={rec.id}
+                  type={rec.type}
+                  description={rec.description}
+                  impact={rec.impact}
+                  checked={enabledRecIds.has(rec.id)}
+                  onToggle={() => toggleRecEnabled(rec.id)}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -163,14 +193,15 @@ export function RecommendationsPanel() {
               </span>
             </div>
             {quickWins.map((win: any) => (
-              <RecItem
-                key={win.id}
-                id={win.id}
-                type={win.type}
-                description={win.description}
-                checked={enabledRecIds.has(win.id)}
-                onToggle={() => toggleRecEnabled(win.id)}
-              />
+              <div key={win.id} style={fullyDisabledRecIds.has(win.id) ? { opacity: 0.4 } : undefined}>
+                <RecItem
+                  id={win.id}
+                  type={win.type}
+                  description={win.description}
+                  checked={enabledRecIds.has(win.id)}
+                  onToggle={() => toggleRecEnabled(win.id)}
+                />
+              </div>
             ))}
           </div>
         )}

@@ -6,6 +6,7 @@ import { MODEL_CONTEXT } from "../../config/models";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
+import { InventoryPanel } from "./InventoryPanel";
 import { RunSelector } from "./RunSelector";
 import { ResponsesModal } from "./ResponsesModal";
 import { ResourcesModal } from "./ResourcesModal";
@@ -154,19 +155,26 @@ export function ResultsTab() {
         className="w-80 shrink-0 h-full overflow-hidden flex flex-col"
         style={{ borderRight: '1px solid var(--sub-rivet)', backgroundColor: 'var(--sub-panel)' }}
       >
-        {analyzing ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="flex items-center gap-3" style={{ color: 'var(--sub-text-dim)' }}>
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span className="text-sm">Analyzing tool usage...</span>
+        <div className="flex-1 overflow-y-auto">
+          <CollapsibleSection title="Inventory" defaultOpen={false}>
+            <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
+              <InventoryPanel />
             </div>
-          </div>
-        ) : (
-          <RecommendationsPanel />
-        )}
+          </CollapsibleSection>
+          {analyzing ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="flex items-center gap-3" style={{ color: 'var(--sub-text-dim)' }}>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span className="text-sm">Analyzing tool usage...</span>
+              </div>
+            </div>
+          ) : (
+            <RecommendationsPanel />
+          )}
+        </div>
       </div>
 
       {/* Right panel: Results */}

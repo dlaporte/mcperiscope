@@ -178,6 +178,17 @@ interface AppState {
   selectedRunId: string | null;
   enabledRecIds: Set<string>;
 
+  // Disabled inventory items
+  disabledTools: Set<string>;
+  disabledResources: Set<string>;
+  disabledPrompts: Set<string>;
+  toggleDisabledTool: (name: string) => void;
+  toggleDisabledResource: (uri: string) => void;
+  toggleDisabledPrompt: (name: string) => void;
+  setAllToolsEnabled: (enabled: boolean) => void;
+  setAllResourcesEnabled: (enabled: boolean) => void;
+  setAllPromptsEnabled: (enabled: boolean) => void;
+
   // Optimization workbench actions
   analyzeTools: () => Promise<void>;
   toggleRecEnabled: (id: string) => void;
@@ -564,6 +575,65 @@ export const useStore = create<AppState>((set, get) => ({
   selectedRunId: null,
   enabledRecIds: new Set<string>(),
 
+  // Disabled inventory items
+  disabledTools: new Set<string>(),
+  disabledResources: new Set<string>(),
+  disabledPrompts: new Set<string>(),
+
+  toggleDisabledTool: (name) => {
+    set((state) => {
+      const next = new Set(state.disabledTools);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return { disabledTools: next };
+    });
+  },
+
+  toggleDisabledResource: (uri) => {
+    set((state) => {
+      const next = new Set(state.disabledResources);
+      if (next.has(uri)) next.delete(uri);
+      else next.add(uri);
+      return { disabledResources: next };
+    });
+  },
+
+  toggleDisabledPrompt: (name) => {
+    set((state) => {
+      const next = new Set(state.disabledPrompts);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return { disabledPrompts: next };
+    });
+  },
+
+  setAllToolsEnabled: (enabled) => {
+    if (enabled) {
+      set({ disabledTools: new Set<string>() });
+    } else {
+      const allNames = new Set(get().tools.map((t: any) => t.name));
+      set({ disabledTools: allNames });
+    }
+  },
+
+  setAllResourcesEnabled: (enabled) => {
+    if (enabled) {
+      set({ disabledResources: new Set<string>() });
+    } else {
+      const allUris = new Set(get().resources.map((r: any) => r.uri));
+      set({ disabledResources: allUris });
+    }
+  },
+
+  setAllPromptsEnabled: (enabled) => {
+    if (enabled) {
+      set({ disabledPrompts: new Set<string>() });
+    } else {
+      const allNames = new Set(get().prompts.map((p: any) => p.name));
+      set({ disabledPrompts: allNames });
+    }
+  },
+
   toggleRecEnabled: (id) => {
     set((state) => {
       const next = new Set(state.enabledRecIds);
@@ -637,6 +707,9 @@ export const useStore = create<AppState>((set, get) => ({
           analyst_provider: analystConfig?.provider || undefined,
           analyst_api_key: analystConfig?.apiKey || undefined,
           analyst_endpoint: analystConfig?.provider === "custom" ? analystConfig?.endpoint : undefined,
+          disabled_tools: [...state.disabledTools],
+          disabled_resources: [...state.disabledResources],
+          disabled_prompts: [...state.disabledPrompts],
         }),
       });
 
@@ -1037,6 +1110,9 @@ export const useStore = create<AppState>((set, get) => ({
       optimizationRuns: [],
       selectedRunId: null,
       enabledRecIds: new Set<string>(),
+      disabledTools: new Set<string>(),
+      disabledResources: new Set<string>(),
+      disabledPrompts: new Set<string>(),
     });
   },
 

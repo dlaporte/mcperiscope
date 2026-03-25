@@ -431,6 +431,9 @@ class OptimizeRunRequest(BaseModel):
     analyst_provider: str | None = None
     analyst_api_key: str | None = None
     analyst_endpoint: str | None = None
+    disabled_tools: list[str] | None = None
+    disabled_resources: list[str] | None = None
+    disabled_prompts: list[str] | None = None
 
 
 @router.post("/optimize/run")
@@ -635,6 +638,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 quick_wins=filtered_qws,
                 condensed_resources=condensed_resources if condensed_resources else None,
                 rewritten_descriptions=rewritten_descriptions if rewritten_descriptions else None,
+                disabled_tools=req.disabled_tools if req else None,
+                disabled_resources=req.disabled_resources if req else None,
+                disabled_prompts=req.disabled_prompts if req else None,
             )
 
             # Save to file

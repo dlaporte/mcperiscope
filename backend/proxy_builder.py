@@ -407,6 +407,9 @@ async def build_proxy(
     quick_wins: list[dict],
     condensed_resources: dict | None = None,
     rewritten_descriptions: dict[str, str] | None = None,
+    disabled_tools: list[str] | None = None,
+    disabled_resources: list[str] | None = None,
+    disabled_prompts: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Assemble proxy code from modular templates.
 
@@ -422,15 +425,32 @@ async def build_proxy(
         quick_wins: Quick win recommendations from inventory analysis.
         condensed_resources: Dict of uri -> {name, condensed, ...} for resource handlers.
         rewritten_descriptions: Dict of tool_name -> new description text.
+        disabled_tools: List of tool names disabled in inventory.
+        disabled_resources: List of resource URIs disabled in inventory.
+        disabled_prompts: List of prompt names disabled in inventory (tracked, not yet proxied).
 
     Returns:
         A tuple of (source_code, stats_dict) where stats_dict has keys:
         total, removed, consolidated, passthrough.
     """
     rewritten_descriptions = rewritten_descriptions or {}
+    disabled_tools_set = set(disabled_tools) if disabled_tools else set()
+    disabled_resources_set = set(disabled_resources) if disabled_resources else set()
 
     # Classify each tool
     classification = _classify_tools(tools, recommendations, quick_wins)
+
+    # Mark disabled tools as removed
+    for tool_name in disabled_tools_set:
+        if tool_name in classification and classification[tool_name]["status"] != "removed":
+            classification[tool_name] = {"status": "removed", "rec": None}
+
+    # Filter out disabled resources from condensed resources
+    if condensed_resources and disabled_resources_set:
+        condensed_resources = {
+            uri: data for uri, data in condensed_resources.items()
+            if uri not in disabled_resources_set
+        }
 
     # Count stats
     removed_count = sum(1 for c in classification.values() if c["status"] == "removed")

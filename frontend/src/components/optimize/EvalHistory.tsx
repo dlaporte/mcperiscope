@@ -47,25 +47,21 @@ export function EvalHistory() {
               onMouseLeave={(e) => {
                 if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
               }}
+              onClick={() => { selectEval(index); toggleEvalIncluded(index); }}
             >
               {/* Checkbox */}
-              <label
-                className="pl-3 py-3 cursor-pointer flex items-center"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="pl-3 py-3 flex items-center">
                 <input
                   type="checkbox"
                   checked={isIncluded}
                   onChange={() => toggleEvalIncluded(index)}
+                  onClick={(e) => e.stopPropagation()}
                   className="w-3.5 h-3.5 rounded cursor-pointer accent-amber-600"
                 />
-              </label>
+              </div>
 
-              {/* Clickable prompt area */}
-              <button
-                onClick={() => selectEval(index)}
-                className="flex-1 text-left px-3 py-3 min-w-0"
-              >
+              {/* Prompt area */}
+              <div className="flex-1 text-left px-3 py-3 min-w-0">
                 <p className="text-sm truncate" style={{ color: 'var(--sub-text)' }}>
                   {evalResult.prompt}
                 </p>
@@ -73,7 +69,7 @@ export function EvalHistory() {
                   {evalResult.toolChain.length} tool call
                   {evalResult.toolChain.length !== 1 ? "s" : ""}
                 </p>
-              </button>
+              </div>
 
               {/* Delete */}
               <button
