@@ -767,7 +767,18 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         })
 
                         # Run the same prompt through the proxy
-                        messages = [{"role": "user", "content": prompt}]
+                        # Include loaded resources (filtered by disabled set) for fair comparison
+                        messages = []
+                        disabled_res_set = set(req.disabled_resources) if req and req.disabled_resources else set()
+                        active_resources = {
+                            uri: res for uri, res in session.loaded_resources.items()
+                            if uri not in disabled_res_set
+                        }
+                        if active_resources:
+                            resource_parts = [f"## {res['name']}\n\n{res['content']}" for res in active_resources.values()]
+                            messages.append({"role": "user", "content": "The following resources have been loaded for reference:\n\n" + "\n\n---\n\n".join(resource_parts)})
+                            messages.append({"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."})
+                        messages.append({"role": "user", "content": prompt})
                         step = 0
                         proxy_answer = ""
                         try:
