@@ -6,24 +6,36 @@ A web-based tool for exploring, evaluating, and optimizing [Model Context Protoc
 
 ### Explore MCP capabilities
 
-Connect to any MCP server and browse its tools, resources, and prompts. Each item shows its estimated token cost so you can see where context budget is being spent. Sort by name or token count, filter by keyword, and inspect schemas, descriptions, and resource content.
+Connect to any MCP server and browse its tools, resource definitions, and prompts. Each item shows its estimated token cost so you can see where context budget is being spent. Sort by name or token count, filter by keyword, and inspect schemas, descriptions, and resource content with inline markdown rendering.
 
 ### Monitor context usage
 
-Track how much of the LLM's context window is consumed by tool definitions, loaded resources, and evaluation prompts. A real-time session usage gauge shows context growth during tool-calling conversations, updated with actual API-reported token counts.
+Track how much of the LLM's context window is consumed by tool definitions, loaded resources, and evaluation prompts. A real-time session usage gauge shows context growth during tool-calling conversations, updated with actual API-reported token counts. The gauge is consistent across all tabs.
+
+### Evaluate with real prompts
+
+Run natural language prompts against your MCP server and watch the LLM chain tool calls in real time with streaming responses. Use single or batch mode to evaluate multiple prompts at once. Load MCP resources into the evaluation context to test how they affect tool selection and response quality.
 
 ### Optimize with a generated proxy
 
-MCPeriscope analyzes tool usage patterns from your evaluation prompts and generates discrete, actionable recommendations:
+MCPeriscope analyzes tool usage patterns from your evaluation prompts and generates discrete, actionable recommendations grouped by source:
 
+**Behavior recommendations** (from trace analysis):
+- **Consolidate** — merge tools that share a common prefix into a single dispatch tool
+- **Rewrite descriptions** — improve tool descriptions for better LLM selection
+- **Trim responses** — reduce verbose tool response data
+- **Batch** — add batch parameters to reduce round-trips
+- **Add defaults** — add default values to reduce required parameters
+
+**Inventory recommendations** (from static analysis):
 - **Trim descriptions** — rewrite verbose tool descriptions more concisely
 - **Remove unused tools** — omit tools never called during evaluation
 - **Consolidate lookups** — merge no-parameter tools into a single `lookup(table)` tool
-- **Condense resources** — use an analyst LLM to shorten markdown resource content
+- **Condense resources** — use the analyst LLM to shorten markdown resource content
 
-Select which recommendations to apply, click Optimize, and MCPeriscope generates a purpose-built MCP proxy server (using [FastMCP](https://github.com/jlowin/fastmcp)) that sits between the LLM and your upstream server. It then re-runs your evaluation prompts through the proxy and shows a before/after comparison of context usage, tool counts, accuracy, and latency.
+Select which recommendations to apply, click Optimize, and MCPeriscope assembles a purpose-built MCP proxy server (using [FastMCP](https://github.com/jlowin/fastmcp)) from modular code templates. Proxy generation is near-instant and deterministic — the LLM is only used for description rewriting (one batched call) and resource condensing. The proxy is then started and your evaluation prompts are re-run through it to show a before/after comparison of context usage, tool counts, accuracy, and latency.
 
-Run multiple optimization passes with different recommendation combinations and compare results.
+Run multiple optimization passes with different recommendation combinations and compare results using the run selector dropdown.
 
 ## Architecture
 
@@ -31,6 +43,7 @@ Run multiple optimization passes with different recommendation combinations and 
 - **Frontend**: React / TypeScript / Vite / Tailwind CSS / Zustand
 - **LLM Support**: Anthropic (Claude), OpenAI, and any OpenAI-compatible endpoint
 - **MCP Connectivity**: OAuth 2.0, bearer token, and custom header authentication
+- **Proxy Generation**: Modular code templates with compile-time validation
 
 ## Getting started
 
@@ -53,16 +66,18 @@ cd mcperiscope
 ### Configure
 
 1. Open http://localhost:5173
-2. Go to **Settings** and add your LLM configurations (API keys, models, endpoints)
-3. Add your MCP server (URL and authentication method)
-4. Assign LLMs to the **Agent** role (runs evaluation prompts) and **Analyst** role (compares answers and generates proxy code)
+2. Go to **Settings** and configure your LLMs — each with its own provider, model, API key, and endpoint
+3. Add your MCP server configurations with URL and authentication method
+4. Assign LLMs to roles:
+   - **Agent** — executes evaluation prompts using MCP tools to answer questions
+   - **Analyst** — compares baseline vs optimized answers and rewrites tool descriptions
 
-### Connect and explore
+### Workflow
 
-1. Go to **Connect**, select your MCP server, and click Connect
-2. Switch to **Explore** to browse tools, resources, and prompts with token costs
-3. Switch to **Evaluate** to run test prompts and watch the LLM chain tool calls in real time
-4. Switch to **Optimize** to see recommendations, select optimizations, and generate a proxy to see real-world results
+1. **Connect** — select your MCP server and click Connect
+2. **Explore** — browse tools, resource definitions, and prompts with token costs
+3. **Evaluate** — run test prompts (single or batch) and watch tool calls stream in real time
+4. **Optimize** — review recommendations, select which to apply, click Optimize, and compare results
 
 ## Environment variables
 
