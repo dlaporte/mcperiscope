@@ -219,7 +219,8 @@ async def _finish_connect() -> dict:
     inventory = analyze_inventory(session.tools)
     session.inventory = analysis_to_dict(inventory)
     total_tokens = session.inventory.get("total_budget_tokens", 0)
-    session.quick_wins = generate_quick_wins(session.tools, total_tokens, session.model)
+    if not session.quick_wins:
+        session.quick_wins = generate_quick_wins(session.tools, total_tokens, session.model)
     return {
         "status": "connected",
         "serverInfo": server_info(),

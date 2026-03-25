@@ -187,8 +187,9 @@ async def get_inventory():
 
     total_budget = tool_budget + resource_tokens + prompt_tokens
 
-    quick_wins = generate_quick_wins(session.tools, total_budget, session.model, resource_details)
-    session.quick_wins = quick_wins
+    # Only generate quick wins if not already set (preserves stable IDs across optimize runs)
+    if not session.quick_wins:
+        session.quick_wins = generate_quick_wins(session.tools, total_budget, session.model, resource_details)
 
     return {
         **session.inventory,
@@ -199,7 +200,7 @@ async def get_inventory():
         "model": session.model,
         "contextWindow": ctx_window,
         "contextPct": round(total_budget / ctx_window * 100, 2) if ctx_window else 0,
-        "quickWins": quick_wins,
+        "quickWins": session.quick_wins,
     }
 
 
