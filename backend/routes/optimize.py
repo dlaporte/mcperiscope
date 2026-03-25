@@ -1027,13 +1027,16 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
 
     # Set cwd to project root so backend.mcp_optimizer imports work
     project_root = Path(__file__).resolve().parent.parent.parent
-    with open(stderr_file, "w") as err_fh:
-        process = subprocess.Popen(
-            [sys.executable, str(proxy_file), "--port", str(port)],
-            stdout=subprocess.DEVNULL,
-            stderr=err_fh,
-            cwd=str(project_root),
-        )
+    # Open stderr file — don't use `with` since the subprocess needs the fd to stay open
+    err_fh = open(stderr_file, "w")
+    process = subprocess.Popen(
+        [sys.executable, str(proxy_file), "--port", str(port)],
+        stdout=subprocess.DEVNULL,
+        stderr=err_fh,
+        cwd=str(project_root),
+    )
+    # Close parent's copy — child has its own fd
+    err_fh.close()
 
     return port, process, stderr_file
 
