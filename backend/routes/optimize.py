@@ -625,7 +625,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     yield _sse("progress", {"phase": "proxy", "message": f"Description rewriting skipped: {e}"})
 
         # Step 2b: Assemble proxy code (deterministic, fast)
-        yield _sse("progress", {"phase": "proxy", "message": f"Assembling proxy ({len(session.tools)} tools, {len(filtered_recs)} recs, {len(filtered_qws)} qws)..."})
+        yield _sse("progress", {"phase": "proxy", "message": "Assembling proxy..."})
         try:
             proxy_code, proxy_stats = await build_proxy(
                 tools=session.tools,
@@ -660,10 +660,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_tools = None
         proxy_menu_tokens = 0
         if proxy_code:
-            yield _sse("progress", {"phase": "proxy", "message": f"Starting proxy server ({len(proxy_code)} chars)..."})
+            yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
             try:
                 proxy_port, proxy_process, proxy_stderr_file = _start_proxy(proxy_code)
-                yield _sse("progress", {"phase": "proxy", "message": f"Proxy process started on port {proxy_port}, waiting for health check..."})
 
                 # Wait for proxy to start, check health (up to 30 seconds)
                 proxy_started = False
@@ -672,7 +671,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     if proxy_process.poll() is not None:
                         break  # Process died
                     if attempt > 0 and attempt % 5 == 0:
-                        yield _sse("progress", {"phase": "proxy", "message": f"Waiting for proxy to start ({attempt}s)..."})
+                        yield _sse("progress", {"phase": "proxy", "message": "Waiting for proxy to start..."})
                     try:
                         import httpx
                         async with httpx.AsyncClient() as hc:
@@ -719,7 +718,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         )
                     yield _sse("progress", {
                         "phase": "proxy",
-                        "message": f"Proxy running on port {proxy_port} with {proxy_tools} tools (was {len(session.tools)})"
+                        "message": f"Proxy running with {proxy_tools} tools (was {len(session.tools)})"
                     })
             except Exception as e:
                 yield _sse("progress", {"phase": "proxy", "message": f"Proxy start failed: {e}"})
@@ -753,7 +752,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         "input_schema": t.inputSchema or {"type": "object", "properties": {}},
                     } for t in proxy_tools_defs]
                     included_evals = [(i, e) for i, e in enumerate(session.eval_results) if i in included]
-                    yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(included_evals)} prompts through proxy ({len(proxy_tools_list)} tools)..."})
+                    yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(included_evals)} prompts through proxy..."})
                     for eval_num, (i, eval_result) in enumerate(included_evals, 1):
                         prompt = eval_result["prompt"]
                         yield _sse("progress", {

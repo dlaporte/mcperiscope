@@ -1355,8 +1355,16 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
 
-      // Ensure loading is cleared
-      set({ evalLoading: false });
+      // Ensure loading is cleared — also auto-include if we got an answer
+      set((state) => {
+        const ev = state.evalResults[placeholderIndex];
+        if (ev?.answer && !ev.answer.startsWith("Error:")) {
+          const included = new Set(state.evalIncluded);
+          included.add(placeholderIndex);
+          return { evalLoading: false, evalIncluded: included };
+        }
+        return { evalLoading: false };
+      });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       set((state) => {
