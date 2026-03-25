@@ -5,7 +5,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  const data = await res.json();
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    if (!res.ok) {
+      throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+    }
+    throw new Error("Invalid response from server");
+  }
   if (!res.ok) {
     throw new Error(data.error || data.detail || `Request failed: ${res.status}`);
   }
