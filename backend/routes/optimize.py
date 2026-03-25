@@ -758,6 +758,21 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         "input_schema": t.inputSchema or {"type": "object", "properties": {}},
                     } for t in proxy_tools_defs]
                     included_evals = [(i, e) for i, e in enumerate(session.eval_results) if i in included]
+
+                    # Build resource context once (only enabled resources)
+                    disabled_res_set = set(req.disabled_resources) if req and req.disabled_resources else set()
+                    active_resources = {
+                        uri: res for uri, res in session.loaded_resources.items()
+                        if uri not in disabled_res_set
+                    }
+                    resource_preamble: list[dict] = []
+                    if active_resources:
+                        resource_parts = [f"## {res['name']}\n\n{res['content']}" for res in active_resources.values()]
+                        resource_preamble = [
+                            {"role": "user", "content": "The following resources have been loaded for reference:\n\n" + "\n\n---\n\n".join(resource_parts)},
+                            {"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."},
+                        ]
+
                     yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(included_evals)} prompts through proxy..."})
                     for eval_num, (i, eval_result) in enumerate(included_evals, 1):
                         prompt = eval_result["prompt"]
@@ -766,19 +781,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             "message": f"Re-running prompt {eval_num}/{len(included_evals)}: {prompt[:50]}..."
                         })
 
-                        # Run the same prompt through the proxy
-                        # Include loaded resources (filtered by disabled set) for fair comparison
-                        messages = []
-                        disabled_res_set = set(req.disabled_resources) if req and req.disabled_resources else set()
-                        active_resources = {
-                            uri: res for uri, res in session.loaded_resources.items()
-                            if uri not in disabled_res_set
-                        }
-                        if active_resources:
-                            resource_parts = [f"## {res['name']}\n\n{res['content']}" for res in active_resources.values()]
-                            messages.append({"role": "user", "content": "The following resources have been loaded for reference:\n\n" + "\n\n---\n\n".join(resource_parts)})
-                            messages.append({"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."})
-                        messages.append({"role": "user", "content": prompt})
+                        # Clean context: only enabled resources + the prompt (no history)
+                        messages = [*resource_preamble, {"role": "user", "content": prompt}]
                         step = 0
                         proxy_answer = ""
                         try:
