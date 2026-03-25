@@ -233,7 +233,7 @@ def _gen_prefix_consolidation(
         args_clean = ""
 
     dispatch_map_repr = json.dumps(dispatch_map, indent=4)
-    action_list = json.dumps(list(dispatch_map.keys()))
+    action_list_repr = json.dumps(sorted(dispatch_map.keys()))
 
     lines = [
         f"@mcp.tool(description={_quote(desc)})",
@@ -241,7 +241,7 @@ def _gen_prefix_consolidation(
         f'    """Consolidated tool dispatching to upstream based on action."""',
         f"    dispatch_map = {dispatch_map_repr}",
         "    if action not in dispatch_map:",
-        f'        return json.dumps({{"error": f"Unknown action: {{action}}. Must be one of {action_list}"}})',
+        f"        return json.dumps({{\"error\": \"Unknown action: \" + action + \". Must be one of: \" + \", \".join(sorted(dispatch_map.keys()))}})",
         "    upstream_tool = dispatch_map[action]",
         args_build,
     ]
