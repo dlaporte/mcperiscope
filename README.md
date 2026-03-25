@@ -35,7 +35,7 @@ MCPeriscope analyzes tool usage patterns from your evaluation prompts and genera
 
 Select which recommendations to apply, click Optimize, and MCPeriscope assembles a purpose-built MCP proxy server (using [FastMCP](https://github.com/jlowin/fastmcp)) from modular code templates. Proxy generation is near-instant and deterministic — the LLM is only used for description rewriting (one batched call) and resource condensing. The proxy is then started and your evaluation prompts are re-run through it to show a before/after comparison of context usage, tool counts, accuracy, and latency.
 
-Run multiple optimization passes with different recommendation combinations and compare results using the run selector dropdown.
+Run multiple optimization passes with different recommendation combinations and compare results using the run selector dropdown. Each run produces downloadable artifacts: a **remediation plan** (markdown) for use with your coding tool of choice, an **optimization report** (HTML), and the **proxy server** (Python) ready to deploy.
 
 ## Architecture
 
