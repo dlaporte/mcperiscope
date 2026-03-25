@@ -35,13 +35,8 @@ def _get_redirect_url(request_origin: str | None = None) -> str:
     env_url = os.environ.get("OAUTH_REDIRECT_URL")
     if env_url:
         return env_url
-    # Use localhost for OAuth redirects — non-localhost HTTP URIs are typically
-    # rejected by OAuth providers as a security measure
     if request_origin:
-        from urllib.parse import urlparse
-        parsed = urlparse(request_origin)
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        return f"http://localhost:{port}/oauth/callback"
+        return f"{request_origin.rstrip('/')}/oauth/callback"
     return "http://localhost:5173/oauth/callback"
 
 
