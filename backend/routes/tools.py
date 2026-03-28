@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -8,6 +9,8 @@ from fastapi import APIRouter, HTTPException
 from backend.models import ToolCallRequest
 from backend import mcp_manager
 from backend.state import session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -62,7 +65,8 @@ async def call_tool(req: ToolCallRequest):
 
         return {"content": content, "isError": getattr(result, "isError", False)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in tools route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def _extract_fields(content: list[dict]) -> list[str]:

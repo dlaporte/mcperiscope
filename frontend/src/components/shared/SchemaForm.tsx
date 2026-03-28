@@ -322,6 +322,15 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleaned: Record<string, any> = {};
+    // Validate required fields
+    const missingRequired = [...required].filter(key => {
+      const v = values[key];
+      return v === "" || v === undefined || v === null;
+    });
+    if (missingRequired.length > 0) {
+      alert(`Required fields are missing: ${missingRequired.join(", ")}`);
+      return;
+    }
     for (const [k, v] of Object.entries(values)) {
       if (v !== "" && v !== undefined) {
         const prop = properties[k];

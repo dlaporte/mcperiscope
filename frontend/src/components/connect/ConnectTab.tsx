@@ -49,7 +49,7 @@ function LLMDisplay() {
 
 export function ConnectTab() {
   const {
-    connected, connecting, error, connect, disconnect, serverInfo, oauthPending,
+    connected, connecting, error, connect, disconnect, oauthPending,
     connectProgress,
     mcpConfigs, selectMCPConfig, setActiveTab,
     checkStatus,

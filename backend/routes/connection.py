@@ -50,7 +50,8 @@ async def connect(req: ConnectRequest, request: Request):
         origin = request.headers.get("origin")
         return await mcp_manager.connect(req.url, req.auth, request_origin=origin)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in connection route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/disconnect")

@@ -11,7 +11,11 @@ export function PromptDetail() {
     if (result) harvestResultParams(result);
   }, [result, harvestResultParams]);
 
-  if (!prompt) return null;
+  if (!prompt) return (
+  <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>
+    <p className="text-sm">Select a prompt from the sidebar to view and test it.</p>
+  </div>
+);
 
   // Build a schema from prompt arguments
   const schema: any = { type: "object", properties: {}, required: [] };

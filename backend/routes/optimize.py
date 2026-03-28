@@ -727,6 +727,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         "message": f"Proxy running with {proxy_tools} tools (was {len(session.tools)})"
                     })
             except Exception as e:
+                session.kill_proxy()
                 yield _sse("progress", {"phase": "proxy", "message": f"Proxy start failed: {e}"})
 
         # --- Step 4: Re-run prompts through proxy ---
@@ -1047,16 +1048,18 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
 
     # Set cwd to project root so backend.mcp_optimizer imports work
     project_root = Path(__file__).resolve().parent.parent.parent
-    # Open stderr file — don't use `with` since the subprocess needs the fd to stay open
+    # Open stderr file — close parent's copy after Popen so child keeps its own fd
     err_fh = open(stderr_file, "w")
-    process = subprocess.Popen(
-        [sys.executable, str(proxy_file), "--port", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=err_fh,
-        cwd=str(project_root),
-    )
-    # Close parent's copy — child has its own fd
-    err_fh.close()
+    try:
+        process = subprocess.Popen(
+            [sys.executable, str(proxy_file), "--port", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=err_fh,
+            cwd=str(project_root),
+        )
+    finally:
+        # Always close parent's copy; child has inherited its own fd
+        err_fh.close()
 
     return port, process, stderr_file
 

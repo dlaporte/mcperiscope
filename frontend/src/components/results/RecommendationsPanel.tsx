@@ -37,7 +37,7 @@ interface RecItemProps {
   onToggle: () => void;
 }
 
-function RecItem({ id, type, description, impact, checked, onToggle }: RecItemProps) {
+function RecItem({ id: _id, type, description, impact, checked, onToggle }: RecItemProps) {
   const [expanded, setExpanded] = useState(false);
   const typeLower = (type || "").toLowerCase();
   const badgeStyle = TYPE_STYLES[typeLower] || defaultBadgeStyle;
@@ -110,7 +110,6 @@ export function RecommendationsPanel() {
   const disabledResources = useStore((s) => s.disabledResources);
 
   const hasAny = recommendations.length > 0 || quickWins.length > 0;
-  const enabledCount = enabledRecIds.size;
 
   // Determine which recommendations are fully disabled by inventory
   const fullyDisabledRecIds = useMemo(() => {

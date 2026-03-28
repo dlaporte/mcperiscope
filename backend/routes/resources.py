@@ -33,7 +33,8 @@ async def list_resources():
             })
         return {"resources": resources}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/resources/read")
@@ -71,7 +72,8 @@ async def read_resource(req: ResourceReadRequest):
                 })
         return {"contents": contents}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/resource-templates")
@@ -91,7 +93,8 @@ async def list_resource_templates():
             })
         return {"resourceTemplates": templates}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class LoadResourceRequest(BaseModel):
@@ -147,7 +150,8 @@ async def load_resource(req: LoadResourceRequest):
         session.loaded_resources[req.uri] = entry
         return {"loaded": True, **entry, "uri": req.uri}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/resources/unload")

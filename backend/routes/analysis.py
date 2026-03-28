@@ -204,6 +204,13 @@ async def get_inventory():
     }
 
 
+@router.get("/config/models")
+async def get_model_config():
+    """Return supported models and their context window sizes."""
+    from backend.state import MODEL_CONTEXT_WINDOWS
+    return {"models": MODEL_CONTEXT_WINDOWS}
+
+
 @router.get("/analysis/tool/{name}")
 async def get_tool_stats(name: str):
     if not session.tools:

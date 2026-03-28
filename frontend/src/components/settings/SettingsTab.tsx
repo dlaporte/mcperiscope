@@ -2,11 +2,6 @@ import { useState } from "react";
 import { useStore, KNOWN_MODELS } from "../../store";
 import type { LLMConfig, MCPServerConfig } from "../../store";
 
-const PROVIDER_BADGE_STYLES: Record<string, React.CSSProperties> = {
-  anthropic: { backgroundColor: "rgba(196,154,42,0.2)", color: "var(--sub-brass)" },
-  openai: { backgroundColor: "rgba(100,149,237,0.2)", color: "#6495ed" },
-  custom: { backgroundColor: "rgba(204,51,51,0.15)", color: "var(--sub-red)" },
-};
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
@@ -234,13 +229,6 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
     </div>
   );
 }
-
-const AUTH_METHOD_LABELS: Record<string, string> = {
-  none: "None",
-  bearer: "Bearer Token",
-  header: "Custom Header",
-  oauth: "OAuth 2.0",
-};
 
 function MCPConfigCard({ config }: { config: MCPServerConfig }) {
   const { updateMCPConfig, removeMCPConfig } = useStore();
