@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException
+from mcp.shared.exceptions import McpError
 from pydantic import BaseModel
 
 from backend.models import ResourceReadRequest
@@ -32,6 +33,11 @@ async def list_resources():
                 "mimeType": getattr(r, "mimeType", None),
             })
         return {"resources": resources}
+    except McpError as e:
+        if "Method not found" in str(e):
+            return {"resources": []}
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.exception("Error in resources route")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -92,6 +98,11 @@ async def list_resource_templates():
                 "description": getattr(t, "description", None),
             })
         return {"resourceTemplates": templates}
+    except McpError as e:
+        if "Method not found" in str(e):
+            return {"resourceTemplates": []}
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.exception("Error in resources route")
         raise HTTPException(status_code=500, detail="Internal server error")

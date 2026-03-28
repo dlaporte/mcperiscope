@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException
+from mcp.shared.exceptions import McpError
 
 from backend.models import PromptGetRequest
 from backend import mcp_manager
@@ -29,6 +30,11 @@ async def list_prompts():
                 ],
             })
         return {"prompts": prompts}
+    except McpError as e:
+        if "Method not found" in str(e):
+            return {"prompts": []}
+        logger.exception("Error in prompts route")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.exception("Error in prompts route")
         raise HTTPException(status_code=500, detail="Internal server error")
