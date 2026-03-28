@@ -156,6 +156,8 @@ interface AppState {
       error: string | null;
     }>;
     traceEvents: unknown[];
+    usage?: { peak_context_tokens?: number; [key: string]: unknown };
+    contextWindow?: number;
     rating?: { correctness: string; notes: string };
   }>;
   selectedEvalIndex: number | null;
@@ -748,15 +750,12 @@ export const useStore = create<AppState>((set, get) => ({
                 set({ optimizeProgress: data.message });
               } else if (currentEvent === "done") {
                 // Fetch final results from backend
-                const [comparison, recs, planRes, runsRes] = await Promise.allSettled([
+                const [comparison, recs, planRes] = await Promise.allSettled([
                   api.getComparison(),
                   api.getRecommendations(),
                   fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
-                  api.getRuns(),
                 ]);
                 const recsData = recs.status === "fulfilled" ? recs.value as any : {};
-                const runsData = runsRes.status === "fulfilled" ? (runsRes.value as any).runs : [];
-
                 // Also fetch the full run data for the new run
                 const runId = data.runId;
                 let newRun: OptimizationRun | null = null;
@@ -999,7 +998,6 @@ export const useStore = create<AppState>((set, get) => ({
       const state = get();
       const authConfig = buildAuthConfig(state);
       const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
-      const provider = primaryConfig?.provider;
       const res = await api.connect(
         url, authConfig,
         primaryConfig?.model || state.model,

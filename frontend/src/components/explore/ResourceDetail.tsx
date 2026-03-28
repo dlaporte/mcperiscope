@@ -10,7 +10,11 @@ export function ResourceDetail() {
     if (result) harvestResultParams(result);
   }, [result, harvestResultParams]);
 
-  if (!resource) return null;
+  if (!resource) return (
+  <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>
+    <p className="text-sm">Select a resource from the sidebar to view details.</p>
+  </div>
+);
 
   return (
     <div className="space-y-4">

@@ -108,6 +108,53 @@ function prettyPrintJson(data: unknown): string {
   });
 }
 
+function highlightJson(jsonStr: string): React.ReactNode {
+  // Split into tokens: strings, numbers, booleans, null, punctuation
+  const parts: React.ReactNode[] = [];
+  let keyIndex = 0;
+
+  // Use regex to tokenize
+  const tokenRegex = /("(?:[^"\\]|\\.)*")|(\b(?:true|false|null)\b)|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([{}\[\],:])/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let isKey = true; // Track if next string is a key
+
+  while ((match = tokenRegex.exec(jsonStr)) !== null) {
+    // Add any whitespace/text before this match
+    if (match.index > lastIndex) {
+      parts.push(jsonStr.slice(lastIndex, match.index));
+    }
+
+    const [full, str, keyword, num, punct] = match;
+
+    if (str !== undefined) {
+      // Determine if this is a key (preceded by { or , at same level) or value
+      const color = isKey ? 'var(--sub-brass)' : 'var(--sub-phosphor)';
+      parts.push(<span key={keyIndex++} style={{ color }}>{full}</span>);
+      isKey = false;
+    } else if (keyword !== undefined) {
+      parts.push(<span key={keyIndex++} style={{ color: '#6495ed' }}>{full}</span>);
+      isKey = false;
+    } else if (num !== undefined) {
+      parts.push(<span key={keyIndex++} style={{ color: '#6495ed' }}>{full}</span>);
+      isKey = false;
+    } else if (punct !== undefined) {
+      parts.push(<span key={keyIndex++} style={{ color: 'var(--sub-text-dim)' }}>{full}</span>);
+      if (full === ':') isKey = false;
+      else if (full === ',' || full === '{' || full === '[') isKey = true;
+    }
+
+    lastIndex = match.index + full.length;
+  }
+
+  // Add remaining text
+  if (lastIndex < jsonStr.length) {
+    parts.push(jsonStr.slice(lastIndex));
+  }
+
+  return parts;
+}
+
 export function JsonViewer({ data }: Props) {
   const [formatted, setFormatted] = useState(false);
   const extracted = extractTextContent(data);
@@ -145,10 +192,8 @@ export function JsonViewer({ data }: Props) {
           <Markdown remarkPlugins={[remarkGfm]}>{extracted.text}</Markdown>
         </div>
       ) : (
-        <pre
-          className="sonar-screen phosphor-text p-4 rounded-lg overflow-auto text-sm max-h-[600px]"
-        >
-          {prettyPrintJson(prettyData)}
+        <pre className="sonar-screen p-4 rounded-lg overflow-auto text-sm max-h-[600px]">
+          {highlightJson(prettyPrintJson(prettyData))}
         </pre>
       )}
     </div>

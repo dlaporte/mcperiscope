@@ -23,6 +23,7 @@ function Section({
     <div>
       <button
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold"
         style={{ color: 'var(--sub-text)' }}
         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
@@ -195,7 +196,8 @@ export function Sidebar() {
           {filter && (
             <button
               onClick={() => setFilter("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-xs"
+              aria-label="Clear filter"
               style={{ color: 'var(--sub-text-dim)' }}
             >
               ✕
@@ -209,10 +211,10 @@ export function Sidebar() {
         className="flex items-center justify-between px-4 py-1.5"
         style={{ borderBottom: '1px solid var(--sub-rivet)' }}
       >
-        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>
           Name
         </span>
-        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--sub-text-dim)' }}>
           Tokens
         </span>
       </div>
@@ -230,7 +232,8 @@ export function Sidebar() {
             <button
               key={item.name}
               onClick={() => select("tool", item)}
-              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
+              title={item.name}
+              className="w-full text-left pl-6 pr-4 py-1.5 text-xs flex items-center justify-between gap-1"
               style={
                 isSelected("tool", item.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
@@ -276,7 +279,8 @@ export function Sidebar() {
             <button
               key={resource.uri}
               onClick={() => select("resource", resource)}
-              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
+              title={resource.name || resource.uri}
+              className="w-full text-left pl-6 pr-4 py-1.5 text-xs flex items-center justify-between gap-1"
               style={
                 isSelected("resource", resource.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
@@ -322,7 +326,8 @@ export function Sidebar() {
             <button
               key={prompt.name}
               onClick={() => select("prompt", prompt)}
-              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
+              title={prompt.name}
+              className="w-full text-left pl-6 pr-4 py-1.5 text-xs flex items-center justify-between gap-1"
               style={
                 isSelected("prompt", prompt.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }

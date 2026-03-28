@@ -88,7 +88,11 @@ export function ToolDetail() {
 
   const trimmableFields = useMemo(() => (result ? findTrimmableFields(result) : []), [result]);
 
-  if (!tool) return null;
+  if (!tool) return (
+  <div className="flex items-center justify-center h-full" style={{ color: 'var(--sub-text-dim)' }}>
+    <p className="text-sm">Select a tool from the sidebar to view details and invoke it.</p>
+  </div>
+);
 
   const handleSubmit = (args: Record<string, unknown>) => {
     harvestParams(args);

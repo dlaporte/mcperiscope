@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException
+from mcp.shared.exceptions import McpError
 from pydantic import BaseModel
 
 from backend.models import ResourceReadRequest
@@ -32,8 +33,14 @@ async def list_resources():
                 "mimeType": getattr(r, "mimeType", None),
             })
         return {"resources": resources}
+    except McpError as e:
+        if "Method not found" in str(e):
+            return {"resources": []}
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/resources/read")
@@ -71,7 +78,8 @@ async def read_resource(req: ResourceReadRequest):
                 })
         return {"contents": contents}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/resource-templates")
@@ -90,8 +98,14 @@ async def list_resource_templates():
                 "description": getattr(t, "description", None),
             })
         return {"resourceTemplates": templates}
+    except McpError as e:
+        if "Method not found" in str(e):
+            return {"resourceTemplates": []}
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class LoadResourceRequest(BaseModel):
@@ -147,7 +161,8 @@ async def load_resource(req: LoadResourceRequest):
         session.loaded_resources[req.uri] = entry
         return {"loaded": True, **entry, "uri": req.uri}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error in resources route")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/resources/unload")
