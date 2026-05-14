@@ -6,10 +6,17 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
-    "fastmcp>=3.0.0",
+    # fastmcp 3.2.0 fixes CVE-2025-64340 / CVE-2026-27124.
+    "fastmcp>=3.2.0",
     "httpx>=0.27.0",
-    "anthropic>=0.52.0",
+    # anthropic 0.87.0 fixes CVE-2026-34450 / CVE-2026-34452.
+    "anthropic>=0.87.0",
     "openai>=1.50.0",
+    # Transitive bumps to clear pip-audit advisories.
+    "authlib>=1.6.11",
+    "cryptography>=46.0.7",
+    "python-multipart>=0.0.27",
+    "pygments>=2.20.0",
 ]
 
 [build-system]

@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, SupportsFloat
 
 import anyio
 from anyio import Path as AsyncPath
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_filename(key: str) -> str:
@@ -62,12 +66,32 @@ class FileKeyValueStore:
     async def _write(self, path: Path, value: Mapping[str, Any]) -> None:
         apath = AsyncPath(path)
         await AsyncPath(path.parent).mkdir(parents=True, exist_ok=True)
-        # Atomic-ish write: write to tmp then rename
+        # Tighten directory permissions to 0700 so other local users can't
+        # enumerate token files.
+        try:
+            os.chmod(path.parent, 0o700)
+        except OSError:
+            logger.debug("Could not chmod %s to 0700", path.parent, exc_info=True)
+
+        # Atomic write: create tmp file with mode 0600 using low-level open,
+        # write, then rename. Avoids a window where the file is readable by
+        # other users between create and chmod.
         tmp = path.with_suffix(".tmp")
-        await AsyncPath(tmp).write_text(
-            json.dumps(dict(value), indent=2), encoding="utf-8"
-        )
-        await AsyncPath(tmp).rename(apath)
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(dict(value), indent=2))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        os.replace(tmp, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            logger.debug("Could not chmod %s to 0600", path, exc_info=True)
 
     # ------------------------------------------------------------------
     # Core protocol methods

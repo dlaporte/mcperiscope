@@ -61,7 +61,9 @@ cd mcperiscope
 ./dev.sh
 ```
 
-`dev.sh` installs Python and Node dependencies automatically, then starts the backend on port 8000 and frontend on port 5173.
+`dev.sh` installs Python and Node dependencies automatically, then starts the backend on port 8000 and frontend on port 5173, both bound to `127.0.0.1`.
+
+The backend mints a bearer token at startup and writes it to `~/.mcperiscope/token` (mode 0600). The Vite dev proxy reads it and attaches `Authorization: Bearer …` to every `/api` request, so the browser app does not need to handle the token. To call the backend directly (curl, etc.), read the token from that file or set `MCPERISCOPE_PRINT_TOKEN=1` to log it on startup.
 
 ### Configure
 
@@ -83,8 +85,21 @@ cd mcperiscope
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins |
-| `OAUTH_REDIRECT_URL` | Auto-detected | OAuth callback URL override |
+| `MCPERISCOPE_HOST` | `127.0.0.1` | Interface the backend (and Vite) bind to. Set to `0.0.0.0` to expose on the LAN — only do this if you know what you are doing. |
+| `MCPERISCOPE_PRINT_TOKEN` | unset | When `1`, log the per-startup bearer token to stdout. Useful for calling the API with curl. |
+| `MCPERISCOPE_DISABLE_AUTH` | unset | When `1`, skip the bearer-token check. Tests only. |
+| `MCPERISCOPE_MAX_RESOURCE_BYTES` | `1048576` (1 MiB) | Per-resource size cap on `/resources/load` and `/resources/read`. |
+| `MCPERISCOPE_MAX_TOTAL_LOADED_BYTES` | `10485760` (10 MiB) | Aggregate cap on the loaded-resource context. |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins. |
+| `OAUTH_REDIRECT_URL` | `http://localhost:5173/oauth/callback` | OAuth callback URL override. |
+
+## Security notes
+
+- The backend listens on loopback only and requires a per-startup bearer token on every `/api/*` request. `/healthz` is the only unauthenticated route.
+- MCP and LLM URLs must be `http`/`https`. Link-local, multicast, and reserved IPs are rejected; loopback and private/LAN addresses are allowed (this is a local developer tool).
+- Generated proxy code passes all MCP-supplied identifiers (tool names, parameter names, resource URIs) through a sanitizer so a malicious upstream server cannot inject Python statements.
+- OAuth completion requires the full callback URL (with `state`) — pasting a bare code is no longer accepted.
+- Stored API keys are bound to the `(provider, custom_endpoint)` tuple they were submitted with. Switching destinations without resubmitting the key returns HTTP 400 and clears the stored key.
 
 ## License
 

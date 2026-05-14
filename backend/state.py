@@ -51,11 +51,18 @@ class Session:
     provider: str = "anthropic"
     api_key: str = ""
     custom_endpoint: str = ""
+    # Provider+endpoint a stored api_key was last set under. A stored key MUST
+    # NOT be reused with a different (provider, endpoint) tuple — that would let
+    # a caller exfiltrate the credential to an arbitrary destination.
+    api_key_provider: str = ""
+    api_key_endpoint: str = ""
     custom_context_window: int = 128_000
     analyst_model: str = ""
     analyst_provider: str = ""
     analyst_api_key: str = ""
     analyst_endpoint: str = ""
+    analyst_api_key_provider: str = ""
+    analyst_api_key_endpoint: str = ""
     loaded_resources: dict[str, dict] = field(default_factory=dict)  # uri → {name, content, tokens}
     eval_results: list[dict] = field(default_factory=list)
     comparison: dict | None = None

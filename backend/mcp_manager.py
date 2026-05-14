@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastmcp import Client
 from mcp.types import Tool
 from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
@@ -31,23 +32,71 @@ _url: str | None = None
 _tools: list[Tool] | None = None
 
 
-def _get_redirect_url(request_origin: str | None = None) -> str:
+class _StaticHeaderAuth(httpx.Auth):
+    """Inject a fixed header on every request — used for bearer/custom-header MCP auth."""
+
+    def __init__(self, header_name: str, header_value: str) -> None:
+        self._header_name = header_name
+        self._header_value = header_value
+
+    def auth_flow(self, request):
+        request.headers[self._header_name] = self._header_value
+        yield request
+
+
+def _build_client(url: str, oauth_provider: WebOAuth, auth_config: AuthConfig | None):
+    """Build a FastMCP Client honoring the requested auth_config.
+
+    - oauth (default): use the WebOAuth provider so the user can complete the
+      browser flow.
+    - bearer: send `Authorization: Bearer <token>` on every request, no OAuth.
+    - header: send `<name>: <value>` on every request, no OAuth.
+    - none: no auth at all.
+    """
+    if auth_config is None:
+        auth_type = "oauth"
+    else:
+        auth_type = (auth_config.type or "oauth").lower()
+
+    if auth_type == "bearer":
+        token = (auth_config.token if auth_config else None) or ""
+        if not token:
+            raise ValueError("bearer auth requested but no token supplied")
+        return Client(url, auth=_StaticHeaderAuth("Authorization", f"Bearer {token}"))
+    if auth_type == "header":
+        name = (auth_config.name if auth_config else None) or ""
+        value = (auth_config.value if auth_config else None) or ""
+        if not name:
+            raise ValueError("header auth requested but no header name supplied")
+        return Client(url, auth=_StaticHeaderAuth(name, value))
+    if auth_type == "none":
+        return Client(url)
+    # oauth (default)
+    return Client(url, auth=oauth_provider)
+
+
+def _get_redirect_url() -> str:
+    """Return the OAuth redirect URL.
+
+    Pulled exclusively from `OAUTH_REDIRECT_URL` (preferred) or the safe
+    default `http://localhost:5173/oauth/callback`. We deliberately do NOT
+    accept the request's `Origin` header — that's attacker-controllable on
+    direct HTTP calls and was the SEC-05 surface.
+    """
     env_url = os.environ.get("OAUTH_REDIRECT_URL")
     if env_url:
         return env_url
-    if request_origin:
-        return f"{request_origin.rstrip('/')}/oauth/callback"
     return "http://localhost:5173/oauth/callback"
 
 
-async def connect(url: str, auth_config: AuthConfig | None = None, request_origin: str | None = None) -> dict:
+async def connect(url: str, auth_config: AuthConfig | None = None) -> dict:
     """Connect to an MCP server."""
     global _client, _auth, _url, _tools
 
     await disconnect()
 
     _url = url
-    redirect_url = _get_redirect_url(request_origin)
+    redirect_url = _get_redirect_url()
     token_dir = Path.home() / ".mcperiscope" / "tokens"
 
     _auth = WebOAuth(
@@ -56,7 +105,7 @@ async def connect(url: str, auth_config: AuthConfig | None = None, request_origi
         token_storage=FileKeyValueStore(token_dir),
     )
 
-    _client = Client(url, auth=_auth)
+    _client = _build_client(url, _auth, auth_config)
 
     # Try connecting — if OAuth is needed, HeadlessOAuth captures the auth URL
     connect_task = asyncio.create_task(_do_connect())
@@ -93,34 +142,30 @@ async def _do_connect():
 
 
 async def complete_oauth(callback_url_or_code: str) -> dict:
-    """Complete OAuth by providing the callback URL or bare code from the frontend."""
+    """Complete OAuth by providing the full callback URL from the browser.
+
+    The full URL contains the `state` value the OAuth library generated. We
+    require it so the underlying provider can compare the returned state to
+    the one it issued. The previous "bare code + synthetic state" path
+    forged the state on the caller's behalf, defeating that check.
+    """
     global _tools
 
     if not _auth:
         raise ValueError("No OAuth flow in progress")
 
-    # Handle both full URL and bare code
-    from urllib.parse import urlparse, parse_qs, urlencode
+    from urllib.parse import parse_qs, urlparse
 
-    if "://" in callback_url_or_code and "code=" in callback_url_or_code:
-        # Full callback URL — use as-is
-        _auth.supply_callback_url(callback_url_or_code)
-    else:
-        # Bare code (or URL without code param) — construct a callback URL
-        # Extract state from the pending auth URL if available
-        state = None
-        if _auth.pending_auth_url:
-            parsed_auth = urlparse(_auth.pending_auth_url)
-            auth_params = parse_qs(parsed_auth.query)
-            state = auth_params.get("state", [None])[0]
+    parsed = urlparse(callback_url_or_code)
+    has_url = bool(parsed.scheme and parsed.netloc)
+    query = parse_qs(parsed.query) if has_url else {}
+    if not (has_url and query.get("code") and query.get("state")):
+        raise ValueError(
+            "OAuth completion requires the full callback URL "
+            "(including both `code` and `state` query parameters)."
+        )
 
-        # Build a synthetic callback URL
-        code = callback_url_or_code.strip()
-        params = {"code": code}
-        if state:
-            params["state"] = state
-        synthetic_url = f"http://localhost/callback?{urlencode(params)}"
-        _auth.supply_callback_url(synthetic_url)
+    _auth.supply_callback_url(callback_url_or_code)
 
     # Wait for the connection to complete
     for _ in range(300):

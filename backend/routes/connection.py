@@ -6,7 +6,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 from backend.models import ConnectRequest
 from backend import mcp_manager
+from backend.credentials import bind_primary_credentials
 from backend.state import session
+from backend.url_validation import validate_external_url
 
 logger = logging.getLogger(__name__)
 
@@ -33,22 +35,26 @@ async def _validate_api_key(api_key: str) -> None:
 
 @router.post("/connect")
 async def connect(req: ConnectRequest, request: Request):
-    if req.model:
-        session.model = req.model
-    if req.provider:
-        session.provider = req.provider
-    if req.api_key:
-        session.api_key = req.api_key
-    session.custom_endpoint = req.custom_endpoint or ""
+    # Validate the upstream MCP URL before touching session state.
+    validate_external_url(req.url, label="MCP server URL")
+    if req.custom_endpoint:
+        validate_external_url(req.custom_endpoint, label="LLM endpoint")
+
+    bind_primary_credentials(
+        session,
+        api_key=req.api_key,
+        provider=req.provider,
+        custom_endpoint=req.custom_endpoint,
+        model=req.model,
+    )
+
     # Only validate API key for Anthropic provider
-    if req.api_key and (req.provider or session.provider) == "anthropic":
+    if req.api_key and session.provider == "anthropic":
         await _validate_api_key(req.api_key)
     if req.custom_context_window:
         session.custom_context_window = req.custom_context_window
     try:
-        # Pass the request origin so OAuth redirect goes to the right host
-        origin = request.headers.get("origin")
-        return await mcp_manager.connect(req.url, req.auth, request_origin=origin)
+        return await mcp_manager.connect(req.url, req.auth)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

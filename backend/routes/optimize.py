@@ -16,7 +16,9 @@ from pydantic import BaseModel
 from backend.models import EvaluateRequest, RatingRequest
 from backend.state import OptimizationRun, session
 from backend import mcp_manager
+from backend.credentials import bind_analyst_credentials, bind_primary_credentials
 from backend.llm_client import LLMClient
+from backend.url_validation import validate_external_url
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +59,15 @@ async def evaluate(req: EvaluateRequest):
     """Run an evaluation prompt with SSE streaming of tool calls."""
     if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
-    # Always restore from request (backend may have restarted)
-    if req.api_key:
-        session.api_key = req.api_key
-    if req.model:
-        session.model = req.model
-    if req.provider:
-        session.provider = req.provider
-    # Always update endpoint — clear it when switching away from custom
-    session.custom_endpoint = req.custom_endpoint or ""
+    if req.custom_endpoint:
+        validate_external_url(req.custom_endpoint, label="LLM endpoint")
+    bind_primary_credentials(
+        session,
+        api_key=req.api_key,
+        provider=req.provider,
+        custom_endpoint=req.custom_endpoint,
+        model=req.model,
+    )
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
     if not session.tools:
@@ -445,23 +447,25 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
 
-    # Always restore API key/model/endpoint from request (backend may have restarted)
-    if req and req.api_key:
-        session.api_key = req.api_key
-    if req and req.model:
-        session.model = req.model
-    if req and req.provider:
-        session.provider = req.provider
-    if req:
-        session.custom_endpoint = req.custom_endpoint or ""
-    if req and req.analyst_model:
-        session.analyst_model = req.analyst_model
-    if req and req.analyst_provider:
-        session.analyst_provider = req.analyst_provider
-    if req and req.analyst_api_key:
-        session.analyst_api_key = req.analyst_api_key
-    if req:
-        session.analyst_endpoint = req.analyst_endpoint or ""
+    if req and req.custom_endpoint:
+        validate_external_url(req.custom_endpoint, label="LLM endpoint")
+    if req and req.analyst_endpoint:
+        validate_external_url(req.analyst_endpoint, label="Analyst LLM endpoint")
+
+    bind_primary_credentials(
+        session,
+        api_key=req.api_key if req else None,
+        provider=req.provider if req else None,
+        custom_endpoint=req.custom_endpoint if req else None,
+        model=req.model if req else None,
+    )
+    bind_analyst_credentials(
+        session,
+        api_key=req.analyst_api_key if req else None,
+        provider=req.analyst_provider if req else None,
+        endpoint=req.analyst_endpoint if req else None,
+        model=req.analyst_model if req else None,
+    )
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
 
@@ -1036,7 +1040,17 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
 
 def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
-    """Start the proxy server on a random port. Returns (port, process, stderr_file)."""
+    """Start the proxy server on a random port. Returns (port, process, stderr_file).
+
+    Hardened against the case where `proxy_code` was influenced by an
+    untrusted MCP server. We:
+      * Run in a new session/process group so a misbehaving child can't share
+        terminal signals with the backend.
+      * Scrub the environment to a minimal allowlist so a side-effecting
+        import in the generated module can't read arbitrary secrets.
+      * Pin cwd to the project root only because the proxy imports
+        `backend.mcp_optimizer.proxy_runtime`.
+    """
     # Find available port
     with socket.socket() as s:
         s.bind(("", 0))
@@ -1049,11 +1063,29 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
     project_root = Path(__file__).resolve().parent.parent.parent
     # Open stderr file — don't use `with` since the subprocess needs the fd to stay open
     err_fh = open(stderr_file, "w")
+
+    import os as _os
+    # Minimal env: only what Python needs to start up and resolve our package.
+    safe_env = {
+        "PATH": _os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": _os.environ.get("HOME", str(Path.home())),
+        "PYTHONPATH": _os.environ.get("PYTHONPATH", str(project_root)),
+        "LANG": _os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": _os.environ.get("LC_ALL", "C.UTF-8"),
+    }
+    # Pass through virtualenv markers so `sys.executable` resolves correctly.
+    for k in ("VIRTUAL_ENV", "PYENV_VERSION", "UV_CACHE_DIR"):
+        if k in _os.environ:
+            safe_env[k] = _os.environ[k]
+
     process = subprocess.Popen(
         [sys.executable, str(proxy_file), "--port", str(port)],
         stdout=subprocess.DEVNULL,
         stderr=err_fh,
         cwd=str(project_root),
+        env=safe_env,
+        start_new_session=True,
+        close_fds=True,
     )
     # Close parent's copy — child has its own fd
     err_fh.close()

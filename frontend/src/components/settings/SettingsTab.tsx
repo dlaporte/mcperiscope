@@ -615,7 +615,68 @@ export function SettingsTab() {
             </div>
           </div>
         </section>
+
+        <ClearCredentialsSection />
       </div>
     </div>
+  );
+}
+
+function ClearCredentialsSection() {
+  const [confirming, setConfirming] = useState(false);
+  const handleClear = () => {
+    const LS_PREFIX = "mcperiscope:";
+    // Sensitive keys: anything that holds an API key, bearer token, or
+    // header value. We intentionally drop the *entire* llmConfigs and
+    // mcpConfigs entries — they hold credentials inside the JSON blob —
+    // and the loose `apiKey` / `authToken` / `headerValue` fallbacks.
+    const SENSITIVE = [
+      `${LS_PREFIX}llmConfigs`,
+      `${LS_PREFIX}mcpConfigs`,
+      `${LS_PREFIX}apiKey`,
+      `${LS_PREFIX}authToken`,
+      `${LS_PREFIX}headerName`,
+      `${LS_PREFIX}headerValue`,
+      `${LS_PREFIX}customEndpoint`,
+    ];
+    SENSITIVE.forEach((k) => localStorage.removeItem(k));
+    window.location.reload();
+  };
+  return (
+    <section className="mt-6 pt-6 border-t" style={{ borderColor: "var(--sub-divider)" }}>
+      <h3 className="text-sm font-semibold mb-2" style={{ color: "var(--sub-text)" }}>
+        Credentials
+      </h3>
+      <p className="text-xs mb-3" style={{ color: "var(--sub-text-dim)" }}>
+        LLM API keys and MCP bearer/header values are persisted in your browser&rsquo;s localStorage.
+        Click below to wipe them — you will need to re-enter your keys.
+      </p>
+      {confirming ? (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleClear}
+            className="px-3 py-1.5 text-xs rounded-lg border"
+            style={{ backgroundColor: "var(--sub-red)", color: "white", borderColor: "var(--sub-red)" }}
+          >
+            Confirm wipe
+          </button>
+          <button
+            onClick={() => setConfirming(false)}
+            className="px-3 py-1.5 text-xs rounded-lg border"
+            style={{ borderColor: "var(--sub-divider)", color: "var(--sub-text-dim)" }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          className="px-3 py-1.5 text-xs rounded-lg border"
+          style={{ borderColor: "var(--sub-divider)", color: "var(--sub-text)" }}
+        >
+          Clear all stored credentials
+        </button>
+      )}
+    </section>
   );
 }

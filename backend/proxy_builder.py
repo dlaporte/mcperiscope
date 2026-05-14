@@ -8,11 +8,47 @@ Everything else is string assembly with compile() validation.
 from __future__ import annotations
 
 import json
+import keyword
 import logging
 import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Identifier sanitization (treat all MCP metadata as untrusted)
+# ---------------------------------------------------------------------------
+
+_IDENT_INVALID_RE = re.compile(r"[^a-zA-Z0-9_]")
+
+
+def safe_ident(name: str | None, used: set[str] | None = None, fallback: str = "tool") -> str:
+    """Return a syntactically valid, unique Python identifier derived from name.
+
+    - Replaces non-alphanumeric/underscore chars with `_`.
+    - Prefixes a leading digit with `_`.
+    - Mangles Python keywords / soft keywords.
+    - Falls back to `fallback` if input collapses to empty.
+    - Disambiguates against `used` (mutated in place) with numeric suffixes.
+    """
+    raw = "" if name is None else str(name)
+    cleaned = _IDENT_INVALID_RE.sub("_", raw)
+    if not cleaned or cleaned == "_" * len(cleaned):
+        cleaned = fallback
+    if cleaned[0].isdigit():
+        cleaned = "_" + cleaned
+    if keyword.iskeyword(cleaned) or keyword.issoftkeyword(cleaned):
+        cleaned = cleaned + "_"
+    if used is None:
+        return cleaned
+    candidate = cleaned
+    i = 2
+    while candidate in used:
+        candidate = f"{cleaned}_{i}"
+        i += 1
+    used.add(candidate)
+    return candidate
 
 
 # ---------------------------------------------------------------------------
@@ -141,12 +177,14 @@ def _gen_lookup_consolidation(
     rec: dict,
     tools: list,
     rewritten_descriptions: dict[str, str] | None = None,
+    used_idents: set[str] | None = None,
 ) -> list[str]:
     """Generate a consolidated lookup() tool for no-param reference tools."""
     source_tools = rec.get("source_tools", []) or rec.get("tools", [])
     target = rec.get("target_tool") or {}
 
     # Build the lookup map: short_name -> upstream_tool_name
+    # Keys go through json.dumps at emit time; no need to sanitize them as identifiers.
     lookup_map: dict[str, str] = {}
     for name in source_tools:
         short = name
@@ -159,12 +197,15 @@ def _gen_lookup_consolidation(
     desc = target.get("description", f"Consolidated lookup for {len(source_tools)} reference data tools")
     table_list = ", ".join(sorted(lookup_map.keys()))
 
+    # The function name is fixed (`lookup`), but disambiguate if reserved.
+    fn_name = safe_ident("lookup", used_idents, fallback="lookup")
+
     lines = [
         f"LOOKUP_TOOLS = {json.dumps(lookup_map, indent=2)}",
         "",
         f'@mcp.tool(description={_quote(desc)})',
-        "async def lookup(table: str) -> str:",
-        f'    """Look up reference data by table name. Available tables: {table_list}"""',
+        f"async def {fn_name}(table: str) -> str:",
+        f"    {_quote(f'Look up reference data by table name. Available tables: {table_list}')}",
         "    if table not in LOOKUP_TOOLS:",
         '        return json.dumps({"error": f"Unknown table: {table}. Available: {sorted(LOOKUP_TOOLS.keys())}"})',
         "    result = await upstream.call(LOOKUP_TOOLS[table], {})",
@@ -178,11 +219,16 @@ def _gen_prefix_consolidation(
     rec: dict,
     tools: list,
     rewritten_descriptions: dict[str, str] | None = None,
+    used_idents: set[str] | None = None,
 ) -> list[str]:
     """Generate a consolidated dispatch tool for prefix-grouped tools."""
     source_tools = rec.get("source_tools", []) or rec.get("tools", [])
     target = rec.get("target_tool") or {}
-    target_name = target.get("name", "consolidated_tool")
+    target_name = safe_ident(
+        target.get("name", "consolidated_tool"),
+        used_idents,
+        fallback="consolidated_tool",
+    )
     desc = target.get("description", f"Consolidated tool for: {', '.join(source_tools)}")
 
     # Build tool_name -> tool object map
@@ -192,8 +238,12 @@ def _gen_prefix_consolidation(
     # The action value is the tool name itself (matches analyze.py's _merged_params)
     dispatch_map = {name: name for name in source_tools if name in tool_map}
 
-    # Collect the union of all parameters across source tools
-    all_properties: dict[str, Any] = {}
+    # Collect the union of all parameters across source tools.
+    # Keep original JSON-schema property names (for upstream dispatch) alongside a
+    # sanitized Python identifier (for the function signature and local var).
+    # all_properties: pname (original) -> {"schema": schema, "ident": safe_pname}
+    fn_local_idents: set[str] = {"action", "args", "result", "dispatch_map", "upstream_tool"}
+    all_properties: dict[str, dict[str, Any]] = {}
     all_required: set[str] = set()
     first = True
     for tool_name in source_tools:
@@ -205,27 +255,33 @@ def _gen_prefix_consolidation(
         req = set(schema.get("required", []))
         for k, v in props.items():
             if k not in all_properties:
-                all_properties[k] = v
+                all_properties[k] = {
+                    "schema": v,
+                    "ident": safe_ident(k, fn_local_idents, fallback="arg"),
+                }
         if first:
             all_required = req
             first = False
         else:
             all_required &= req
 
-    # Build function signature: action first, then union of other params
+    # Build function signature: action first, then union of other params (sanitized).
     param_parts = ["action: str"]
-    for pname, pschema in all_properties.items():
-        ptype = _py_type(pschema)
+    for pname, info in all_properties.items():
+        ptype = _py_type(info["schema"])
+        ident = info["ident"]
         if pname in all_required:
-            param_parts.append(f"{pname}: {ptype}")
+            param_parts.append(f"{ident}: {ptype}")
         else:
-            param_parts.append(f"{pname}: {ptype} | None = None")
+            param_parts.append(f"{ident}: {ptype} | None = None")
     params = ", ".join(param_parts)
 
-    # Build args dict (all params except action)
-    arg_keys = list(all_properties.keys())
-    if arg_keys:
-        dict_entries = ", ".join(f'"{k}": {k}' for k in arg_keys)
+    # Build args dict mapping original JSON keys to sanitized locals.
+    if all_properties:
+        dict_entries = ", ".join(
+            f"{json.dumps(pname)}: {info['ident']}"
+            for pname, info in all_properties.items()
+        )
         args_build = f"    args = {{{dict_entries}}}"
         args_clean = "    args = {k: v for k, v in args.items() if v is not None}"
     else:
@@ -233,15 +289,14 @@ def _gen_prefix_consolidation(
         args_clean = ""
 
     dispatch_map_repr = json.dumps(dispatch_map, indent=4)
-    action_list_repr = json.dumps(sorted(dispatch_map.keys()))
 
     lines = [
         f"@mcp.tool(description={_quote(desc)})",
         f"async def {target_name}({params}) -> str:",
-        f'    """Consolidated tool dispatching to upstream based on action."""',
+        f"    {_quote('Consolidated tool dispatching to upstream based on action.')}",
         f"    dispatch_map = {dispatch_map_repr}",
         "    if action not in dispatch_map:",
-        f"        return json.dumps({{\"error\": \"Unknown action: \" + action + \". Must be one of: \" + \", \".join(sorted(dispatch_map.keys()))}})",
+        "        return json.dumps({\"error\": \"Unknown action: \" + action + \". Must be one of: \" + \", \".join(sorted(dispatch_map.keys()))})",
         "    upstream_tool = dispatch_map[action]",
         args_build,
     ]
@@ -258,6 +313,7 @@ def _gen_prefix_consolidation(
 def _gen_passthrough(
     tool,
     rewritten_descriptions: dict[str, str] | None = None,
+    used_idents: set[str] | None = None,
 ) -> list[str]:
     """Generate a passthrough wrapper for a single tool."""
     schema = tool.inputSchema or {}
@@ -272,44 +328,48 @@ def _gen_passthrough(
     desc = desc.replace("\n", " ")
     desc_json = json.dumps(desc)
 
-    # Sanitize tool name for use as Python function name
-    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', tool.name)
-    if safe_name[0:1].isdigit():
-        safe_name = f"tool_{safe_name}"
+    safe_name = safe_ident(tool.name, used_idents, fallback="tool")
 
+    fn_local_idents: set[str] = {"args", "result"}
     params = []
     args_entries = []
     for pname, pschema in props.items():
         ptype = _py_type(pschema)
-        safe_pname = re.sub(r'[^a-zA-Z0-9_]', '_', pname)
+        safe_pname = safe_ident(pname, fn_local_idents, fallback="arg")
         if pname in required_set:
             params.append(f"{safe_pname}: {ptype}")
         else:
             params.append(f"{safe_pname}: {ptype} | None = None")
-        args_entries.append(f'{json.dumps(pname)}: {safe_pname}')
+        args_entries.append(f"{json.dumps(pname)}: {safe_pname}")
 
     param_str = ", ".join(params)
     args_str = "{" + ", ".join(args_entries) + "}" if args_entries else "{}"
 
     lines = [
-        f'@mcp.tool(description={desc_json})',
+        f"@mcp.tool(description={desc_json})",
         f"async def {safe_name}({param_str}) -> str:",
         f"    args = {{k: v for k, v in {args_str}.items() if v is not None}}",
-        f'    result = await upstream.call({json.dumps(tool.name)}, args)',
-        f"    return json.dumps(result) if not isinstance(result, str) else result",
+        f"    result = await upstream.call({json.dumps(tool.name)}, args)",
+        "    return json.dumps(result) if not isinstance(result, str) else result",
         "",
     ]
     return lines
 
 
-def _gen_condensed_resources(condensed_resources: dict) -> list[str]:
+def _gen_condensed_resources(
+    condensed_resources: dict,
+    used_idents: set[str] | None = None,
+) -> list[str]:
     """Generate @mcp.resource handlers for condensed resources."""
     lines = ["# --- Condensed resource handlers ---"]
     for uri, data in condensed_resources.items():
-        safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', data["name"])
-        lines.append(f'@mcp.resource("{uri}")')
-        lines.append(f"async def resource_{safe_name}() -> str:")
-        lines.append(f'    """Condensed version of {data["name"]}"""')
+        raw_name = data.get("name", "resource")
+        fn_name = safe_ident(f"resource_{raw_name}", used_idents, fallback="resource")
+        docstring = _quote(f"Condensed version of {raw_name}")
+        # URI goes inside @mcp.resource(...) via json.dumps so any chars are safely quoted.
+        lines.append(f"@mcp.resource({json.dumps(uri)})")
+        lines.append(f"async def {fn_name}() -> str:")
+        lines.append(f"    {docstring}")
         lines.append(f"    return {json.dumps(data['condensed'])}")
         lines.append("")
     return lines
@@ -466,6 +526,13 @@ async def build_proxy(
     # Assemble code
     lines = _gen_header(upstream_url, token_dir)
 
+    # Single namespace for all generated module-level identifiers, seeded with
+    # names already used by the header (UPSTREAM_URL, TOKEN_DIR, upstream, lifespan, mcp).
+    used_idents: set[str] = {
+        "UPSTREAM_URL", "TOKEN_DIR", "upstream", "lifespan", "mcp", "LOOKUP_TOOLS",
+        "argparse", "json", "asynccontextmanager", "FastMCP", "UpstreamClient",
+    }
+
     # Track which consolidation recs we've already generated
     generated_consolidation_ids: set[str] = set()
 
@@ -478,7 +545,7 @@ async def build_proxy(
         if rec_id in generated_consolidation_ids:
             continue
         generated_consolidation_ids.add(rec_id)
-        lines.extend(_gen_lookup_consolidation(rec, tools, rewritten_descriptions))
+        lines.extend(_gen_lookup_consolidation(rec, tools, rewritten_descriptions, used_idents))
 
     # Generate prefix consolidations
     for tool_name, info in classification.items():
@@ -489,28 +556,32 @@ async def build_proxy(
         if rec_id in generated_consolidation_ids:
             continue
         generated_consolidation_ids.add(rec_id)
-        lines.extend(_gen_prefix_consolidation(rec, tools, rewritten_descriptions))
+        lines.extend(_gen_prefix_consolidation(rec, tools, rewritten_descriptions, used_idents))
 
     # Generate condensed resources
     if condensed_resources:
-        lines.extend(_gen_condensed_resources(condensed_resources))
+        lines.extend(_gen_condensed_resources(condensed_resources, used_idents))
 
     # Generate passthrough + description-rewritten tools
     passthrough_lines = []
     for t in tools:
         status = classification.get(t.name, {}).get("status", "passthrough")
         if status in ("passthrough", "description_rewritten"):
-            passthrough_lines.extend(_gen_passthrough(t, rewritten_descriptions))
+            passthrough_lines.extend(_gen_passthrough(t, rewritten_descriptions, used_idents))
 
     if passthrough_lines:
         lines.append("# --- Passthrough tools (unmodified) ---")
         lines.append("")
         lines.extend(passthrough_lines)
 
-    # Removed tools comment
+    # Removed tools comment — names may contain newlines/quotes from a malicious MCP
+    # server, so collapse to safe characters before embedding into a comment.
     removed_tools = [name for name, info in classification.items() if info["status"] == "removed"]
     if removed_tools:
-        lines.append(f"# Removed tools: {', '.join(removed_tools)}")
+        safe_removed = ", ".join(
+            re.sub(r"[\r\n]", " ", name)[:80] for name in removed_tools
+        )
+        lines.append(f"# Removed tools: {safe_removed}")
         lines.append("")
 
     # Entry point

@@ -16,17 +16,25 @@ fi
 
 echo "Starting MCPeriscope..."
 
+# Default to loopback. Set MCPERISCOPE_HOST=0.0.0.0 for LAN exposure (not recommended).
+HOST="${MCPERISCOPE_HOST:-127.0.0.1}"
+VITE_HOST_ARGS=()
+if [ "$HOST" != "127.0.0.1" ] && [ "$HOST" != "localhost" ]; then
+  echo "WARNING: binding to $HOST exposes MCPeriscope beyond localhost." >&2
+  VITE_HOST_ARGS=(--host "$HOST")
+fi
+
 # Start FastAPI backend
-python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000 &
+python -m uvicorn backend.main:app --reload --host "$HOST" --port 8000 &
 BACKEND_PID=$!
 
 # Start Vite frontend
-cd frontend && npx vite --host &
+cd frontend && npx vite "${VITE_HOST_ARGS[@]}" &
 FRONTEND_PID=$!
 
 trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
 
-echo "Backend: http://localhost:8000"
-echo "Frontend: http://localhost:5173"
+echo "Backend: http://$HOST:8000"
+echo "Frontend: http://$HOST:5173"
 
 wait
