@@ -1,12 +1,15 @@
 import { useStore } from "../../store";
 
 const MODELS = [
-  // Anthropic — Claude 4.6 family (latest)
+  // Anthropic — Claude 4.8 (latest)
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8", context: 1000000, provider: "anthropic" },
+  // Anthropic — Claude 4.6 family
   { id: "claude-opus-4-6", label: "Claude Opus 4.6", context: 1000000, provider: "anthropic" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", context: 1000000, provider: "anthropic" },
   // Anthropic — Claude 4.5
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", context: 200000, provider: "anthropic" },
   // OpenAI — GPT-5.x family
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", context: 1000000, provider: "openai" },
   { id: "gpt-5.4", label: "GPT-5.4", context: 1000000, provider: "openai" },
   { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", context: 400000, provider: "openai" },
   { id: "gpt-5.2", label: "GPT-5.2", context: 400000, provider: "openai" },
