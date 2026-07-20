@@ -52,6 +52,16 @@ class HeadlessOAuth(OAuth):
         self._auth_code: str | None = None
         self._auth_state: str | None = None
         self._code_event: anyio.Event | None = None
+        # MCPeriscope is a public client that authenticates with PKCE, so it must
+        # register as a public client. If we let the server pick the default
+        # token_endpoint_auth_method it may choose client_secret_basic and issue a
+        # secret; the MCP SDK then sends both an Authorization: Basic header AND
+        # client_id in the token-request body, which strict servers reject with
+        # "Client must not use multiple authentication methods". Forcing "none"
+        # keeps the token exchange to a single (public/PKCE) auth method.
+        acm = dict(kwargs.pop("additional_client_metadata", None) or {})
+        acm.setdefault("token_endpoint_auth_method", "none")
+        kwargs["additional_client_metadata"] = acm
         super().__init__(**kwargs)
 
     @property
