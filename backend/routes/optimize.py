@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _sanitized_auth(auth) -> dict | None:
+    """Reduce the session AuthConfig to what the generated proxy needs.
+
+    OAuth carries no secrets (tokens live in token_dir); the other methods
+    need their credential fields for the proxy to reach the upstream.
+    """
+    if auth is None:
+        return None
+    if auth.type in ("bearer", "header", "oauth_client_creds"):
+        return auth.model_dump(exclude_none=True)
+    if auth.type == "none":
+        return {"type": "none"}
+    return {k: v for k, v in {"type": "oauth", "scope": auth.scope}.items() if v}
+
+
 def _serialize_mcp_result(result) -> str:
     """Convert MCP CallToolResult to a plain text string."""
     parts = []
@@ -639,6 +654,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 upstream_url=mcp_manager.get_url() or "",
                 token_dir=token_dir,
                 recommendations=filtered_recs,
+                auth_config=_sanitized_auth(mcp_manager.get_auth_config()),
                 quick_wins=filtered_qws,
                 condensed_resources=condensed_resources if condensed_resources else None,
                 rewritten_descriptions=rewritten_descriptions if rewritten_descriptions else None,

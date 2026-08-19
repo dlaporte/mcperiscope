@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
-from backend.models import ConnectRequest
+from backend.models import AuthConfig, ConnectRequest
 from backend import mcp_manager
 from backend.credentials import bind_primary_credentials
 from backend.state import session
@@ -33,12 +33,44 @@ async def _validate_api_key(api_key: str) -> None:
         logger.debug("Non-auth error during API key validation (key is likely valid)", exc_info=True)
 
 
+def _validate_auth_config(auth: AuthConfig | None) -> None:
+    """Reject malformed auth configs with a 400 before any connection attempt."""
+    if auth is None:
+        return
+    if auth.type == "oauth_client_creds":
+        if not (auth.token_endpoint and auth.client_id and auth.client_secret):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Client-credentials auth requires token endpoint, "
+                    "client ID, and client secret"
+                ),
+            )
+        validate_external_url(auth.token_endpoint, label="Token endpoint")
+    if auth.type == "oauth" and auth.client_metadata_url:
+        # The MCP SDK hard-requires an HTTPS, non-root-path CIMD URL; fail
+        # with a 400 here instead of its ValueError surfacing as a 500.
+        validate_external_url(auth.client_metadata_url, label="Client metadata URL")
+        from urllib.parse import urlparse
+
+        parsed = urlparse(auth.client_metadata_url)
+        if parsed.scheme != "https" or parsed.path in ("", "/"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Client metadata URL must be an HTTPS URL with a "
+                    "non-root path (e.g. https://example.com/oauth/client.json)"
+                ),
+            )
+
+
 @router.post("/connect")
 async def connect(req: ConnectRequest, request: Request):
     # Validate the upstream MCP URL before touching session state.
     validate_external_url(req.url, label="MCP server URL")
     if req.custom_endpoint:
         validate_external_url(req.custom_endpoint, label="LLM endpoint")
+    _validate_auth_config(req.auth)
 
     bind_primary_credentials(
         session,
@@ -54,7 +86,7 @@ async def connect(req: ConnectRequest, request: Request):
     if req.custom_context_window:
         session.custom_context_window = req.custom_context_window
     try:
-        return await mcp_manager.connect(req.url, req.auth)
+        return await mcp_manager.connect(req.url, req.auth, req.protocol)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

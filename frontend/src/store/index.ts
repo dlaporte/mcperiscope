@@ -8,7 +8,8 @@ function generateId(): string {
 }
 
 type ItemType = "tool" | "resource" | "prompt";
-type AuthMethod = "none" | "bearer" | "header" | "oauth";
+type AuthMethod = "none" | "bearer" | "header" | "oauth" | "oauth_client_creds";
+export type MCPProtocol = "auto" | "http" | "sse";
 
 interface Selection {
   type: ItemType;
@@ -36,11 +37,28 @@ export interface MCPServerConfig {
   id: string;
   name: string;        // user-defined label (e.g., "Scoutbook MCP", "Local Dev")
   url: string;         // MCP server URL
-  authMethod: "none" | "bearer" | "header" | "oauth";
+  authMethod: AuthMethod;
   authToken: string;   // for bearer auth
   headerName: string;  // for header auth
   headerValue: string; // for header auth
+  scope: string;             // oauth + client-creds: scope override (space-separated)
+  clientId: string;          // oauth: pre-registered client; client-creds: required
+  clientSecret: string;      // oauth: optional; client-creds: required
+  clientAuth: "post" | "basic"; // token endpoint auth method when a secret is set
+  clientMetadataUrl: string; // oauth: CIMD URL (alternative to dynamic registration)
+  tokenEndpoint: string;     // client-creds: token endpoint URL
+  protocol: MCPProtocol;     // transport: auto-detect / Streamable HTTP / legacy SSE
 }
+
+export const MCP_CONFIG_DEFAULTS = {
+  scope: "",
+  clientId: "",
+  clientSecret: "",
+  clientAuth: "post" as const,
+  clientMetadataUrl: "",
+  tokenEndpoint: "",
+  protocol: "auto" as const,
+};
 
 export const KNOWN_MODELS = [
   // Anthropic — Claude 4.8 (latest)
@@ -90,6 +108,13 @@ interface AppState {
   authToken: string;
   headerName: string;
   headerValue: string;
+  authScope: string;
+  authClientId: string;
+  authClientSecret: string;
+  authClientAuth: "post" | "basic";
+  authClientMetadataUrl: string;
+  authTokenEndpoint: string;
+  protocol: MCPProtocol;
   oauthPending: boolean;
   connectProgress: string | null;
 
@@ -214,6 +239,7 @@ interface AppState {
   setCustomContextWindow: (ctx: number) => void;
   connect: (url: string) => Promise<void>;
   disconnect: () => Promise<void>;
+  signOutMCP: (url: string) => Promise<void>;
   completeOAuth: (code: string) => Promise<void>;
   select: (type: ItemType, item: any) => void;
   clearSelection: () => void;
@@ -336,7 +362,23 @@ function buildAuthConfig(state: AppState): AuthConfig | undefined {
     case "header":
       return { type: "header", name: state.headerName, value: state.headerValue };
     case "oauth":
-      return { type: "oauth" };
+      return {
+        type: "oauth",
+        scope: state.authScope || undefined,
+        client_id: state.authClientId || undefined,
+        client_secret: state.authClientSecret || undefined,
+        client_auth: state.authClientSecret ? state.authClientAuth : undefined,
+        client_metadata_url: state.authClientMetadataUrl || undefined,
+      };
+    case "oauth_client_creds":
+      return {
+        type: "oauth_client_creds",
+        token_endpoint: state.authTokenEndpoint,
+        client_id: state.authClientId,
+        client_secret: state.authClientSecret,
+        scope: state.authScope || undefined,
+        client_auth: state.authClientAuth || "post",
+      };
   }
 }
 
@@ -468,7 +510,10 @@ function loadMCPConfigs(): MCPServerConfig[] {
   try {
     const raw = lsGet("mcpConfigs");
     let configs: MCPServerConfig[] = [];
-    if (raw) configs = JSON.parse(raw);
+    // Fill fields added since a config was saved so old localStorage blobs keep working.
+    if (raw) configs = (JSON.parse(raw) as MCPServerConfig[]).map(
+      (c) => ({ ...MCP_CONFIG_DEFAULTS, ...c })
+    );
 
     // Migration: if no configs exist and there's exactly one URL in history, create a config
     if (configs.length === 0) {
@@ -486,6 +531,7 @@ function loadMCPConfigs(): MCPServerConfig[] {
               authToken: "",
               headerName: "",
               headerValue: "",
+              ...MCP_CONFIG_DEFAULTS,
             };
             configs.push(config);
             lsSet("mcpConfigs", JSON.stringify(configs));
@@ -525,10 +571,17 @@ export const useStore = create<AppState>((set, get) => ({
   connecting: false,
   serverInfo: null,
   error: null,
-  authMethod: (lsGet("authMethod") || "none") as "none" | "bearer" | "header" | "oauth",
+  authMethod: (lsGet("authMethod") || "none") as AuthMethod,
   authToken: lsGet("authToken"),
   headerName: lsGet("headerName"),
   headerValue: lsGet("headerValue"),
+  authScope: lsGet("authScope"),
+  authClientId: lsGet("authClientId"),
+  authClientSecret: lsGet("authClientSecret"),
+  authClientAuth: (lsGet("authClientAuth") || "post") as "post" | "basic",
+  authClientMetadataUrl: lsGet("authClientMetadataUrl"),
+  authTokenEndpoint: lsGet("authTokenEndpoint"),
+  protocol: (lsGet("protocol") || "auto") as MCPProtocol,
   oauthPending: false,
   connectProgress: null,
   model: lsGet("model") || "claude-sonnet-4-6",
@@ -973,11 +1026,25 @@ export const useStore = create<AppState>((set, get) => ({
         authToken: config.authToken,
         headerName: config.headerName,
         headerValue: config.headerValue,
+        authScope: config.scope,
+        authClientId: config.clientId,
+        authClientSecret: config.clientSecret,
+        authClientAuth: config.clientAuth,
+        authClientMetadataUrl: config.clientMetadataUrl,
+        authTokenEndpoint: config.tokenEndpoint,
+        protocol: config.protocol,
       });
       lsSet("authMethod", config.authMethod);
       lsSet("authToken", config.authToken);
       lsSet("headerName", config.headerName);
       lsSet("headerValue", config.headerValue);
+      lsSet("authScope", config.scope);
+      lsSet("authClientId", config.clientId);
+      lsSet("authClientSecret", config.clientSecret);
+      lsSet("authClientAuth", config.clientAuth);
+      lsSet("authClientMetadataUrl", config.clientMetadataUrl);
+      lsSet("authTokenEndpoint", config.tokenEndpoint);
+      lsSet("protocol", config.protocol);
     }
   },
 
@@ -1010,6 +1077,7 @@ export const useStore = create<AppState>((set, get) => ({
         primaryConfig?.apiKey || state.apiKey,
         primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
         primaryConfig?.contextWindow || state.customContextWindow,
+        state.protocol,
       );
 
       if (res.status === "oauth_redirect" && res.authorizationUrl) {
@@ -1117,6 +1185,18 @@ export const useStore = create<AppState>((set, get) => ({
       disabledResources: new Set<string>(),
       disabledPrompts: new Set<string>(),
     });
+  },
+
+  signOutMCP: async (url: string) => {
+    if (get().connected) {
+      await get().disconnect();
+    }
+    try {
+      await api.signOut(url);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ error: `Sign-out failed: ${message}` });
+    }
   },
 
   select: (type, item) => set({ selection: { type, item }, result: null }),

@@ -21,10 +21,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export interface AuthConfig {
-  type: "none" | "bearer" | "header" | "oauth";
+  type: "none" | "bearer" | "header" | "oauth" | "oauth_client_creds";
   token?: string;
   name?: string;
   value?: string;
+  scope?: string;
+  client_id?: string;
+  client_secret?: string;
+  client_auth?: "post" | "basic";
+  client_metadata_url?: string;
+  token_endpoint?: string;
 }
 
 export interface ConnectResult {
@@ -40,14 +46,20 @@ export interface ModelConfig {
 
 export const api = {
   // === Connection ===
-  connect: (url: string, auth?: AuthConfig, model?: string, provider?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number) =>
+  connect: (url: string, auth?: AuthConfig, model?: string, provider?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number, protocol?: string) =>
     request<ConnectResult>("/connect", {
       method: "POST",
-      body: JSON.stringify({ url, auth, model: model || undefined, provider: provider || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint || undefined, custom_context_window: customContextWindow || undefined }),
+      body: JSON.stringify({ url, auth, model: model || undefined, provider: provider || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint || undefined, custom_context_window: customContextWindow || undefined, protocol: protocol && protocol !== "auto" ? protocol : undefined }),
     }),
 
   disconnect: () =>
     request<{ status: string }>("/disconnect", { method: "DELETE" }),
+
+  signOut: (url: string) =>
+    request<{ status: string; url: string; revoked?: boolean | null }>("/auth/signout", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
 
   status: () =>
     request<{ connected: boolean; serverInfo: unknown }>("/status"),

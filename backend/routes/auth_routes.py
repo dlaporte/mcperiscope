@@ -5,9 +5,10 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from backend.models import OAuthCallbackRequest
+from backend.models import OAuthCallbackRequest, SignOutRequest
 from backend import mcp_manager
 from backend.state import session
+from backend.url_validation import validate_external_url
 
 router = APIRouter()
 
@@ -59,6 +60,16 @@ async def auth_callback(req: OAuthCallbackRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/auth/signout")
+async def auth_signout(req: SignOutRequest):
+    """Delete stored OAuth tokens for a server (best-effort upstream revoke)."""
+    validate_external_url(req.url, label="MCP server URL")
+    try:
+        return await mcp_manager.signout(req.url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sign-out failed: {e}")
 
 
 @router.get("/auth/status")

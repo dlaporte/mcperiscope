@@ -102,6 +102,44 @@ def test_condensed_resource_with_malicious_uri():
     _assert_no_top_level_calls(code)
 
 
+def test_auth_config_with_malicious_values_stays_inert():
+    tools = [_tool("safe")]
+    nasty = {
+        "type": "bearer",
+        "token": f'x"\nimport os; {_SYS}("id")\n y',
+    }
+    code, _ = asyncio.run(build_proxy(
+        tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
+        recommendations=[], quick_wins=[], auth_config=nasty,
+    ))
+    _assert_no_top_level_calls(code)
+    # The credential must round-trip intact through the json.loads wrapper.
+    ns: dict = {}
+    exec(compile(ast.parse(code.split("@asynccontextmanager")[0]), "p", "exec"), ns)
+    assert ns["AUTH_CONFIG"] == nasty
+
+
+def test_oauth_auth_config_emits_no_secret_material():
+    tools = [_tool("safe")]
+    code, _ = asyncio.run(build_proxy(
+        tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
+        recommendations=[], quick_wins=[],
+        auth_config={"type": "oauth", "scope": "read"},
+    ))
+    assert "client_secret" not in code
+    assert "WARNING: contains credentials" not in code
+
+
+def test_bearer_auth_config_emits_warning_comment():
+    tools = [_tool("safe")]
+    code, _ = asyncio.run(build_proxy(
+        tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
+        recommendations=[], quick_wins=[],
+        auth_config={"type": "bearer", "token": "t"},
+    ))
+    assert "WARNING: contains credentials" in code
+
+
 def test_removed_tools_comment_handles_newlines():
     nasty = f"evil\nimport os; {_SYS}('id')"
     tools = [_tool(nasty), _tool("safe")]

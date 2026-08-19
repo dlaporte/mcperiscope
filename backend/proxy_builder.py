@@ -143,11 +143,17 @@ def _classify_tools(
 # Code generators for each section
 # ---------------------------------------------------------------------------
 
-def _gen_header(upstream_url: str, token_dir: str) -> list[str]:
+def _gen_header(
+    upstream_url: str, token_dir: str, auth_config: dict | None = None
+) -> list[str]:
     """Generate the proxy header with imports, upstream client, lifespan, mcp."""
+    secret_warning = []
+    if auth_config and auth_config.get("type") in ("bearer", "header", "oauth_client_creds"):
+        secret_warning = ["# WARNING: contains credentials — do not commit", ""]
     return [
         '"""Auto-generated MCP proxy server by MCPeriscope."""',
         "",
+        *secret_warning,
         "from __future__ import annotations",
         "import argparse",
         "import json",
@@ -157,8 +163,9 @@ def _gen_header(upstream_url: str, token_dir: str) -> list[str]:
         "",
         f"UPSTREAM_URL = {json.dumps(upstream_url)}",
         f"TOKEN_DIR = {json.dumps(token_dir)}",
+        f"AUTH_CONFIG = json.loads({json.dumps(json.dumps(auth_config))})",
         "",
-        "upstream = UpstreamClient(UPSTREAM_URL, token_dir=TOKEN_DIR)",
+        "upstream = UpstreamClient(UPSTREAM_URL, token_dir=TOKEN_DIR, auth_config=AUTH_CONFIG)",
         "",
         "@asynccontextmanager",
         "async def lifespan(app):",
@@ -465,6 +472,7 @@ async def build_proxy(
     token_dir: str,
     recommendations: list[dict],
     quick_wins: list[dict],
+    auth_config: dict | None = None,
     condensed_resources: dict | None = None,
     rewritten_descriptions: dict[str, str] | None = None,
     disabled_tools: list[str] | None = None,
@@ -482,6 +490,8 @@ async def build_proxy(
         upstream_url: URL of the upstream MCP server.
         token_dir: Directory for OAuth token storage.
         recommendations: Behavior recommendations from analysis.
+        auth_config: Sanitized upstream auth config dict (see routes/optimize.py);
+            None or {"type": "oauth", ...} means reuse tokens from token_dir.
         quick_wins: Quick win recommendations from inventory analysis.
         condensed_resources: Dict of uri -> {name, condensed, ...} for resource handlers.
         rewritten_descriptions: Dict of tool_name -> new description text.
@@ -524,12 +534,12 @@ async def build_proxy(
     )
 
     # Assemble code
-    lines = _gen_header(upstream_url, token_dir)
+    lines = _gen_header(upstream_url, token_dir, auth_config)
 
     # Single namespace for all generated module-level identifiers, seeded with
     # names already used by the header (UPSTREAM_URL, TOKEN_DIR, upstream, lifespan, mcp).
     used_idents: set[str] = {
-        "UPSTREAM_URL", "TOKEN_DIR", "upstream", "lifespan", "mcp", "LOOKUP_TOOLS",
+        "UPSTREAM_URL", "TOKEN_DIR", "AUTH_CONFIG", "upstream", "lifespan", "mcp", "LOOKUP_TOOLS",
         "argparse", "json", "asynccontextmanager", "FastMCP", "UpstreamClient",
     }
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useStore, KNOWN_MODELS } from "../../store";
+import { useStore, KNOWN_MODELS, MCP_CONFIG_DEFAULTS } from "../../store";
 import type { LLMConfig, MCPServerConfig } from "../../store";
+import { api } from "../../api/client";
 
 const PROVIDER_BADGE_STYLES: Record<string, React.CSSProperties> = {
   anthropic: { backgroundColor: "rgba(196,154,42,0.2)", color: "var(--sub-brass)" },
@@ -239,7 +240,8 @@ const AUTH_METHOD_LABELS: Record<string, string> = {
   none: "None",
   bearer: "Bearer Token",
   header: "Custom Header",
-  oauth: "OAuth 2.0",
+  oauth: "OAuth 2.1",
+  oauth_client_creds: "OAuth 2.1 Client Credentials",
 };
 
 function MCPConfigCard({ config }: { config: MCPServerConfig }) {
@@ -253,9 +255,22 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
   const [authToken, setAuthToken] = useState(config.authToken);
   const [headerName, setHeaderName] = useState(config.headerName);
   const [headerValue, setHeaderValue] = useState(config.headerValue);
+  const [scope, setScope] = useState(config.scope);
+  const [clientId, setClientId] = useState(config.clientId);
+  const [clientSecret, setClientSecret] = useState(config.clientSecret);
+  const [clientAuth, setClientAuth] = useState(config.clientAuth);
+  const [clientMetadataUrl, setClientMetadataUrl] = useState(config.clientMetadataUrl);
+  const [tokenEndpoint, setTokenEndpoint] = useState(config.tokenEndpoint);
+  const [protocol, setProtocol] = useState(config.protocol);
+
+  const clientCredsIncomplete =
+    authMethod === "oauth_client_creds" && !(tokenEndpoint && clientId && clientSecret);
 
   const handleSave = () => {
-    updateMCPConfig(config.id, { name, url, authMethod, authToken, headerName, headerValue });
+    updateMCPConfig(config.id, {
+      name, url, authMethod, authToken, headerName, headerValue,
+      scope, clientId, clientSecret, clientAuth, clientMetadataUrl, tokenEndpoint, protocol,
+    });
     setEditing(false);
   };
 
@@ -266,6 +281,13 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
     setAuthToken(config.authToken);
     setHeaderName(config.headerName);
     setHeaderValue(config.headerValue);
+    setScope(config.scope);
+    setClientId(config.clientId);
+    setClientSecret(config.clientSecret);
+    setClientAuth(config.clientAuth);
+    setClientMetadataUrl(config.clientMetadataUrl);
+    setTokenEndpoint(config.tokenEndpoint);
+    setProtocol(config.protocol);
     setEditing(false);
   };
 
@@ -336,6 +358,20 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
             />
           </div>
 
+          {/* Protocol */}
+          <div>
+            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Protocol</label>
+            <select
+              value={protocol}
+              onChange={(e) => setProtocol(e.target.value as MCPServerConfig["protocol"])}
+              className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
+            >
+              <option value="auto">Auto</option>
+              <option value="http">Streamable HTTP</option>
+              <option value="sse">Legacy SSE</option>
+            </select>
+          </div>
+
           {/* Auth Method */}
           <div>
             <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Auth Method</label>
@@ -347,7 +383,8 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
               <option value="none">None</option>
               <option value="bearer">Bearer Token</option>
               <option value="header">Custom Header</option>
-              <option value="oauth">OAuth 2.0</option>
+              <option value="oauth">OAuth 2.1</option>
+              <option value="oauth_client_creds">OAuth 2.1 Client Credentials</option>
             </select>
           </div>
 
@@ -391,18 +428,136 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
             </>
           )}
 
-          {/* OAuth note */}
+          {/* OAuth 2.1 (authorization code) — all fields optional */}
           {authMethod === "oauth" && (
-            <p className="text-xs" style={{ color: "var(--sub-text-dim)" }}>
-              OAuth flow will be initiated on connect.
-            </p>
+            <>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Scope (optional — overrides discovery)</label>
+                <input
+                  type="text"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="openid profile"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client ID (optional — pre-registered)</label>
+                <input
+                  type="text"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Leave blank for automatic registration"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Secret (optional)</label>
+                <input
+                  type="password"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Client secret"
+                />
+              </div>
+              {clientSecret && (
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Auth</label>
+                  <select
+                    value={clientAuth}
+                    onChange={(e) => setClientAuth(e.target.value as MCPServerConfig["clientAuth"])}
+                    className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
+                  >
+                    <option value="post">POST body (client_secret_post)</option>
+                    <option value="basic">Basic header (client_secret_basic)</option>
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Metadata URL (CIMD, optional)</label>
+                <input
+                  type="text"
+                  value={clientMetadataUrl}
+                  onChange={(e) => setClientMetadataUrl(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="https://example.com/oauth/client.json"
+                />
+              </div>
+              <p className="text-xs" style={{ color: "var(--sub-text-dim)" }}>
+                Browser sign-in starts on connect.
+              </p>
+            </>
+          )}
+
+          {/* OAuth 2.1 client credentials */}
+          {authMethod === "oauth_client_creds" && (
+            <>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Token Endpoint</label>
+                <input
+                  type="text"
+                  value={tokenEndpoint}
+                  onChange={(e) => setTokenEndpoint(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="https://idp.example.com/oauth/token"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client ID</label>
+                <input
+                  type="text"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Your own API client ID"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Secret</label>
+                <input
+                  type="password"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Client secret"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Scope (optional)</label>
+                <input
+                  type="text"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
+                  placeholder="read write"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Auth</label>
+                <select
+                  value={clientAuth}
+                  onChange={(e) => setClientAuth(e.target.value as MCPServerConfig["clientAuth"])}
+                  className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
+                >
+                  <option value="post">POST body (client_secret_post)</option>
+                  <option value="basic">Basic header (client_secret_basic)</option>
+                </select>
+              </div>
+              {clientCredsIncomplete && (
+                <p className="text-xs" style={{ color: "var(--sub-red)" }}>
+                  Token endpoint, client ID, and client secret are required.
+                </p>
+              )}
+            </>
           )}
 
           {/* Save / Cancel */}
           <div className="flex gap-2 pt-1">
             <button
               onClick={handleSave}
-              className="btn-brass px-4 py-1.5 rounded-lg text-sm font-medium"
+              disabled={clientCredsIncomplete}
+              className="btn-brass px-4 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50"
             >
               Save
             </button>
@@ -458,6 +613,7 @@ export function SettingsTab() {
       authToken: "",
       headerName: "",
       headerValue: "",
+      ...MCP_CONFIG_DEFAULTS,
     };
     addMCPConfig(config);
   };
@@ -623,13 +779,21 @@ export function SettingsTab() {
 }
 
 function ClearCredentialsSection() {
+  const { mcpConfigs } = useStore();
   const [confirming, setConfirming] = useState(false);
-  const handleClear = () => {
+  const handleClear = async () => {
+    // Also delete the backend's stored OAuth tokens for each OAuth server —
+    // best-effort, a failed sign-out never blocks the localStorage wipe.
+    for (const cfg of mcpConfigs) {
+      if (cfg.authMethod === "oauth" && cfg.url) {
+        await api.signOut(cfg.url).catch(() => {});
+      }
+    }
     const LS_PREFIX = "mcperiscope:";
-    // Sensitive keys: anything that holds an API key, bearer token, or
-    // header value. We intentionally drop the *entire* llmConfigs and
-    // mcpConfigs entries — they hold credentials inside the JSON blob —
-    // and the loose `apiKey` / `authToken` / `headerValue` fallbacks.
+    // Sensitive keys: anything that holds an API key, bearer token, header
+    // value, or OAuth client secret. We intentionally drop the *entire*
+    // llmConfigs and mcpConfigs entries — they hold credentials inside the
+    // JSON blob — and the loose per-field fallbacks.
     const SENSITIVE = [
       `${LS_PREFIX}llmConfigs`,
       `${LS_PREFIX}mcpConfigs`,
@@ -638,6 +802,12 @@ function ClearCredentialsSection() {
       `${LS_PREFIX}headerName`,
       `${LS_PREFIX}headerValue`,
       `${LS_PREFIX}customEndpoint`,
+      `${LS_PREFIX}authScope`,
+      `${LS_PREFIX}authClientId`,
+      `${LS_PREFIX}authClientSecret`,
+      `${LS_PREFIX}authClientAuth`,
+      `${LS_PREFIX}authClientMetadataUrl`,
+      `${LS_PREFIX}authTokenEndpoint`,
     ];
     SENSITIVE.forEach((k) => localStorage.removeItem(k));
     window.location.reload();
@@ -648,8 +818,9 @@ function ClearCredentialsSection() {
         Credentials
       </h3>
       <p className="text-xs mb-3" style={{ color: "var(--sub-text-dim)" }}>
-        LLM API keys and MCP bearer/header values are persisted in your browser&rsquo;s localStorage.
-        Click below to wipe them — you will need to re-enter your keys.
+        LLM API keys, MCP bearer/header values, and OAuth client secrets are persisted in your
+        browser&rsquo;s localStorage; OAuth sign-in tokens are stored by the backend. Click below to
+        wipe all of them — you will need to re-enter your keys and sign in again.
       </p>
       {confirming ? (
         <div className="flex items-center gap-2">

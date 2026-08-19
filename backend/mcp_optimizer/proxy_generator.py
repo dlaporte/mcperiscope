@@ -285,6 +285,8 @@ def generate_proxy_code(
     approved_recommendations: list[dict],
     all_tools: list,  # list of mcp.types.Tool
     upstream_url: str,
+    token_dir: str | None = None,
+    auth_config: dict | None = None,
 ) -> str:
     """Generate a complete, runnable FastMCP proxy server.
 
@@ -293,6 +295,9 @@ def generate_proxy_code(
             containing at minimum ``type`` and ``source_tools``.
         all_tools: Full tool inventory from the upstream MCP server.
         upstream_url: URL of the original MCP server to proxy.
+        token_dir: Directory holding the upstream OAuth token store.
+        auth_config: Sanitized upstream auth config dict (see
+            routes/optimize.py:_sanitized_auth).
 
     Returns:
         A string of Python source code for a runnable FastMCP server.
@@ -324,7 +329,11 @@ def generate_proxy_code(
 
 
         # --- Upstream connection ---
-        upstream = UpstreamClient({_quote(upstream_url)})
+        upstream = UpstreamClient(
+            {_quote(upstream_url)},
+            token_dir={_quote(token_dir) if token_dir else "None"},
+            auth_config=json.loads({_quote(json.dumps(auth_config))}),
+        )
 
 
         @asynccontextmanager

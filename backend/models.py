@@ -11,15 +11,27 @@ MAX_PROMPT_CHARS = 64_000
 
 
 class AuthConfig(BaseModel):
-    type: Literal["none", "bearer", "header", "oauth"] = "none"
+    type: Literal["none", "bearer", "header", "oauth", "oauth_client_creds"] = "none"
+    # bearer
     token: str | None = None
+    # header
     name: str | None = None
     value: str | None = None
+    # oauth (authorization code) — all optional; absent = SDK auto-discovery/DCR.
+    # scope/client_id/client_secret/client_auth are shared with oauth_client_creds.
+    scope: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    client_auth: Literal["post", "basic"] | None = None
+    client_metadata_url: str | None = None
+    # oauth_client_creds
+    token_endpoint: str | None = None
 
 
 class ConnectRequest(BaseModel):
     url: str
     auth: AuthConfig | None = None
+    protocol: Literal["auto", "http", "sse"] | None = None
     model: str | None = None
     provider: str | None = None
     api_key: str | None = None
@@ -61,3 +73,7 @@ class OAuthCallbackRequest(BaseModel):
     callback_url: str
     model: str | None = None
     api_key: str | None = None
+
+
+class SignOutRequest(BaseModel):
+    url: str

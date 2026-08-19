@@ -13,42 +13,58 @@ import os
 from pathlib import Path
 from typing import Any
 
-import httpx
 from fastmcp import Client
 from mcp.types import Tool
 from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
+from backend.mcp_optimizer.proxy_runtime import StaticHeaderAuth
 from backend.mcp_optimizer.token_store import FileKeyValueStore
 
+from backend.auth.client_credentials import ClientCredentialsAuth
 from backend.auth.oauth import WebOAuth
 from backend.state import session
 from backend.models import AuthConfig
 
 logger = logging.getLogger(__name__)
 
+TOKEN_DIR = Path.home() / ".mcperiscope" / "tokens"
+
 # Global state
 _client: Client | None = None
 _auth: WebOAuth | None = None
 _url: str | None = None
 _tools: list[Tool] | None = None
+_auth_config: AuthConfig | None = None
 
 
-class _StaticHeaderAuth(httpx.Auth):
-    """Inject a fixed header on every request — used for bearer/custom-header MCP auth."""
+def _make_transport(url: str, protocol: str | None):
+    """Return the Client target honoring the requested protocol.
 
-    def __init__(self, header_name: str, header_value: str) -> None:
-        self._header_name = header_name
-        self._header_value = header_value
+    - auto (default): let FastMCP infer the transport from the URL.
+    - http: force Streamable HTTP.
+    - sse: force the legacy HTTP+SSE transport.
+    """
+    if protocol == "http":
+        from fastmcp.client.transports import StreamableHttpTransport
 
-    def auth_flow(self, request):
-        request.headers[self._header_name] = self._header_value
-        yield request
+        return StreamableHttpTransport(url)
+    if protocol == "sse":
+        from fastmcp.client.transports import SSETransport
+
+        return SSETransport(url)
+    return url
 
 
-def _build_client(url: str, oauth_provider: WebOAuth, auth_config: AuthConfig | None):
+def _build_client(
+    url: str,
+    oauth_provider: WebOAuth,
+    auth_config: AuthConfig | None,
+    protocol: str | None = None,
+):
     """Build a FastMCP Client honoring the requested auth_config.
 
     - oauth (default): use the WebOAuth provider so the user can complete the
       browser flow.
+    - oauth_client_creds: mint tokens with the user's own client ID/secret.
     - bearer: send `Authorization: Bearer <token>` on every request, no OAuth.
     - header: send `<name>: <value>` on every request, no OAuth.
     - none: no auth at all.
@@ -58,21 +74,44 @@ def _build_client(url: str, oauth_provider: WebOAuth, auth_config: AuthConfig | 
     else:
         auth_type = (auth_config.type or "oauth").lower()
 
+    target = _make_transport(url, protocol)
+
     if auth_type == "bearer":
         token = (auth_config.token if auth_config else None) or ""
         if not token:
             raise ValueError("bearer auth requested but no token supplied")
-        return Client(url, auth=_StaticHeaderAuth("Authorization", f"Bearer {token}"))
+        return Client(target, auth=StaticHeaderAuth("Authorization", f"Bearer {token}"))
     if auth_type == "header":
         name = (auth_config.name if auth_config else None) or ""
         value = (auth_config.value if auth_config else None) or ""
         if not name:
             raise ValueError("header auth requested but no header name supplied")
-        return Client(url, auth=_StaticHeaderAuth(name, value))
+        return Client(target, auth=StaticHeaderAuth(name, value))
+    if auth_type == "oauth_client_creds":
+        if not (
+            auth_config
+            and auth_config.token_endpoint
+            and auth_config.client_id
+            and auth_config.client_secret
+        ):
+            raise ValueError(
+                "client-credentials auth requires token_endpoint, client_id, "
+                "and client_secret"
+            )
+        return Client(
+            target,
+            auth=ClientCredentialsAuth(
+                token_endpoint=auth_config.token_endpoint,
+                client_id=auth_config.client_id,
+                client_secret=auth_config.client_secret,
+                scope=auth_config.scope,
+                client_auth=auth_config.client_auth or "post",
+            ),
+        )
     if auth_type == "none":
-        return Client(url)
+        return Client(target)
     # oauth (default)
-    return Client(url, auth=oauth_provider)
+    return Client(target, auth=oauth_provider)
 
 
 def _get_redirect_url() -> str:
@@ -89,23 +128,41 @@ def _get_redirect_url() -> str:
     return "http://localhost:5173/oauth/callback"
 
 
-async def connect(url: str, auth_config: AuthConfig | None = None) -> dict:
+async def connect(
+    url: str,
+    auth_config: AuthConfig | None = None,
+    protocol: str | None = None,
+) -> dict:
     """Connect to an MCP server."""
-    global _client, _auth, _url, _tools
+    global _client, _auth, _url, _tools, _auth_config
 
     await disconnect()
 
     _url = url
+    _auth_config = auth_config
     redirect_url = _get_redirect_url()
-    token_dir = Path.home() / ".mcperiscope" / "tokens"
+
+    oauth_kwargs: dict[str, Any] = {}
+    if auth_config and (auth_config.type or "oauth") == "oauth":
+        oauth_kwargs = dict(
+            scopes=auth_config.scope,
+            client_id=auth_config.client_id,
+            client_secret=auth_config.client_secret,
+            client_metadata_url=auth_config.client_metadata_url,
+        )
+        if auth_config.client_secret and auth_config.client_auth == "basic":
+            oauth_kwargs["additional_client_metadata"] = {
+                "token_endpoint_auth_method": "client_secret_basic"
+            }
 
     _auth = WebOAuth(
         redirect_url=redirect_url,
         client_name="MCPeriscope",
-        token_storage=FileKeyValueStore(token_dir),
+        token_storage=FileKeyValueStore(TOKEN_DIR),
+        **oauth_kwargs,
     )
 
-    _client = _build_client(url, _auth, auth_config)
+    _client = _build_client(url, _auth, auth_config, protocol)
 
     # Try connecting — if OAuth is needed, HeadlessOAuth captures the auth URL
     connect_task = asyncio.create_task(_do_connect())
@@ -178,7 +235,7 @@ async def complete_oauth(callback_url_or_code: str) -> dict:
 
 async def disconnect() -> dict:
     """Disconnect from the MCP server."""
-    global _client, _auth, _url, _tools
+    global _client, _auth, _url, _tools, _auth_config
 
     if _client is not None:
         try:
@@ -189,9 +246,36 @@ async def disconnect() -> dict:
     _auth = None
     _url = None
     _tools = None
+    _auth_config = None
     session.connection = None
     session.reset()
     return {"status": "disconnected"}
+
+
+async def signout(url: str) -> dict:
+    """Delete stored OAuth tokens for a server, revoking upstream best-effort.
+
+    The local delete always wins: revocation failures only downgrade the
+    `revoked` field, they never block the sign-out.
+    """
+    from fastmcp.client.auth.oauth import TokenStorageAdapter
+
+    from backend.auth.revocation import try_revoke
+
+    normalized = url.rstrip("/")  # matches WebOAuth._bind's storage keying
+
+    if _url and _url.rstrip("/") == normalized:
+        # Never keep a live client whose tokens we are deleting.
+        await disconnect()
+
+    adapter = TokenStorageAdapter(
+        async_key_value=FileKeyValueStore(TOKEN_DIR), server_url=normalized
+    )
+    tokens = await adapter.get_tokens()
+    client_info = await adapter.get_client_info()
+    revoked = await try_revoke(normalized, tokens, client_info)
+    await adapter.clear()
+    return {"status": "signed_out", "url": normalized, "revoked": revoked}
 
 
 def is_connected() -> bool:
@@ -201,6 +285,11 @@ def is_connected() -> bool:
 def get_url() -> str | None:
     """Get the connected MCP server URL."""
     return _url
+
+
+def get_auth_config() -> AuthConfig | None:
+    """Get the auth config used for the current connection."""
+    return _auth_config
 
 
 def is_oauth_pending() -> bool:

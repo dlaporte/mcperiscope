@@ -55,7 +55,8 @@ export function ConnectTab() {
     checkStatus,
   } = useStore();
 
-  const { completeOAuth } = useStore();
+  const { completeOAuth, signOutMCP } = useStore();
+  const [signingOut, setSigningOut] = useState(false);
 
   const [selectedConfigId, setSelectedConfigId] = useState<string>(() => {
     return mcpConfigs.length > 0 ? mcpConfigs[0].id : "";
@@ -82,6 +83,16 @@ export function ConnectTab() {
     e.preventDefault();
     if (selectedConfig) {
       connect(selectedConfig.url);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (!selectedConfig) return;
+    setSigningOut(true);
+    try {
+      await signOutMCP(selectedConfig.url);
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -158,6 +169,24 @@ export function ConnectTab() {
                 </button>
               )}
             </div>
+
+            {/* OAuth sign-out */}
+            {selectedConfig?.authMethod === "oauth" && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={connecting || signingOut}
+                  className="w-full px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+                  style={{ color: 'var(--sub-text-dim)', border: '1px solid var(--sub-rivet)' }}
+                >
+                  {signingOut ? "Signing out..." : "Sign out"}
+                </button>
+                <p className="text-xs mt-1 text-center" style={{ color: 'var(--sub-text-dim)' }}>
+                  Deletes saved sign-in for this server.
+                </p>
+              </div>
+            )}
           </form>
 
           {/* Error Display */}
