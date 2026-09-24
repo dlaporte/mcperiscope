@@ -9,14 +9,23 @@ from backend.mcp_optimizer.connections import MCPConnection
 
 
 MODEL_CONTEXT_WINDOWS = {
-    # Anthropic — Claude 4.8 (latest)
+    # Anthropic — latest
+    "claude-fable-5-1": 1_000_000,
+    "claude-opus-5-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    # Anthropic — Claude 4.8
     "claude-opus-4-8": 1_000_000,
     # Anthropic — Claude 4.6
     "claude-opus-4-6": 1_000_000,
     "claude-sonnet-4-6": 1_000_000,
     # Anthropic — Claude 4.5
     "claude-haiku-4-5-20251001": 200_000,
+    # OpenAI — GPT-6
+    "gpt-6-astra": 1_000_000,
+    "gpt-6-sol": 1_000_000,
+    "gpt-6-luna": 1_000_000,
     # OpenAI — GPT-5.x
+    "gpt-5.6-terra": 1_000_000,
     "gpt-5.6-luna": 1_000_000,
     "gpt-5.4": 1_000_000,
     "gpt-5.4-mini": 400_000,

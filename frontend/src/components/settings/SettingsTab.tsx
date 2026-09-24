@@ -19,6 +19,18 @@ function formatContext(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
 }
 
+// Dropdown sentinel for "type your own model ID" on the Anthropic/OpenAI providers
+const CUSTOM_MODEL = "__custom__";
+
+const CUSTOM_MODEL_PLACEHOLDER: Record<string, string> = {
+  anthropic: "e.g. claude-opus-5",
+  openai: "e.g. gpt-6-sol",
+};
+
+function isKnownModel(provider: string, modelId: string): boolean {
+  return KNOWN_MODELS.some((m) => m.provider === provider && m.id === modelId);
+}
+
 function LLMConfigCard({ config }: { config: LLMConfig }) {
   const { updateLLMConfig, removeLLMConfig } = useStore();
   const [editing, setEditing] = useState(false);
@@ -30,6 +42,9 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [endpoint, setEndpoint] = useState(config.endpoint);
   const [contextWindow, setContextWindow] = useState(config.contextWindow);
+  const [customModel, setCustomModel] = useState(
+    config.provider !== "custom" && !isKnownModel(config.provider, config.model),
+  );
 
   const handleSave = () => {
     updateLLMConfig(config.id, { name, provider, model, apiKey, endpoint, contextWindow });
@@ -43,11 +58,13 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
     setApiKey(config.apiKey);
     setEndpoint(config.endpoint);
     setContextWindow(config.contextWindow);
+    setCustomModel(config.provider !== "custom" && !isKnownModel(config.provider, config.model));
     setEditing(false);
   };
 
   const handleProviderChange = (newProvider: "anthropic" | "openai" | "custom") => {
     setProvider(newProvider);
+    setCustomModel(false);
     if (newProvider !== "custom") {
       const firstModel = KNOWN_MODELS.find((m) => m.provider === newProvider);
       if (firstModel) {
@@ -63,6 +80,12 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
   };
 
   const handleModelSelect = (modelId: string) => {
+    if (modelId === CUSTOM_MODEL) {
+      setCustomModel(true);
+      setModel("");
+      return;
+    }
+    setCustomModel(false);
     setModel(modelId);
     const known = KNOWN_MODELS.find((m) => m.id === modelId);
     if (known) {
@@ -158,17 +181,29 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
                 placeholder="e.g. deepseek-chat"
               />
             ) : (
-              <select
-                value={model}
-                onChange={(e) => handleModelSelect(e.target.value)}
-                className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
-              >
-                {KNOWN_MODELS.filter((m) => m.provider === provider).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label} ({formatContext(m.context)} ctx)
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={customModel ? CUSTOM_MODEL : model}
+                  onChange={(e) => handleModelSelect(e.target.value)}
+                  className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
+                >
+                  {KNOWN_MODELS.filter((m) => m.provider === provider).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label} ({formatContext(m.context)} ctx)
+                    </option>
+                  ))}
+                  <option value={CUSTOM_MODEL}>Custom model ID…</option>
+                </select>
+                {customModel && (
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value.trim())}
+                    className="w-full input-sub border rounded-lg px-3 py-2 text-sm mt-2"
+                    placeholder={CUSTOM_MODEL_PLACEHOLDER[provider]}
+                  />
+                )}
+              </>
             )}
           </div>
 
@@ -198,8 +233,8 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
             </div>
           )}
 
-          {/* Context Window (custom only) */}
-          {provider === "custom" && (
+          {/* Context Window (custom provider or custom model ID) */}
+          {(provider === "custom" || customModel) && (
             <div>
               <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Context Window</label>
               <div className="flex items-center gap-2">

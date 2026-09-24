@@ -26,6 +26,8 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     raw: Any = None
+    # Anthropic content blocks in original order (incl. thinking), for faithful history replay
+    anthropic_content: list[Any] | None = None
 
 
 class LLMClient:
@@ -137,11 +139,12 @@ class LLMClient:
             if hasattr(final, "usage") and final.usage:
                 result.input_tokens = getattr(final.usage, "input_tokens", 0)
                 result.output_tokens = getattr(final.usage, "output_tokens", 0)
+            result.anthropic_content = list(final.content)
 
         yield result
 
     def _parse_anthropic_response(self, response: Any) -> LLMResponse:
-        result = LLMResponse(raw=response)
+        result = LLMResponse(raw=response, anthropic_content=list(response.content))
         if hasattr(response, "usage") and response.usage:
             result.input_tokens = getattr(response.usage, "input_tokens", 0)
             result.output_tokens = getattr(response.usage, "output_tokens", 0)
@@ -360,6 +363,21 @@ class LLMClient:
 
     def to_anthropic_blocks(self, response: LLMResponse) -> list[dict]:
         """Convert an LLMResponse back to Anthropic-style content blocks for message history."""
+        if response.anthropic_content is not None:
+            # Replay Claude's blocks in order. Thinking blocks must be passed back
+            # unchanged on thinking models (Sonnet 5, Fable 5.1, ...) or the next
+            # tool-loop request is rejected.
+            replay: list[dict] = []
+            for b in response.anthropic_content:
+                if b.type == "thinking":
+                    replay.append({"type": "thinking", "thinking": b.thinking, "signature": b.signature})
+                elif b.type == "redacted_thinking":
+                    replay.append({"type": "redacted_thinking", "data": b.data})
+                elif b.type == "text" and b.text:
+                    replay.append({"type": "text", "text": b.text})
+                elif b.type == "tool_use":
+                    replay.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
+            return replay
         blocks = []
         if response.text:
             blocks.append({"type": "text", "text": response.text})
