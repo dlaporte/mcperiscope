@@ -21,8 +21,8 @@ async def _validate_api_key(api_key: str) -> None:
         return
     import anthropic
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        client.messages.create(
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1,
             messages=[{"role": "user", "content": "hi"}],
@@ -31,6 +31,17 @@ async def _validate_api_key(api_key: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid Anthropic API key")
     except Exception:
         logger.debug("Non-auth error during API key validation (key is likely valid)", exc_info=True)
+
+
+async def validate_primary_key(api_key: str | None, provider: str | None) -> None:
+    """Validate a primary key that is about to be bound, before binding it.
+
+    Only Anthropic keys are checked. `provider=None` means the caller keeps
+    the session's current provider (see bind_primary_credentials).
+    """
+    effective_provider = session.provider if provider is None else provider.strip()
+    if api_key and api_key.strip() and effective_provider == "anthropic":
+        await _validate_api_key(api_key.strip())
 
 
 def _validate_auth_config(auth: AuthConfig | None) -> None:
@@ -72,6 +83,8 @@ async def connect(req: ConnectRequest, request: Request):
         validate_external_url(req.custom_endpoint, label="LLM endpoint")
     _validate_auth_config(req.auth)
 
+    # Validate first so an invalid key is never stored.
+    await validate_primary_key(req.api_key, req.provider)
     bind_primary_credentials(
         session,
         api_key=req.api_key,
@@ -79,10 +92,6 @@ async def connect(req: ConnectRequest, request: Request):
         custom_endpoint=req.custom_endpoint,
         model=req.model,
     )
-
-    # Only validate API key for Anthropic provider
-    if req.api_key and session.provider == "anthropic":
-        await _validate_api_key(req.api_key)
     if req.custom_context_window:
         session.custom_context_window = req.custom_context_window
     try:

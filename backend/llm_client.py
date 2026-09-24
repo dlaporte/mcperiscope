@@ -264,14 +264,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 messages=messages,
             )
-            result = LLMResponse(raw=response)
-            if hasattr(response, "usage") and response.usage:
-                result.input_tokens = getattr(response.usage, "input_tokens", 0)
-                result.output_tokens = getattr(response.usage, "output_tokens", 0)
-            for block in response.content:
-                if block.type == "text":
-                    result.text += block.text
-            return result
+            return self._parse_anthropic_response(response)
 
     # --- Helpers ---
 

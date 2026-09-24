@@ -7,6 +7,8 @@ from fastapi.responses import StreamingResponse
 
 from backend.models import OAuthCallbackRequest, SignOutRequest
 from backend import mcp_manager
+from backend.credentials import bind_primary_credentials
+from backend.routes.connection import validate_primary_key
 from backend.state import session
 from backend.url_validation import validate_external_url
 
@@ -19,21 +21,23 @@ def _sse(event: str, data: dict) -> str:
 
 @router.post("/auth/callback")
 async def auth_callback(req: OAuthCallbackRequest):
-    if req.model:
-        session.model = req.model
+    if req.custom_endpoint:
+        validate_external_url(req.custom_endpoint, label="LLM endpoint")
 
     async def event_stream():
-        # Step 1: Store API key
-        if req.api_key:
-            session.api_key = req.api_key
-            # Validate only for Anthropic models (not custom endpoints)
-            if not session.custom_endpoint and session.model.startswith("claude-"):
-                from backend.routes.connection import _validate_api_key
-                try:
-                    await _validate_api_key(req.api_key)
-                except HTTPException as e:
-                    yield _sse("error", {"message": e.detail})
-                    return
+        # Step 1: Validate, then store, the API key (same rules as /connect)
+        try:
+            await validate_primary_key(req.api_key, req.provider)
+            bind_primary_credentials(
+                session,
+                api_key=req.api_key,
+                provider=req.provider,
+                custom_endpoint=req.custom_endpoint,
+                model=req.model,
+            )
+        except HTTPException as e:
+            yield _sse("error", {"message": e.detail})
+            return
 
         # Step 2: Exchange OAuth code and reconnect
         yield _sse("progress", {"message": "Exchanging authorization code..."})

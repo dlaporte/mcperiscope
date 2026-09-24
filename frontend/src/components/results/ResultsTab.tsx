@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useStore } from "../../store";
+import { useStore, includedBackendIndices } from "../../store";
 import { MODEL_CONTEXT } from "../../config/models";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
@@ -46,6 +46,7 @@ function OptimizeButton() {
   const optimizeProgress = useStore((s) => s.optimizeProgress);
   const error = useStore((s) => s.error);
   const runOptimizeWithSelection = useStore((s) => s.runOptimizeWithSelection);
+  const includedEvalCount = useStore((s) => includedBackendIndices(s).length);
 
   const hasAny = recommendations.length > 0 || quickWins.length > 0;
   const enabledCount = enabledRecIds.size;
@@ -54,7 +55,8 @@ function OptimizeButton() {
     <div className="px-3 py-3 shrink-0" style={{ borderTop: '1px solid var(--sub-rivet)' }}>
       <button
         onClick={runOptimizeWithSelection}
-        disabled={!hasAny || enabledCount === 0 || optimizeRunning}
+        disabled={!hasAny || enabledCount === 0 || includedEvalCount === 0 || optimizeRunning}
+        title={includedEvalCount === 0 ? "Include at least one evaluation to optimize" : undefined}
         className="w-full py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         style={{
           backgroundColor: optimizeRunning ? 'var(--sub-panel-light)' : 'var(--sub-brass)',
@@ -130,27 +132,6 @@ export function ResultsTab() {
     fetchRecommendations();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasEvals = evalResults.length > 0;
-
-  if (!hasEvals) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center max-w-md">
-          <div className="mb-4" style={{ color: 'var(--sub-text-dim)' }}>
-            <svg className="w-16 h-16 mx-auto opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-          </div>
-          <p className="text-lg font-medium" style={{ color: 'var(--sub-text-dim)' }}>No evaluation data yet</p>
-          <p className="text-sm mt-2" style={{ color: 'var(--sub-text-dim)' }}>
-            Run evaluation prompts on the Evaluate tab to establish baseline metrics,
-            then return here to optimize.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   // Build baseline-only comparison from eval results (always available)
   const baselineComparison = useMemo(() => {
     const toolTokens = inventory?.total_budget_tokens ?? inventory?.totalBudgetTokens ?? 0;
@@ -191,6 +172,27 @@ export function ResultsTab() {
       delta: {},
     };
   }, [evalResults, inventory, loadedResources]);
+
+  const hasEvals = evalResults.length > 0;
+
+  if (!hasEvals) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center max-w-md">
+          <div className="mb-4" style={{ color: 'var(--sub-text-dim)' }}>
+            <svg className="w-16 h-16 mx-auto opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <p className="text-lg font-medium" style={{ color: 'var(--sub-text-dim)' }}>No evaluation data yet</p>
+          <p className="text-sm mt-2" style={{ color: 'var(--sub-text-dim)' }}>
+            Run evaluation prompts on the Evaluate tab to establish baseline metrics,
+            then return here to optimize.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Derive display data from selected run or baseline-only
   const selectedRun = optimizationRuns.find((r) => r.id === selectedRunId);

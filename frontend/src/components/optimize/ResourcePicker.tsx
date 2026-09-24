@@ -19,8 +19,6 @@ export function ResourcePicker() {
   const [toggling, setToggling] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("name");
 
-  if (resources.length === 0) return null;
-
   const loadedUris = new Set(loadedResources.map((r) => r.uri));
   const loadedCount = loadedResources.length;
   const totalTokens = loadedResources.reduce((sum, r) => sum + r.tokens, 0);
@@ -35,6 +33,8 @@ export function ResourcePicker() {
     }
     return [...withTokens].sort((a, b) => (a.resource.name || "").localeCompare(b.resource.name || ""));
   }, [resources, loadedResources, sortMode]);
+
+  if (resources.length === 0) return null;
 
   const handleToggleAll = async () => {
     setToggling(true);

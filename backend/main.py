@@ -13,7 +13,7 @@ logging.basicConfig(
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth_token import init_token, require_token, token_path
-from backend.state import session
+from backend import mcp_manager
 from backend.routes import analysis, auth_routes, connection, optimize, prompts, resources, results, tools
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,8 @@ async def lifespan(app: FastAPI):
     if os.environ.get("MCPERISCOPE_PRINT_TOKEN") == "1":
         logger.info("MCPeriscope bearer token: %s", token)
     yield
-    if session.connection:
-        await session.connection.disconnect()
+    # Closes the MCP client and kills any running proxy subprocess.
+    await mcp_manager.disconnect()
 
 
 app = FastAPI(title="MCPeriscope", lifespan=lifespan)

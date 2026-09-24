@@ -848,7 +848,7 @@ function ClearCredentialsSection() {
     window.location.reload();
   };
   return (
-    <section className="mt-6 pt-6 border-t" style={{ borderColor: "var(--sub-divider)" }}>
+    <section className="mt-6 pt-6 border-t" style={{ borderColor: "var(--sub-rivet)" }}>
       <h3 className="text-sm font-semibold mb-2" style={{ color: "var(--sub-text)" }}>
         Credentials
       </h3>
@@ -869,7 +869,7 @@ function ClearCredentialsSection() {
           <button
             onClick={() => setConfirming(false)}
             className="px-3 py-1.5 text-xs rounded-lg border"
-            style={{ borderColor: "var(--sub-divider)", color: "var(--sub-text-dim)" }}
+            style={{ borderColor: "var(--sub-rivet)", color: "var(--sub-text-dim)" }}
           >
             Cancel
           </button>
@@ -878,7 +878,7 @@ function ClearCredentialsSection() {
         <button
           onClick={() => setConfirming(true)}
           className="px-3 py-1.5 text-xs rounded-lg border"
-          style={{ borderColor: "var(--sub-divider)", color: "var(--sub-text)" }}
+          style={{ borderColor: "var(--sub-rivet)", color: "var(--sub-text)" }}
         >
           Clear all stored credentials
         </button>

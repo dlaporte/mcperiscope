@@ -722,6 +722,9 @@ def analyze_correctness_correlation(
 # Recommendation generation
 # ---------------------------------------------------------------------------
 
+# Menu tokens a tool should fit in; larger tools get a trim_response rec.
+_TRIM_TARGET_TOKENS = 400
+
 
 def generate_recommendations(
     static: dict[str, Any],
@@ -849,7 +852,11 @@ def generate_recommendations(
             "source_tools": source_tools,
             "target_tool": {
                 "name": "lookup",
-                "parameters": {"table": {"type": "string", "enum": source_tools}},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"table": {"type": "string", "enum": source_tools}},
+                    "required": ["table"],
+                },
                 "description": f"Consolidated lookup for {len(source_tools)} reference/static data tools",
             },
             "estimated_token_savings": savings,
@@ -865,15 +872,19 @@ def generate_recommendations(
         })
 
     # --- From token budget: oversized tools (top 5 only) ---
-    oversized = [b for b in static.get("token_budget", []) if b["total_tokens"] > 300]
+    oversized = [
+        b for b in static.get("token_budget", [])
+        if b["total_tokens"] > _TRIM_TARGET_TOKENS
+    ]
     for budget in oversized[:5]:
+            trim_savings = max(0, budget["total_tokens"] - _TRIM_TARGET_TOKENS)
             recommendations.append({
                 "id": _next_id(),
                 "type": "trim_response",
                 "impact": "MEDIUM",
                 "source_tools": [budget["name"]],
                 "target_tool": None,
-                "estimated_token_savings": budget["total_tokens"] - 400,
+                "estimated_token_savings": trim_savings,
                 "risk": "LOW",
                 "evidence": (
                     f"Tool '{budget['name']}' consumes {budget['total_tokens']} tokens "
@@ -882,7 +893,7 @@ def generate_recommendations(
                 ),
                 "description": (
                     f"Reduce schema/description size for '{budget['name']}' "
-                    f"to save ~{budget['total_tokens'] - 400} tokens"
+                    f"to save ~{trim_savings} tokens"
                 ),
             })
 

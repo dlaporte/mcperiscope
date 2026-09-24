@@ -34,6 +34,8 @@ _auth: WebOAuth | None = None
 _url: str | None = None
 _tools: list[Tool] | None = None
 _auth_config: AuthConfig | None = None
+# Background task running _do_connect; outlives connect() when OAuth is needed.
+_connect_task: asyncio.Task | None = None
 
 
 def _make_transport(url: str, protocol: str | None):
@@ -134,7 +136,7 @@ async def connect(
     protocol: str | None = None,
 ) -> dict:
     """Connect to an MCP server."""
-    global _client, _auth, _url, _tools, _auth_config
+    global _client, _auth, _url, _tools, _auth_config, _connect_task
 
     await disconnect()
 
@@ -165,7 +167,9 @@ async def connect(
     _client = _build_client(url, _auth, auth_config, protocol)
 
     # Try connecting — if OAuth is needed, HeadlessOAuth captures the auth URL
-    connect_task = asyncio.create_task(_do_connect())
+    connect_task = asyncio.create_task(_do_connect(_client))
+    connect_task.add_done_callback(_log_connect_failure)
+    _connect_task = connect_task
 
     # Wait for either connection success or OAuth redirect
     for _ in range(50):
@@ -191,11 +195,26 @@ async def connect(
     return await _finish_connect()
 
 
-async def _do_connect():
+async def _do_connect(client: Client):
     """Internal connect that enters the client context."""
     global _tools
-    await _client.__aenter__()
-    _tools = await _client.list_tools()
+    await client.__aenter__()
+    tools = await client.list_tools()
+    if client is _client:  # ignore a stale task from a replaced connection
+        _tools = tools
+
+
+def _log_connect_failure(task: asyncio.Task) -> None:
+    """Retrieve and log a background connect failure.
+
+    Without this, a task that fails after connect() returned an OAuth
+    redirect logs "Task exception was never retrieved".
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("MCP connect failed: %s", exc, exc_info=exc)
 
 
 async def complete_oauth(callback_url_or_code: str) -> dict:
@@ -225,7 +244,11 @@ async def complete_oauth(callback_url_or_code: str) -> dict:
     _auth.supply_callback_url(callback_url_or_code)
 
     # Wait for the connection to complete
+    task = _connect_task
     for _ in range(300):
+        if task is not None and task.done():
+            await task  # Re-raise the real connect error, if any
+            return await _finish_connect()
         if _tools is not None:
             return await _finish_connect()
         await asyncio.sleep(0.1)
@@ -235,8 +258,12 @@ async def complete_oauth(callback_url_or_code: str) -> dict:
 
 async def disconnect() -> dict:
     """Disconnect from the MCP server."""
-    global _client, _auth, _url, _tools, _auth_config
+    global _client, _auth, _url, _tools, _auth_config, _connect_task
 
+    task, _connect_task = _connect_task, None
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.wait([task])
     if _client is not None:
         try:
             await _client.__aexit__(None, None, None)

@@ -130,10 +130,12 @@ def _classify_tools(
                     if name in classification:
                         classification[name] = {"status": "consolidated_prefix", "rec": rec}
 
-        # Rewrite descriptions (behavior "rewrite_description" or inventory "trim_descriptions")
+        # Rewrite descriptions (behavior "rewrite_description" or inventory "trim_descriptions").
+        # Only applies to tools still passed through: a rewrite never overrides
+        # a remove or consolidate, whichever order the recs arrive in.
         elif rec_type in ("rewrite_description", "trim_descriptions"):
             for name in source_tools:
-                if name in classification:
+                if name in classification and classification[name]["status"] == "passthrough":
                     classification[name] = {"status": "description_rewritten", "rec": rec}
 
     return classification
@@ -192,30 +194,41 @@ def _gen_lookup_consolidation(
 
     # Build the lookup map: short_name -> upstream_tool_name
     # Keys go through json.dumps at emit time; no need to sanitize them as identifiers.
-    lookup_map: dict[str, str] = {}
+    shorts: dict[str, str] = {}
     for name in source_tools:
         short = name
         for prefix in ["get_", "list_", "fetch_", "lookup_"]:
             if short.startswith(prefix):
                 short = short[len(prefix):]
                 break
-        lookup_map[short] = name
+        shorts[name] = short
+    # A short name shared by two tools (get_foo / list_foo) or equal to another
+    # tool's full name is ambiguous; those tools keep their full name as key.
+    short_counts: dict[str, int] = {}
+    for short in shorts.values():
+        short_counts[short] = short_counts.get(short, 0) + 1
+    lookup_map: dict[str, str] = {}
+    for name, short in shorts.items():
+        ambiguous = short_counts[short] > 1 or (short != name and short in shorts)
+        lookup_map[name if ambiguous else short] = name
 
     desc = target.get("description", f"Consolidated lookup for {len(source_tools)} reference data tools")
     table_list = ", ".join(sorted(lookup_map.keys()))
 
     # The function name is fixed (`lookup`), but disambiguate if reserved.
     fn_name = safe_ident("lookup", used_idents, fallback="lookup")
+    # Each lookup tool gets its own module-level map so two lookup recs can't clobber each other.
+    map_name = safe_ident(f"{fn_name.upper()}_TABLES", used_idents, fallback="LOOKUP_TABLES")
 
     lines = [
-        f"LOOKUP_TOOLS = {json.dumps(lookup_map, indent=2)}",
+        f"{map_name} = {json.dumps(lookup_map, indent=2)}",
         "",
         f'@mcp.tool(description={_quote(desc)})',
         f"async def {fn_name}(table: str) -> str:",
         f"    {_quote(f'Look up reference data by table name. Available tables: {table_list}')}",
-        "    if table not in LOOKUP_TOOLS:",
-        '        return json.dumps({"error": f"Unknown table: {table}. Available: {sorted(LOOKUP_TOOLS.keys())}"})',
-        "    result = await upstream.call(LOOKUP_TOOLS[table], {})",
+        f"    if table not in {map_name}:",
+        f'        return json.dumps({{"error": f"Unknown table: {{table}}. Available: {{sorted({map_name}.keys())}}"}})',
+        f"    result = await upstream.call({map_name}[table], {{}})",
         "    return json.dumps(result) if not isinstance(result, str) else result",
         "",
     ]
@@ -249,7 +262,11 @@ def _gen_prefix_consolidation(
     # Keep original JSON-schema property names (for upstream dispatch) alongside a
     # sanitized Python identifier (for the function signature and local var).
     # all_properties: pname (original) -> {"schema": schema, "ident": safe_pname}
-    fn_local_idents: set[str] = {"action", "args", "result", "dispatch_map", "upstream_tool"}
+    # Seed with the body's locals and the module globals it reads, so no
+    # parameter can shadow them.
+    fn_local_idents: set[str] = {
+        "action", "args", "result", "dispatch_map", "upstream_tool", "json", "upstream",
+    }
     all_properties: dict[str, dict[str, Any]] = {}
     all_required: set[str] = set()
     first = True
@@ -273,7 +290,10 @@ def _gen_prefix_consolidation(
             all_required &= req
 
     # Build function signature: action first, then union of other params (sanitized).
+    # The union params are keyword-only so a required one may follow an optional one.
     param_parts = ["action: str"]
+    if all_properties:
+        param_parts.append("*")
     for pname, info in all_properties.items():
         ptype = _py_type(info["schema"])
         ident = info["ident"]
@@ -337,7 +357,9 @@ def _gen_passthrough(
 
     safe_name = safe_ident(tool.name, used_idents, fallback="tool")
 
-    fn_local_idents: set[str] = {"args", "result"}
+    # Seed with the body's locals and the module globals it reads, so no
+    # parameter can shadow them.
+    fn_local_idents: set[str] = {"args", "result", "json", "upstream"}
     params = []
     args_entries = []
     for pname, pschema in props.items():
@@ -349,7 +371,9 @@ def _gen_passthrough(
             params.append(f"{safe_pname}: {ptype} | None = None")
         args_entries.append(f"{json.dumps(pname)}: {safe_pname}")
 
-    param_str = ", ".join(params)
+    # Keyword-only (FastMCP passes arguments by name), so a required param may
+    # follow an optional one in schema property order.
+    param_str = ", ".join(["*", *params]) if params else ""
     args_str = "{" + ", ".join(args_entries) + "}" if args_entries else "{}"
 
     lines = [

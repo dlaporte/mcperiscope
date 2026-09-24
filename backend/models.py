@@ -73,6 +73,8 @@ class OAuthCallbackRequest(BaseModel):
     callback_url: str
     model: str | None = None
     api_key: str | None = None
+    provider: str | None = None
+    custom_endpoint: str | None = None
 
 
 class SignOutRequest(BaseModel):

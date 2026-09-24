@@ -165,6 +165,9 @@ export function Sidebar() {
 
   const isSelected = (type: string, name: string) =>
     selection?.type === type && selection.item.name === name;
+  // Resources are keyed by uri: name is optional and need not be unique
+  const isResourceSelected = (uri: string) =>
+    selection?.type === "resource" && selection.item.uri === uri;
 
   // Use backend-reported totals when available (matches the inventory bar); fall back to client estimates when filtering
   const toolTokens = !query && inventory?.toolTokens != null
@@ -278,16 +281,16 @@ export function Sidebar() {
               onClick={() => select("resource", resource)}
               className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
               style={
-                isSelected("resource", resource.name)
+                isResourceSelected(resource.uri)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
                   : { color: 'var(--sub-text)' }
               }
               onMouseEnter={(e) => {
-                if (!isSelected("resource", resource.name))
+                if (!isResourceSelected(resource.uri))
                   e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
               }}
               onMouseLeave={(e) => {
-                if (!isSelected("resource", resource.name))
+                if (!isResourceSelected(resource.uri))
                   e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
@@ -295,7 +298,7 @@ export function Sidebar() {
               <span
                 className="text-[10px] font-mono shrink-0"
                 style={
-                  isSelected("resource", resource.name)
+                  isResourceSelected(resource.uri)
                     ? { color: 'rgba(255,255,255,0.7)' }
                     : { color: 'var(--sub-text-dim)' }
                 }

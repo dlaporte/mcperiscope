@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -84,34 +84,41 @@ function deepParseJsonStrings(value: unknown): unknown {
 
 /**
  * Pretty-print JSON with multiline strings rendered as actual newlines
- * instead of \n escapes. Long strings are indented to their context level.
+ * instead of \n escapes. Continuation lines are indented to their context level.
+ * Everything else matches JSON.stringify(data, null, 2).
  */
 function prettyPrintJson(data: unknown): string {
-  const raw = JSON.stringify(data, null, 2);
-  // Replace JSON-escaped strings that contain \n with block-indented text.
-  // Match: "<content with \n>" sitting at some indentation level.
-  return raw.replace(/^( *)"((?:[^"\\]|\\.)*)"/gm, (_match, indent: string, content: string) => {
-    // Only process strings that actually contain escaped newlines
-    if (!content.includes("\\n")) return _match;
-    // Unescape the JSON string content
-    const unescaped = content
-      .replace(/\\n/g, "\n")
-      .replace(/\\t/g, "\t")
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, "\\");
-    // If it's a single line after unescape, keep it inline
-    if (!unescaped.includes("\n")) return `${indent}"${unescaped}"`;
-    // Indent each continuation line to align with the opening quote
-    const pad = indent + "  ";
-    const lines = unescaped.split("\n");
-    return `${indent}"${lines.join("\n" + pad)}"`;
-  });
+  const json = JSON.stringify(data);
+  if (json === undefined) return String(data);
+  // Round-trip so the walk sees exactly what JSON.stringify would emit
+  // (drops undefined/functions, applies toJSON).
+  return formatJsonValue(JSON.parse(json), "");
+}
+
+function formatJsonValue(value: unknown, indent: string): string {
+  const inner = indent + "  ";
+  if (typeof value === "string") {
+    if (!value.includes("\n")) return JSON.stringify(value);
+    return `"${value.split("\n").join("\n" + inner)}"`;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    const items = value.map((v) => inner + formatJsonValue(v, inner));
+    return `[\n${items.join(",\n")}\n${indent}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return "{}";
+    const items = entries.map(([k, v]) => `${inner}${JSON.stringify(k)}: ${formatJsonValue(v, inner)}`);
+    return `{\n${items.join(",\n")}\n${indent}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export function JsonViewer({ data }: Props) {
   const [formatted, setFormatted] = useState(false);
-  const extracted = extractTextContent(data);
-  const prettyData = deepParseJsonStrings(data);
+  const extracted = useMemo(() => extractTextContent(data), [data]);
+  const pretty = useMemo(() => prettyPrintJson(deepParseJsonStrings(data)), [data]);
   const showToggle = extracted?.isMarkdown ?? false;
 
   return (
@@ -148,7 +155,7 @@ export function JsonViewer({ data }: Props) {
         <pre
           className="sonar-screen phosphor-text p-4 rounded-lg overflow-auto text-sm max-h-[600px]"
         >
-          {prettyPrintJson(prettyData)}
+          {pretty}
         </pre>
       )}
     </div>

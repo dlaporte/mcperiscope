@@ -51,7 +51,7 @@ export function ConnectTab() {
   const {
     connected, connecting, error, connect, disconnect, serverInfo, oauthPending,
     connectProgress,
-    mcpConfigs, selectMCPConfig, setActiveTab,
+    mcpConfigs, setActiveTab,
     checkStatus,
   } = useStore();
 
@@ -62,7 +62,8 @@ export function ConnectTab() {
     return mcpConfigs.length > 0 ? mcpConfigs[0].id : "";
   });
 
-  const selectedConfig = mcpConfigs.find((c) => c.id === selectedConfigId);
+  // Fall back to the first config so the shown option and the connected config never diverge
+  const selectedConfig = mcpConfigs.find((c) => c.id === selectedConfigId) ?? mcpConfigs[0];
 
   // Check backend status on mount, and resume pending OAuth if needed
   useEffect(() => {
@@ -74,15 +75,10 @@ export function ConnectTab() {
     }
   }, [checkStatus, completeOAuth]);
 
-  const handleConfigSelect = (configId: string) => {
-    setSelectedConfigId(configId);
-    selectMCPConfig(configId);
-  };
-
   const handleConnect = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedConfig) {
-      connect(selectedConfig.url);
+      connect(selectedConfig);
     }
   };
 
@@ -126,8 +122,8 @@ export function ConnectTab() {
               </div>
               {mcpConfigs.length > 0 ? (
                 <select
-                  value={selectedConfigId}
-                  onChange={(e) => handleConfigSelect(e.target.value)}
+                  value={selectedConfig?.id ?? ""}
+                  onChange={(e) => setSelectedConfigId(e.target.value)}
                   disabled={connected || connecting}
                   className="w-full input-sub border rounded-lg px-2 py-2 text-sm disabled:opacity-50"
                 >

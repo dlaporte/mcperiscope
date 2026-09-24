@@ -89,7 +89,7 @@ export function ResourcesModal({ resources, onClose }: Props) {
                       <div className="text-[10px]" style={{ color: 'var(--sub-text-dim)' }}>
                         {data.condensedTokens.toLocaleString()} tokens
                         {savings > 0 && (
-                          <span style={{ color: 'var(--sub-green, #4ade80)' }}> ({savings}% saved)</span>
+                          <span style={{ color: 'var(--sub-phosphor)' }}> ({savings}% saved)</span>
                         )}
                       </div>
                     </div>

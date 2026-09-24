@@ -19,7 +19,14 @@ export function OptimizeTab() {
 
   const [showContext, setShowContext] = useState(false);
 
-  const latestEvalIndex = evalResults.length > 0 ? evalResults.length - 1 : null;
+  // Backend index of the most recent completed eval (context is fetched from the backend session)
+  const latestBackendIndex = useMemo(() => {
+    for (let i = evalResults.length - 1; i >= 0; i--) {
+      const idx = evalResults[i].backendIndex;
+      if (idx !== undefined) return idx;
+    }
+    return null;
+  }, [evalResults]);
 
   // Token cost of loaded resources
   const loadedResourceTokens = useMemo(
@@ -64,7 +71,7 @@ export function OptimizeTab() {
         <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
           Session usage
         </span>
-        <ContextGauge tokens={tokenUsage.total} max={contextWindow} onClick={latestEvalIndex !== null ? () => setShowContext(true) : undefined} />
+        <ContextGauge tokens={tokenUsage.total} max={contextWindow} onClick={latestBackendIndex !== null ? () => setShowContext(true) : undefined} />
       </div>
 
       <div className="flex-1 flex min-h-0">
@@ -90,8 +97,8 @@ export function OptimizeTab() {
         </div>
       </div>
 
-      {showContext && latestEvalIndex !== null && (
-        <ContextModal evalIndex={latestEvalIndex} totalTokens={tokenUsage.total} onClose={() => setShowContext(false)} />
+      {showContext && latestBackendIndex !== null && (
+        <ContextModal evalIndex={latestBackendIndex} totalTokens={tokenUsage.total} onClose={() => setShowContext(false)} />
       )}
     </div>
   );

@@ -41,7 +41,7 @@ def compute_comparison(
         )
         total_calls = len(traces)
         error_calls = sum(1 for t in traces if t.get("error_category") is not None)
-        rated = [r for r in ratings if r.get("correctness") is not None]
+        rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
         correct = sum(1 for r in rated if r.get("correctness") == "correct")
 
         return {
@@ -183,7 +183,7 @@ def generate_plan_md(
         lines.append(f"- **Error rate:** {error_calls / total_calls * 100:.1f}%" if total_calls else "")
 
     if ratings:
-        rated = [r for r in ratings if r.get("correctness") is not None]
+        rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
         correct = sum(1 for r in rated if r.get("correctness") == "correct")
         lines.append(f"- **Accuracy:** {correct}/{len(rated)} ({correct / len(rated) * 100:.0f}%)" if rated else "")
     lines.append("")
@@ -295,7 +295,7 @@ def generate_report_md(data: dict) -> str:
     lines.append(f"- **{total_savings:,}** estimated token savings")
 
     if ratings:
-        rated = [r for r in ratings if r.get("correctness") is not None]
+        rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
         correct = sum(1 for r in rated if r.get("correctness") == "correct")
         if rated:
             lines.append(f"- **Accuracy:** {correct}/{len(rated)} "
@@ -365,10 +365,14 @@ def generate_report_md(data: dict) -> str:
     lines.append("## 4. Evaluation Results")
     lines.append("")
 
-    if not ratings:
+    # session.ratings is positional (index = eval index) and padded with None
+    # for unrated evals.
+    if not any(ratings):
         lines.append("_No evaluation results available._")
     else:
         for i, rating in enumerate(ratings):
+            if rating is None:
+                continue
             prompt_text = prompts[i] if i < len(prompts) else "Unknown prompt"
             correctness = rating.get("correctness", "unrated")
             badge = {"correct": "PASS", "partial": "PARTIAL", "wrong": "FAIL"}.get(
@@ -445,7 +449,7 @@ def generate_report_html(data: dict) -> str:
     budget = inventory.get("total_budget_tokens", 0)
     total_savings = sum(r.get("estimated_token_savings", 0) for r in recommendations)
 
-    rated = [r for r in ratings if r.get("correctness") is not None]
+    rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
     correct = sum(1 for r in rated if r.get("correctness") == "correct")
     accuracy_pct = f"{correct / len(rated) * 100:.0f}%" if rated else "N/A"
 
@@ -454,19 +458,6 @@ def generate_report_html(data: dict) -> str:
     desc_scores: dict[str, Any] = {}
     for d in static.get("descriptions", []):
         desc_scores[d["name"]] = d.get("overall_score", "?")
-
-    # Prepare data for embedding
-    data_json = json.dumps({
-        "url": url,
-        "date": now,
-        "inventory": inventory,
-        "analysis": analysis,
-        "recommendations": recommendations,
-        "ratings": ratings,
-        "traces": traces,
-        "prompts": prompts,
-        "baseline_results": baseline_results,
-    }, default=str)
 
     # Generate the plan markdown for the copy-to-clipboard section
     plan_md = generate_plan_md(
@@ -550,9 +541,6 @@ def generate_report_html(data: dict) -> str:
         {plan_html}
     </section>
 
-    <script>
-        var REPORT_DATA = {data_json};
-    </script>
     <script>{_JS}</script>
 </body>
 </html>"""
@@ -692,7 +680,7 @@ def _html_recommendations(recommendations: list[dict]) -> str:
 def _html_evaluation_results(
     ratings: list[dict], prompts: list[str], traces: list[dict]
 ) -> str:
-    if not ratings:
+    if not any(ratings):
         return "<p>No evaluation results available.</p>"
 
     # Group traces by prompt
@@ -700,6 +688,8 @@ def _html_evaluation_results(
 
     parts = []
     for i, rating in enumerate(ratings):
+        if rating is None:
+            continue
         prompt_text = prompts[i] if i < len(prompts) else "Unknown prompt"
         correctness = rating.get("correctness", "unrated")
         badge_cls = {

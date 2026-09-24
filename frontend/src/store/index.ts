@@ -100,6 +100,30 @@ interface OptimizationRun {
   condensedResources?: Record<string, {name: string; original: string; condensed: string; originalTokens: number; condensedTokens: number}>;
 }
 
+export interface EvalResult {
+  prompt: string;
+  answer: string;
+  toolChain: Array<{
+    step: number;
+    tool: string;
+    input: Record<string, unknown>;
+    output: string;
+    duration: number;
+    error: string | null;
+  }>;
+  traceEvents: unknown[];
+  rating?: { correctness: string; notes: string };
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    peak_context_tokens: number;
+    api_rounds: number;
+  };
+  // Index of this eval in the backend session; stable across client-side deletes
+  backendIndex?: number;
+}
+
 interface AppState {
   // Navigation
   activeTab: Tab;
@@ -113,17 +137,6 @@ interface AppState {
   error: string | null;
 
   // Auth
-  authMethod: AuthMethod;
-  authToken: string;
-  headerName: string;
-  headerValue: string;
-  authScope: string;
-  authClientId: string;
-  authClientSecret: string;
-  authClientAuth: "post" | "basic";
-  authClientMetadataUrl: string;
-  authTokenEndpoint: string;
-  protocol: MCPProtocol;
   oauthPending: boolean;
   connectProgress: string | null;
 
@@ -151,7 +164,6 @@ interface AppState {
   addMCPConfig: (config: MCPServerConfig) => void;
   updateMCPConfig: (id: string, updates: Partial<MCPServerConfig>) => void;
   removeMCPConfig: (id: string) => void;
-  selectMCPConfig: (id: string) => void;
 
   // Evaluation settings
   maxToolRounds: number;
@@ -181,20 +193,7 @@ interface AppState {
   loadedResources: Array<{ uri: string; name: string; tokens: number }>;
 
   // Optimize
-  evalResults: Array<{
-    prompt: string;
-    answer: string;
-    toolChain: Array<{
-      step: number;
-      tool: string;
-      input: Record<string, unknown>;
-      output: string;
-      duration: number;
-      error: string | null;
-    }>;
-    traceEvents: unknown[];
-    rating?: { correctness: string; notes: string };
-  }>;
+  evalResults: EvalResult[];
   selectedEvalIndex: number | null;
   evalIncluded: Set<number>;
   toggleEvalIncluded: (index: number) => void;
@@ -238,15 +237,11 @@ interface AppState {
   fetchRecommendations: () => Promise<void>;
   fetchPlan: () => Promise<void>;
   checkStatus: () => Promise<void>;
-  setAuthMethod: (method: AuthMethod) => void;
-  setAuthToken: (token: string) => void;
-  setHeaderName: (name: string) => void;
-  setHeaderValue: (value: string) => void;
   setModel: (model: string) => void;
   setApiKey: (apiKey: string) => void;
   setCustomEndpoint: (endpoint: string) => void;
   setCustomContextWindow: (ctx: number) => void;
-  connect: (url: string) => Promise<void>;
+  connect: (config: MCPServerConfig) => Promise<void>;
   disconnect: () => Promise<void>;
   signOutMCP: (url: string) => Promise<void>;
   completeOAuth: (code: string) => Promise<void>;
@@ -362,33 +357,48 @@ function addParamEntry(
   }
 }
 
-function buildAuthConfig(state: AppState): AuthConfig | undefined {
-  switch (state.authMethod) {
+function buildAuthConfig(config: MCPServerConfig): AuthConfig | undefined {
+  switch (config.authMethod) {
     case "none":
       return undefined;
     case "bearer":
-      return { type: "bearer", token: state.authToken };
+      return { type: "bearer", token: config.authToken };
     case "header":
-      return { type: "header", name: state.headerName, value: state.headerValue };
+      return { type: "header", name: config.headerName, value: config.headerValue };
     case "oauth":
       return {
         type: "oauth",
-        scope: state.authScope || undefined,
-        client_id: state.authClientId || undefined,
-        client_secret: state.authClientSecret || undefined,
-        client_auth: state.authClientSecret ? state.authClientAuth : undefined,
-        client_metadata_url: state.authClientMetadataUrl || undefined,
+        scope: config.scope || undefined,
+        client_id: config.clientId || undefined,
+        client_secret: config.clientSecret || undefined,
+        client_auth: config.clientSecret ? config.clientAuth : undefined,
+        client_metadata_url: config.clientMetadataUrl || undefined,
       };
     case "oauth_client_creds":
       return {
         type: "oauth_client_creds",
-        token_endpoint: state.authTokenEndpoint,
-        client_id: state.authClientId,
-        client_secret: state.authClientSecret,
-        scope: state.authScope || undefined,
-        client_auth: state.authClientAuth || "post",
+        token_endpoint: config.tokenEndpoint,
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        scope: config.scope || undefined,
+        client_auth: config.clientAuth || "post",
       };
   }
+}
+
+function getPrimaryConfig(state: AppState): LLMConfig | undefined {
+  return state.llmConfigs.find((c) => c.id === state.primaryLLM);
+}
+
+// Backend session indices of the evals checked for optimization. Evals that never
+// completed (no backend index) are skipped.
+export function includedBackendIndices(state: Pick<AppState, "evalIncluded" | "evalResults">): number[] {
+  const indices: number[] = [];
+  for (const i of state.evalIncluded) {
+    const backendIndex = state.evalResults[i]?.backendIndex;
+    if (backendIndex !== undefined) indices.push(backendIndex);
+  }
+  return indices.sort((a, b) => a - b);
 }
 
 async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
@@ -418,21 +428,21 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
       loaded.push({ uri: result.uri, name: result.name, tokens: result.tokens });
     } catch { /* skip failed loads */ }
   }
-  if (loaded.length > 0) {
-    set({ loadedResources: loaded });
-  }
+  set({ loadedResources: loaded });
 }
 
-async function consumeConnectSSE(
+// Parse a `text/event-stream` response. Event and data lines may arrive in
+// different network chunks, so the pending event name lives outside the read loop.
+async function readSSE(
   response: Response,
-  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void,
-  get: () => AppState,
+  onEvent: (event: string, data: any) => void | Promise<void>,
 ) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("No response body");
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let currentEvent = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -442,41 +452,51 @@ async function consumeConnectSSE(
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
 
-    let currentEvent = "";
-    for (const line of lines) {
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, "");
       if (line.startsWith("event: ")) {
         currentEvent = line.slice(7).trim();
       } else if (line.startsWith("data: ") && currentEvent) {
         try {
-          const data = JSON.parse(line.slice(6));
-          if (currentEvent === "progress") {
-            set({ connectProgress: data.message });
-          } else if (currentEvent === "oauth_redirect") {
-            set({ connecting: false, oauthPending: true, connectProgress: null });
-            window.location.href = data.authorizationUrl;
-            return;
-          } else if (currentEvent === "done") {
-            set({
-              connected: true,
-              connecting: false,
-              oauthPending: false,
-              serverInfo: data.serverInfo,
-              connectProgress: null,
-            });
-            await fetchCapabilities(set);
-          } else if (currentEvent === "error") {
-            set({
-              connecting: false,
-              oauthPending: false,
-              error: data.message,
-              connectProgress: null,
-            });
-          }
-        } catch { /* skip unparseable */ }
+          await onEvent(currentEvent, JSON.parse(line.slice(6)));
+        } catch { /* skip unparseable data or handler errors */ }
+        currentEvent = "";
+      } else if (line === "") {
         currentEvent = "";
       }
     }
   }
+}
+
+async function consumeConnectSSE(
+  response: Response,
+  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void,
+  get: () => AppState,
+) {
+  await readSSE(response, async (event, data) => {
+    if (event === "progress") {
+      set({ connectProgress: data.message });
+    } else if (event === "oauth_redirect") {
+      set({ connecting: false, oauthPending: true, connectProgress: null });
+      window.location.href = data.authorizationUrl;
+    } else if (event === "done") {
+      set({
+        connected: true,
+        connecting: false,
+        oauthPending: false,
+        serverInfo: data.serverInfo,
+        connectProgress: null,
+      });
+      await fetchCapabilities(set);
+    } else if (event === "error") {
+      set({
+        connecting: false,
+        oauthPending: false,
+        error: data.message,
+        connectProgress: null,
+      });
+    }
+  });
 
   if (get().connecting) {
     set({ connecting: false, connectProgress: null });
@@ -580,17 +600,6 @@ export const useStore = create<AppState>((set, get) => ({
   connecting: false,
   serverInfo: null,
   error: null,
-  authMethod: (lsGet("authMethod") || "none") as AuthMethod,
-  authToken: lsGet("authToken"),
-  headerName: lsGet("headerName"),
-  headerValue: lsGet("headerValue"),
-  authScope: lsGet("authScope"),
-  authClientId: lsGet("authClientId"),
-  authClientSecret: lsGet("authClientSecret"),
-  authClientAuth: (lsGet("authClientAuth") || "post") as "post" | "basic",
-  authClientMetadataUrl: lsGet("authClientMetadataUrl"),
-  authTokenEndpoint: lsGet("authTokenEndpoint"),
-  protocol: (lsGet("protocol") || "auto") as MCPProtocol,
   oauthPending: false,
   connectProgress: null,
   model: lsGet("model") || "claude-sonnet-4-6",
@@ -734,7 +743,15 @@ export const useStore = create<AppState>((set, get) => ({
       set({
         selectedRunId: runId,
         enabledRecIds: new Set(run.enabledRecIds),
+        planMarkdown: "",
       });
+      // Each run has its own plan; the global plan is only the latest run's
+      fetch(`/api/results/runs/${encodeURIComponent(runId)}/plan`)
+        .then((r) => (r.ok ? r.text() : ""))
+        .then((text) => {
+          if (get().selectedRunId === runId) set({ planMarkdown: text });
+        })
+        .catch(() => { /* no plan for this run */ });
     }
   },
 
@@ -757,12 +774,12 @@ export const useStore = create<AppState>((set, get) => ({
       const state = get();
       const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
       const analystConfig = state.getAnalystConfig();
-      const included = [...state.evalIncluded];
+      const included = includedBackendIndices(state);
       const response = await fetch("/api/optimize/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          included_indices: included.length > 0 ? included : undefined,
+          included_indices: included,
           enabled_rec_ids: [...state.enabledRecIds],
           api_key: primaryConfig?.apiKey || state.apiKey || undefined,
           model: primaryConfig?.model || state.model || undefined,
@@ -788,81 +805,57 @@ export const useStore = create<AppState>((set, get) => ({
         throw new Error(detail);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      await readSSE(response, async (event, data) => {
+        if (event === "progress") {
+          set({ optimizeProgress: data.message });
+        } else if (event === "done") {
+          // Fetch final results from backend
+          const [comparison, recs, planRes, runsRes] = await Promise.allSettled([
+            api.getComparison(),
+            api.getRecommendations(),
+            fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
+            api.getRuns(),
+          ]);
+          const recsData = recs.status === "fulfilled" ? recs.value as any : {};
+          const runsData = runsRes.status === "fulfilled" ? (runsRes.value as any).runs : [];
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
+          // Also fetch the full run data for the new run
+          const runId = data.runId;
+          let newRun: OptimizationRun | null = null;
+          if (runId) {
             try {
-              const data = JSON.parse(line.slice(6));
-              if (currentEvent === "progress") {
-                set({ optimizeProgress: data.message });
-              } else if (currentEvent === "done") {
-                // Fetch final results from backend
-                const [comparison, recs, planRes, runsRes] = await Promise.allSettled([
-                  api.getComparison(),
-                  api.getRecommendations(),
-                  fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
-                  api.getRuns(),
-                ]);
-                const recsData = recs.status === "fulfilled" ? recs.value as any : {};
-                const runsData = runsRes.status === "fulfilled" ? (runsRes.value as any).runs : [];
-
-                // Also fetch the full run data for the new run
-                const runId = data.runId;
-                let newRun: OptimizationRun | null = null;
-                if (runId) {
-                  try {
-                    const runData = await api.getRun(runId);
-                    newRun = {
-                      id: runData.id,
-                      timestamp: runData.timestamp,
-                      name: runData.name,
-                      enabledRecIds: runData.enabledRecIds,
-                      comparison: runData.comparison,
-                      analystResults: runData.analystResults,
-                      proxyAnswers: runData.proxyAnswers,
-                      condensedResources: runData.condensedResources,
-                    };
-                  } catch { /* ignore */ }
-                }
-
-                const updatedRuns = newRun
-                  ? [...get().optimizationRuns.filter((r) => r.id !== newRun!.id), newRun]
-                  : get().optimizationRuns;
-
-                set({
-                  optimizeRunning: false,
-                  optimizeProgress: null,
-                  comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
-                  recommendations: recsData?.recommendations ?? [],
-                  quickWins: recsData?.quickWins ?? [],
-                  planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
-                  optimizationRuns: updatedRuns,
-                  selectedRunId: runId || null,
-                });
-              } else if (currentEvent === "error") {
-                set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
-              }
-            } catch { /* skip */ }
-            currentEvent = "";
+              const runData = await api.getRun(runId);
+              newRun = {
+                id: runData.id,
+                timestamp: runData.timestamp,
+                name: runData.name,
+                enabledRecIds: runData.enabledRecIds,
+                comparison: runData.comparison,
+                analystResults: runData.analystResults,
+                proxyAnswers: runData.proxyAnswers,
+                condensedResources: runData.condensedResources,
+              };
+            } catch { /* ignore */ }
           }
+
+          const updatedRuns = newRun
+            ? [...get().optimizationRuns.filter((r) => r.id !== newRun!.id), newRun]
+            : get().optimizationRuns;
+
+          set({
+            optimizeRunning: false,
+            optimizeProgress: null,
+            comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
+            recommendations: recsData?.recommendations ?? [],
+            quickWins: recsData?.quickWins ?? [],
+            planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
+            optimizationRuns: updatedRuns,
+            selectedRunId: runId || null,
+          });
+        } else if (event === "error") {
+          set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
         }
-      }
+      });
 
       if (get().optimizeRunning) {
         set({ optimizeRunning: false, optimizeProgress: null });
@@ -905,6 +898,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   checkStatus: async () => {
+    // Already connected: refetching would reload every resource and undo user unloads
+    if (get().connected) return;
     try {
       const res = await api.status();
       if (res.connected) {
@@ -915,11 +910,6 @@ export const useStore = create<AppState>((set, get) => ({
       // Backend not reachable, stay disconnected
     }
   },
-
-  setAuthMethod: (method) => { lsSet("authMethod", method); set({ authMethod: method }); },
-  setAuthToken: (token) => { lsSet("authToken", token); set({ authToken: token }); },
-  setHeaderName: (name) => { lsSet("headerName", name); set({ headerName: name }); },
-  setHeaderValue: (value) => { lsSet("headerValue", value); set({ headerValue: value }); },
 
   setModel: (model) => {
     lsSet("model", model);
@@ -1027,36 +1017,6 @@ export const useStore = create<AppState>((set, get) => ({
     set({ mcpConfigs: configs });
   },
 
-  selectMCPConfig: (id) => {
-    const config = get().mcpConfigs.find((c) => c.id === id);
-    if (config) {
-      set({
-        authMethod: config.authMethod,
-        authToken: config.authToken,
-        headerName: config.headerName,
-        headerValue: config.headerValue,
-        authScope: config.scope,
-        authClientId: config.clientId,
-        authClientSecret: config.clientSecret,
-        authClientAuth: config.clientAuth,
-        authClientMetadataUrl: config.clientMetadataUrl,
-        authTokenEndpoint: config.tokenEndpoint,
-        protocol: config.protocol,
-      });
-      lsSet("authMethod", config.authMethod);
-      lsSet("authToken", config.authToken);
-      lsSet("headerName", config.headerName);
-      lsSet("headerValue", config.headerValue);
-      lsSet("authScope", config.scope);
-      lsSet("authClientId", config.clientId);
-      lsSet("authClientSecret", config.clientSecret);
-      lsSet("authClientAuth", config.clientAuth);
-      lsSet("authClientMetadataUrl", config.clientMetadataUrl);
-      lsSet("authTokenEndpoint", config.tokenEndpoint);
-      lsSet("protocol", config.protocol);
-    }
-  },
-
   getAnalystConfig: () => {
     const { analystLLM, llmConfigs } = get();
     return llmConfigs.find((c) => c.id === analystLLM) || null;
@@ -1072,21 +1032,20 @@ export const useStore = create<AppState>((set, get) => ({
     set({ maxTokensPerResponse: n });
   },
 
-  connect: async (url: string) => {
+  connect: async (config: MCPServerConfig) => {
     set({ connecting: true, error: null, oauthPending: false, connectProgress: null });
     try {
       const state = get();
-      const authConfig = buildAuthConfig(state);
+      const authConfig = buildAuthConfig(config);
       const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
-      const provider = primaryConfig?.provider;
       const res = await api.connect(
-        url, authConfig,
+        config.url, authConfig,
         primaryConfig?.model || state.model,
         primaryConfig?.provider,
         primaryConfig?.apiKey || state.apiKey,
         primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
         primaryConfig?.contextWindow || state.customContextWindow,
-        state.protocol,
+        config.protocol,
       );
 
       if (res.status === "oauth_redirect" && res.authorizationUrl) {
@@ -1106,14 +1065,16 @@ export const useStore = create<AppState>((set, get) => ({
   completeOAuth: async (callbackUrl: string) => {
     set({ connecting: true, error: null, connectProgress: "Starting authentication..." });
     try {
-      const state = get();
+      const primaryConfig = getPrimaryConfig(get());
       const response = await fetch("/api/auth/callback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           callback_url: callbackUrl,
-          model: state.model || undefined,
-          api_key: state.apiKey || undefined,
+          model: primaryConfig?.model || undefined,
+          api_key: primaryConfig?.apiKey || undefined,
+          provider: primaryConfig?.provider || undefined,
+          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig.endpoint : undefined,
         }),
       });
 
@@ -1178,6 +1139,9 @@ export const useStore = create<AppState>((set, get) => ({
       selection: null,
       result: null,
       parameterStore: {},
+      resultMeta: null,
+      loadedResources: [],
+      liveContextTokens: 0,
       evalResults: [],
       selectedEvalIndex: null,
       evalIncluded: new Set<number>(),
@@ -1187,6 +1151,7 @@ export const useStore = create<AppState>((set, get) => ({
       comparison: null,
       recommendations: [],
       quickWins: [],
+      planMarkdown: "",
       optimizationRuns: [],
       selectedRunId: null,
       enabledRecIds: new Set<string>(),
@@ -1392,6 +1357,7 @@ export const useStore = create<AppState>((set, get) => ({
     const placeholderIndex = get().evalResults.length;
     set((state) => ({
       evalLoading: true,
+      liveContextTokens: 0,
       evalResults: [
         ...state.evalResults,
         { prompt, answer: "", toolChain: [], traceEvents: [] },
@@ -1421,107 +1387,81 @@ export const useStore = create<AppState>((set, get) => ({
         throw new Error(err.detail || response.statusText);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              // Update live context tokens
-              if (currentEvent === "context_update" && data.context_tokens != null) {
-                // API-reported value is authoritative — allow corrections downward
-                set({ liveContextTokens: data.context_tokens });
-              } else if (data.context_tokens != null && data.context_tokens > get().liveContextTokens) {
-                // Estimates only go up (monotonic) to avoid visual jitter
-                set({ liveContextTokens: data.context_tokens });
-              }
-
-              if (currentEvent === "text_delta") {
-                // Streaming text from LLM — append to current answer
-                set((state) => {
-                  const evalResults = [...state.evalResults];
-                  const entry = { ...evalResults[placeholderIndex] };
-                  entry.answer = (entry.answer || "") + (data.text || "");
-                  evalResults[placeholderIndex] = entry;
-                  return { evalResults };
-                });
-              } else if (currentEvent === "tool_calling") {
-                // Add an in-progress step to the tool chain
-                set((state) => {
-                  const evalResults = [...state.evalResults];
-                  const entry = { ...evalResults[placeholderIndex] };
-                  entry.toolChain = [
-                    ...entry.toolChain,
-                    { step: data.step, tool: data.tool, input: data.input, output: "Calling...", duration: 0, error: null },
-                  ];
-                  evalResults[placeholderIndex] = entry;
-                  return { evalResults };
-                });
-              } else if (currentEvent === "tool_result") {
-                // Update the last step with the result
-                set((state) => {
-                  const evalResults = [...state.evalResults];
-                  const entry = { ...evalResults[placeholderIndex] };
-                  const chain = [...entry.toolChain];
-                  const lastIdx = chain.findIndex((s) => s.step === data.step);
-                  if (lastIdx >= 0) {
-                    chain[lastIdx] = data;
-                  } else {
-                    chain.push(data);
-                  }
-                  entry.toolChain = chain;
-                  evalResults[placeholderIndex] = entry;
-                  return { evalResults };
-                });
-              } else if (currentEvent === "done") {
-                // Final result
-                set((state) => {
-                  const evalResults = [...state.evalResults];
-                  evalResults[placeholderIndex] = {
-                    prompt: data.prompt,
-                    answer: data.answer,
-                    toolChain: data.toolChain,
-                    traceEvents: data.traceEvents,
-                    usage: data.usage,
-                    contextWindow: data.contextWindow,
-                  };
-                  // Auto-include in optimization
-                  const included = new Set(state.evalIncluded);
-                  included.add(placeholderIndex);
-                  return { evalResults, evalLoading: false, evalIncluded: included };
-                });
-              } else if (currentEvent === "error") {
-                set((state) => {
-                  const evalResults = [...state.evalResults];
-                  evalResults[placeholderIndex] = {
-                    ...evalResults[placeholderIndex],
-                    answer: `Error: ${data.message}`,
-                  };
-                  return { evalResults, evalLoading: false };
-                });
-              }
-            } catch {
-              // Skip unparseable SSE data
-            }
-            currentEvent = "";
-          }
+      await readSSE(response, (event, data) => {
+        // Update live context tokens
+        if (event === "context_update" && data.context_tokens != null) {
+          // API-reported value is authoritative — allow corrections downward
+          set({ liveContextTokens: data.context_tokens });
+        } else if (data.context_tokens != null && data.context_tokens > get().liveContextTokens) {
+          // Estimates only go up (monotonic) to avoid visual jitter
+          set({ liveContextTokens: data.context_tokens });
         }
-      }
+
+        if (event === "text_delta") {
+          // Streaming text from LLM — append to current answer
+          set((state) => {
+            const evalResults = [...state.evalResults];
+            const entry = { ...evalResults[placeholderIndex] };
+            entry.answer = (entry.answer || "") + (data.text || "");
+            evalResults[placeholderIndex] = entry;
+            return { evalResults };
+          });
+        } else if (event === "tool_calling") {
+          // Add an in-progress step to the tool chain
+          set((state) => {
+            const evalResults = [...state.evalResults];
+            const entry = { ...evalResults[placeholderIndex] };
+            entry.toolChain = [
+              ...entry.toolChain,
+              { step: data.step, tool: data.tool, input: data.input, output: "Calling...", duration: 0, error: null },
+            ];
+            evalResults[placeholderIndex] = entry;
+            return { evalResults };
+          });
+        } else if (event === "tool_result") {
+          // Update the last step with the result
+          set((state) => {
+            const evalResults = [...state.evalResults];
+            const entry = { ...evalResults[placeholderIndex] };
+            const chain = [...entry.toolChain];
+            const lastIdx = chain.findIndex((s) => s.step === data.step);
+            if (lastIdx >= 0) {
+              chain[lastIdx] = data;
+            } else {
+              chain.push(data);
+            }
+            entry.toolChain = chain;
+            evalResults[placeholderIndex] = entry;
+            return { evalResults };
+          });
+        } else if (event === "done") {
+          // Final result
+          set((state) => {
+            const evalResults = [...state.evalResults];
+            evalResults[placeholderIndex] = {
+              prompt: data.prompt,
+              answer: data.answer,
+              toolChain: data.toolChain,
+              traceEvents: data.traceEvents,
+              usage: data.usage,
+              backendIndex: data.index,
+            };
+            // Auto-include in optimization
+            const included = new Set(state.evalIncluded);
+            included.add(placeholderIndex);
+            return { evalResults, evalLoading: false, evalIncluded: included };
+          });
+        } else if (event === "error") {
+          set((state) => {
+            const evalResults = [...state.evalResults];
+            evalResults[placeholderIndex] = {
+              ...evalResults[placeholderIndex],
+              answer: `Error: ${data.message}`,
+            };
+            return { evalResults, evalLoading: false };
+          });
+        }
+      });
 
       // Ensure loading is cleared — also auto-include if we got an answer
       set((state) => {
@@ -1547,8 +1487,10 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   submitRating: async (index, correctness, notes) => {
+    const backendIndex = get().evalResults[index]?.backendIndex;
+    if (backendIndex === undefined) return;
     try {
-      await api.submitRating(index, correctness, notes);
+      await api.submitRating(backendIndex, correctness, notes);
       set((state) => {
         const evalResults = [...state.evalResults];
         if (evalResults[index]) {
@@ -1572,6 +1514,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   removeEval: (index) => {
+    // evaluate() writes to its entry by position while streaming
+    if (get().evalLoading) return;
     set((state) => {
       const evalResults = state.evalResults.filter((_, i) => i !== index);
       // Rebuild evalIncluded with shifted indices

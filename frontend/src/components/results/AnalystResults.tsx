@@ -63,7 +63,7 @@ export function AnalystResults({ results }: Props) {
               >
                 <span
                   className="text-xs font-semibold uppercase px-2 py-0.5 rounded shrink-0"
-                  style={{ color: style.color, backgroundColor: `${style.color}20` }}
+                  style={{ color: style.color, backgroundColor: `color-mix(in srgb, ${style.color} 12%, transparent)` }}
                 >
                   {style.label}
                 </span>

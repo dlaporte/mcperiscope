@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -9,11 +10,12 @@ import traceback
 import socket
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from pydantic import BaseModel
-from backend.models import EvaluateRequest, RatingRequest
+from pydantic import BaseModel, Field
+from backend.models import MAX_TOOL_ROUNDS, EvaluateRequest, RatingRequest
 from backend.state import OptimizationRun, session
 from backend import mcp_manager
 from backend.credentials import bind_analyst_credentials, bind_primary_credentials
@@ -67,6 +69,45 @@ def _extract_fields(text: str) -> list[str]:
     except (json.JSONDecodeError, IndexError, TypeError):
         pass
     return []
+
+
+def _llm_error_message(e: Exception) -> str:
+    """Map an LLM SDK exception to a user-facing answer string."""
+    import anthropic
+    import openai
+
+    status = getattr(e, "status_code", None)
+    if status == 502:
+        return "Error: LLM provider returned Bad Gateway (502). The service may be down or overloaded."
+    if isinstance(e, (anthropic.AuthenticationError, openai.AuthenticationError)) or status == 401:
+        return "Error: Authentication failed. Check your API key in Settings."
+    if isinstance(e, (anthropic.RateLimitError, openai.RateLimitError)) or status == 429:
+        return "Error: Rate limit exceeded. Wait a moment and try again."
+    # Timeout errors subclass connection errors in both SDKs, so check them first.
+    if isinstance(e, (anthropic.APITimeoutError, openai.APITimeoutError)):
+        return "Error: Request timed out. The LLM provider may be slow or unreachable."
+    if isinstance(e, (anthropic.APIConnectionError, openai.APIConnectionError)):
+        return "Error: Could not connect to the LLM provider. Check the endpoint in Settings."
+    return f"Error: {e}"
+
+
+def _analyst_pairs(proxy_answers: list[dict], eval_results: list[dict]) -> list[tuple[str, str, str]]:
+    """Pair each proxy answer with the baseline answer of the eval it re-ran.
+
+    Returns (prompt, baseline_answer, proxy_answer) tuples. Proxy answers carry
+    the original eval index because only the included evals are re-run.
+    """
+    pairs = []
+    for entry in proxy_answers:
+        idx = entry.get("index")
+        if idx is None or not 0 <= idx < len(eval_results):
+            continue
+        pairs.append((
+            entry.get("prompt", ""),
+            eval_results[idx].get("answer", ""),
+            entry.get("answer", ""),
+        ))
+    return pairs
 
 
 @router.post("/optimize/evaluate")
@@ -149,7 +190,7 @@ async def evaluate(req: EvaluateRequest):
         # Context tracking: use API-reported base + estimated delta from new content
         # Initialize base from prior eval's peak if available, otherwise estimate from messages
         context_base = 0
-        for prev_ev in session.eval_results[:-1]:  # Exclude current (placeholder)
+        for prev_ev in session.eval_results:  # This eval isn't appended until it finishes
             peak = (prev_ev.get("usage") or {}).get("peak_context_tokens", 0)
             if peak:
                 context_base = peak
@@ -273,19 +314,7 @@ async def evaluate(req: EvaluateRequest):
         except Exception as e:
             logger.exception("Evaluation error")
             # Show a clean error message without the full traceback
-            err_msg = str(e)
-            if "Bad Gateway" in err_msg or "502" in err_msg:
-                final_answer = "Error: LLM provider returned Bad Gateway (502). The service may be down or overloaded."
-            elif "401" in err_msg or "Unauthorized" in err_msg or "AuthenticationError" in err_msg:
-                final_answer = "Error: Authentication failed. Check your API key in Settings."
-            elif "429" in err_msg or "rate" in err_msg.lower():
-                final_answer = "Error: Rate limit exceeded. Wait a moment and try again."
-            elif "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
-                final_answer = "Error: Request timed out. The LLM provider may be slow or unreachable."
-            elif "connect" in err_msg.lower():
-                final_answer = "Error: Could not connect to the LLM provider. Check the endpoint in Settings."
-            else:
-                final_answer = f"Error: {err_msg}"
+            final_answer = _llm_error_message(e)
 
         usage = {
             "input_tokens": total_input_tokens,
@@ -451,6 +480,7 @@ class OptimizeRunRequest(BaseModel):
     disabled_tools: list[str] | None = None
     disabled_resources: list[str] | None = None
     disabled_prompts: list[str] | None = None
+    max_tool_rounds: int | None = Field(default=None, ge=1, le=MAX_TOOL_ROUNDS)
 
 
 @router.post("/optimize/run")
@@ -492,6 +522,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     included_evals = [e for i, e in enumerate(session.eval_results) if i in included]
     if not included_evals:
         raise HTTPException(status_code=400, detail="No evaluations included")
+    max_rounds = (req.max_tool_rounds if req else None) or 20
 
     async def event_stream():
         import asyncio
@@ -542,14 +573,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
         # --- Step 1b: Condense resources if resource recommendations are enabled ---
         condensed_resources = {}  # uri -> condensed_text
-        enabled_ids = set(req.enabled_rec_ids) if req and req.enabled_rec_ids else None
-        resource_recs_enabled = False
-        if enabled_ids:
-            all_recs = session.recommendations + session.quick_wins
-            for rec in all_recs:
-                if rec.get("id") in enabled_ids and rec.get("type") in ("resource_context_usage", "large_resource", "resource_consolidation"):
-                    resource_recs_enabled = True
-                    break
+        resource_recs_enabled = any(
+            r.get("type") in RESOURCE_REC_TYPES for r in filtered_recs + filtered_qws
+        )
 
         if resource_recs_enabled:
             yield _sse("progress", {"phase": "resources", "message": "Condensing resources..."})
@@ -689,18 +715,19 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
             try:
                 proxy_port, proxy_process, proxy_stderr_file = _start_proxy(proxy_code)
+                # Track it immediately so a client disconnect mid-wait can't orphan it
+                session.proxy_process = proxy_process
 
                 # Wait for proxy to start, check health (up to 30 seconds)
                 proxy_started = False
-                for attempt in range(30):
-                    await asyncio.sleep(1)
-                    if proxy_process.poll() is not None:
-                        break  # Process died
-                    if attempt > 0 and attempt % 5 == 0:
-                        yield _sse("progress", {"phase": "proxy", "message": "Waiting for proxy to start..."})
-                    try:
-                        import httpx
-                        async with httpx.AsyncClient() as hc:
+                async with httpx.AsyncClient() as hc:
+                    for attempt in range(30):
+                        await asyncio.sleep(1)
+                        if proxy_process.poll() is not None:
+                            break  # Process died
+                        if attempt > 0 and attempt % 5 == 0:
+                            yield _sse("progress", {"phase": "proxy", "message": "Waiting for proxy to start..."})
+                        try:
                             resp = await hc.post(
                                 f"http://localhost:{proxy_port}/mcp",
                                 json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -712,8 +739,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             if resp.status_code == 200:
                                 proxy_started = True
                                 break
-                    except Exception:
-                        pass  # Expected during startup
+                        except Exception:
+                            pass  # Expected during startup
 
                 if not proxy_started:
                     stderr = ""
@@ -721,16 +748,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         stderr = proxy_stderr_file.read_text(errors="replace")[-500:]
                     except Exception:
                         pass
-                    if proxy_process.poll() is not None:
+                    crashed = proxy_process.poll() is not None
+                    session.kill_proxy()
+                    if crashed:
                         yield _sse("progress", {"phase": "proxy", "message": f"Proxy crashed: {stderr}"})
                     else:
-                        proxy_process.terminate()
                         yield _sse("progress", {"phase": "proxy", "message": f"Proxy timed out (30s). Last stderr: {stderr}"})
                     proxy_port = None
                     proxy_process = None
-                    session.proxy_process = None
                 else:
-                    session.proxy_process = proxy_process
                     # Get proxy tool list
                     from fastmcp import Client
                     proxy_client = Client(f"http://localhost:{proxy_port}/mcp")
@@ -804,14 +830,24 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         # Clean context: only enabled resources + the prompt (no history)
                         messages = [*resource_preamble, {"role": "user", "content": prompt}]
                         step = 0
+                        round_num = 0
                         proxy_answer = ""
                         try:
                             while True:
+                                round_num += 1
+                                if round_num > max_rounds:
+                                    proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: stopped after {max_rounds} tool call rounds"})
+                                    yield _sse("progress", {
+                                        "phase": "evaluate",
+                                        "message": f"Prompt {i+1} exceeded max tool call rounds ({max_rounds})",
+                                    })
+                                    break
+
                                 response = await llm.chat(messages=messages, tools=proxy_tools_list, max_tokens=4096)
 
                                 if not response.tool_calls:
                                     proxy_answer = response.text
-                                    proxy_answers.append({"prompt": prompt, "answer": proxy_answer})
+                                    proxy_answers.append({"index": i, "prompt": prompt, "answer": proxy_answer})
                                     break
 
                                 messages.append({
@@ -855,7 +891,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
                                 messages.append({"role": "user", "content": tool_results})
                         except Exception as e:
-                            proxy_answers.append({"prompt": prompt, "answer": f"Error: {e}"})
+                            proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: {e}"})
                             yield _sse("progress", {
                                 "phase": "evaluate",
                                 "message": f"Prompt {i+1} failed: {str(e)[:100]}"
@@ -880,13 +916,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     session.analyst_endpoint or session.custom_endpoint,
                 )
 
-                for i, proxy_entry in enumerate(proxy_answers):
-                    if i >= len(session.eval_results):
-                        break
-                    baseline_answer = session.eval_results[i].get("answer", "")
-                    proxy_answer = proxy_entry.get("answer", "")
-                    prompt = proxy_entry.get("prompt", "")
-
+                for i, (prompt, baseline_answer, proxy_answer) in enumerate(
+                    _analyst_pairs(proxy_answers, session.eval_results)
+                ):
                     if not baseline_answer or not proxy_answer or proxy_answer.startswith("Error:"):
                         analyst_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer", "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
                         continue
@@ -1080,19 +1112,19 @@ def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
     # Open stderr file — don't use `with` since the subprocess needs the fd to stay open
     err_fh = open(stderr_file, "w")
 
-    import os as _os
     # Minimal env: only what Python needs to start up and resolve our package.
     safe_env = {
-        "PATH": _os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": _os.environ.get("HOME", str(Path.home())),
-        "PYTHONPATH": _os.environ.get("PYTHONPATH", str(project_root)),
-        "LANG": _os.environ.get("LANG", "C.UTF-8"),
-        "LC_ALL": _os.environ.get("LC_ALL", "C.UTF-8"),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", str(Path.home())),
+        # project_root must stay first so `backend.*` resolves to this checkout.
+        "PYTHONPATH": os.pathsep.join(filter(None, [str(project_root), os.environ.get("PYTHONPATH")])),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
     }
     # Pass through virtualenv markers so `sys.executable` resolves correctly.
     for k in ("VIRTUAL_ENV", "PYENV_VERSION", "UV_CACHE_DIR"):
-        if k in _os.environ:
-            safe_env[k] = _os.environ[k]
+        if k in os.environ:
+            safe_env[k] = os.environ[k]
 
     process = subprocess.Popen(
         [sys.executable, str(proxy_file), "--port", str(port)],
