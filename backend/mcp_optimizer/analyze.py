@@ -287,7 +287,6 @@ def analyze_lookup_tools(tools: list[Tool]) -> list[dict[str, Any]]:
 
         # Check if tool takes no required params or only simple ID params
         schema = tool.inputSchema or {}
-        required = set(schema.get("required", []))
         props = schema.get("properties", {})
         param_count = len(props)
         simple_params = param_count <= 1
@@ -470,9 +469,6 @@ def find_parameter_hops(traces: list[dict]) -> list[dict[str, Any]]:
                 tool_input = trace_b.get("tool_input", {})
                 if not tool_input:
                     continue
-                # Check if any input value matches a response field name pattern
-                # (the actual value from tool A appearing in tool B input)
-                input_values = _flatten_values(tool_input)
                 for field_name in response_fields:
                     # Check if the field name appears as an input parameter name
                     # or if input values reference fields from the response
@@ -508,23 +504,6 @@ def find_parameter_hops(traces: list[dict]) -> list[dict[str, Any]]:
         })
 
     return results
-
-
-def _flatten_values(d: dict) -> list[Any]:
-    """Recursively extract all leaf values from a dict."""
-    values: list[Any] = []
-    for v in d.values():
-        if isinstance(v, dict):
-            values.extend(_flatten_values(v))
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, dict):
-                    values.extend(_flatten_values(item))
-                else:
-                    values.append(item)
-        else:
-            values.append(v)
-    return values
 
 
 def compute_error_cost(traces: list[dict]) -> dict[str, Any]:

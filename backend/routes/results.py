@@ -89,7 +89,6 @@ async def get_plan():
     plan_md = generate_plan_md(
         url=mcp_manager.get_url() or "",
         inventory=session.inventory or {},
-        analysis=session.analysis or {},
         recommendations=session.recommendations,
         ratings=session.ratings,
         traces=session.traces,
@@ -145,17 +144,12 @@ async def get_run_plan(run_id: str):
     run = next((r for r in session.optimization_runs if r.id == run_id), None)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    # Filter recommendations to this run's enabled set
-    enabled_set = set(run.enabled_rec_ids)
-    recs = [r for r in session.recommendations if r.get("id") in enabled_set]
-    qws = [q for q in session.quick_wins if q.get("id") in enabled_set]
     from backend.mcp_optimizer.report import generate_plan_md
 
     plan_md = generate_plan_md(
         url=mcp_manager.get_url() or "",
         inventory=session.inventory or {},
-        analysis=session.analysis or {},
-        recommendations=recs + qws,
+        recommendations=run.enabled_recs,  # this run's own snapshot
         ratings=session.ratings,
         traces=session.traces,
         prompts=session.prompts,

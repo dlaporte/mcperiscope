@@ -39,6 +39,8 @@ class OptimizationRun:
     timestamp: float
     name: str
     enabled_rec_ids: list[str] = field(default_factory=list)
+    # Snapshot of the enabled recs + quick wins; IDs are reassigned on re-analyze.
+    enabled_recs: list[dict] = field(default_factory=list)
     proxy_code: str | None = None
     comparison: dict | None = None
     proxy_answers: list[dict] = field(default_factory=list)

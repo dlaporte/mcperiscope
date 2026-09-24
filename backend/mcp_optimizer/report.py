@@ -57,7 +57,6 @@ def _delta_value(delta: Any) -> Any:
 def generate_plan_md(
     url: str,
     inventory: dict,
-    analysis: dict,
     recommendations: list[dict],
     ratings: list[dict],
     traces: list[dict],
@@ -191,7 +190,6 @@ def generate_report_md(data: dict) -> str:
     analysis = data.get("analysis", {})
     recommendations = data.get("recommendations", [])
     ratings = data.get("ratings", [])
-    traces = data.get("traces", [])
     prompts = data.get("prompts", [])
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -376,7 +374,7 @@ def generate_report_html(data: dict) -> str:
 
     # Generate the plan markdown for the copy-to-clipboard section
     plan_md = generate_plan_md(
-        url, inventory, analysis, recommendations, ratings, traces, prompts
+        url, inventory, recommendations, ratings, traces, prompts
     )
 
     # --- Build HTML sections ---

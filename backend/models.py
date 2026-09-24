@@ -11,7 +11,8 @@ MAX_PROMPT_CHARS = 64_000
 
 
 class AuthConfig(BaseModel):
-    type: Literal["none", "bearer", "header", "oauth", "oauth_client_creds"] = "none"
+    # Same default as sending no auth config at all (see mcp_manager._build_client).
+    type: Literal["none", "bearer", "header", "oauth", "oauth_client_creds"] = "oauth"
     # bearer
     token: str | None = None
     # header

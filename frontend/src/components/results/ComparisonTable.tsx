@@ -93,7 +93,7 @@ function formatDelta(delta: DeltaEntry | undefined, row: RowDef, baseline: numbe
   if (row.isPercent) {
     // For accuracy/error_rate, show percentage point change
     const diff = (proxy - baseline) * 100;
-    if (diff === 0) return "0";
+    if (diff === 0) return "0pp";
     const sign = diff > 0 ? "+" : "";
     return `${sign}${diff.toFixed(1)}pp`;
   }

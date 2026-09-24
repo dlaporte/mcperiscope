@@ -18,9 +18,10 @@ export function ResourcePicker() {
   const totalTokens = loadedResources.reduce((sum, r) => sum + r.tokens, 0);
 
   const sortedResources = useMemo(() => {
+    const loadedTokens = new Map(loadedResources.map((lr) => [lr.uri, lr.tokens]));
     const withTokens = resources.map((r: any) => ({
       resource: r,
-      tokens: loadedResources.find((lr) => lr.uri === r.uri)?.tokens ?? estimateResourceTokens(r),
+      tokens: loadedTokens.get(r.uri) ?? estimateResourceTokens(r),
     }));
     if (sortMode === "tokens") {
       return [...withTokens].sort((a, b) => b.tokens - a.tokens);
@@ -98,8 +99,6 @@ export function ResourcePicker() {
             {sortedResources.map(({ resource: r, tokens }: any) => {
               const uri = r.uri as string;
               const isLoaded = loadedUris.has(uri);
-              const loadedEntry = loadedResources.find((lr) => lr.uri === uri);
-              const displayTokens = loadedEntry?.tokens ?? tokens;
               return (
                 <label
                   key={uri}
@@ -119,7 +118,7 @@ export function ResourcePicker() {
                     className="text-[10px] font-mono shrink-0"
                     style={{ color: isLoaded ? 'var(--sub-text-dim)' : 'var(--sub-hull)' }}
                   >
-                    {displayTokens.toLocaleString()}
+                    {tokens.toLocaleString()}
                   </span>
                 </label>
               );

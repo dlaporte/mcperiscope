@@ -25,10 +25,10 @@ def _tool(name: str, properties: dict | None = None, required: list[str] | None 
 
 
 def _build(tools, recommendations=(), quick_wins=()) -> str:
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=list(recommendations), quick_wins=list(quick_wins),
-    ))
+    )
     return code
 
 
@@ -184,3 +184,31 @@ def test_two_lookup_recs_get_distinct_maps():
     assert "LOOKUP_TABLES = " in code and "LOOKUP_2_TABLES = " in code
     fake = _call_generated(code, "lookup_2", {"table": "c"})
     assert fake.calls == [("get_c", {})]
+
+
+def test_stats_total_counts_proxied_tools():
+    tools = [_tool("db_a"), _tool("db_b"), _tool("db_c"), _tool("gone"), _tool("plain")]
+    recs = [
+        {"type": "consolidate", "source_tools": ["db_a", "db_b", "db_c"], "target_tool": {"name": "db"}},
+        {"type": "remove", "source_tools": ["gone"]},
+    ]
+    _, stats = build_proxy(
+        tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
+        recommendations=recs, quick_wins=[],
+    )
+    assert stats == {"total": 2, "upstream": 5, "removed": 1, "consolidated": 3, "passthrough": 1}
+
+
+def test_passthrough_keeps_full_description():
+    desc = "line one\nline \"two\"\n" + "x" * 800
+    tool = SimpleNamespace(name="t", description=desc, inputSchema={"type": "object", "properties": {}})
+    code = _build([tool])
+    ns: dict = {"__name__": "generated_proxy"}
+    exec(compile(code, "<proxy>", "exec"), ns)
+
+    async def get_desc():
+        async with Client(ns["mcp"]) as c:
+            return (await c.list_tools())[0].description
+
+    ns["upstream"] = _FakeUpstream()
+    assert asyncio.run(get_desc()) == desc

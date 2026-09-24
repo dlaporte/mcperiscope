@@ -27,7 +27,7 @@ def _data() -> dict:
 
 
 def test_plan_md_with_none_ratings():
-    md = generate_plan_md("https://x/mcp", {}, {}, [], _RATINGS, [], _PROMPTS)
+    md = generate_plan_md("https://x/mcp", {}, [], _RATINGS, [], _PROMPTS)
     assert "1/1" in md
 
 

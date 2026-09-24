@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 from types import SimpleNamespace
 
 from backend.proxy_builder import build_proxy, safe_ident
@@ -49,10 +48,10 @@ def test_safe_ident_basic():
 
 def test_passthrough_with_malicious_tool_name():
     tools = [_tool(_PAYLOAD)]
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=[], quick_wins=[],
-    ))
+    )
     _assert_no_top_level_calls(code)
 
 
@@ -64,10 +63,10 @@ def test_consolidation_with_malicious_prefix():
         "source_tools": [t.name for t in tools],
         "target_tool": {"name": _PAYLOAD, "description": "d", "parameters": {}},
     }]
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=recs, quick_wins=[],
-    ))
+    )
     _assert_no_top_level_calls(code)
 
 
@@ -79,10 +78,10 @@ def test_consolidation_with_malicious_param_name():
         "source_tools": [t.name for t in tools],
         "target_tool": {"name": "foo", "description": "d", "parameters": {}},
     }]
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=recs, quick_wins=[],
-    ))
+    )
     _assert_no_top_level_calls(code)
 
 
@@ -94,11 +93,11 @@ def test_condensed_resource_with_malicious_uri():
             "condensed": "ok",
         }
     }
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=[], quick_wins=[],
         condensed_resources=condensed,
-    ))
+    )
     _assert_no_top_level_calls(code)
 
 
@@ -108,10 +107,10 @@ def test_auth_config_with_malicious_values_stays_inert():
         "type": "bearer",
         "token": f'x"\nimport os; {_SYS}("id")\n y',
     }
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=[], quick_wins=[], auth_config=nasty,
-    ))
+    )
     _assert_no_top_level_calls(code)
     # The credential must round-trip intact through the json.loads wrapper.
     ns: dict = {}
@@ -121,22 +120,22 @@ def test_auth_config_with_malicious_values_stays_inert():
 
 def test_oauth_auth_config_emits_no_secret_material():
     tools = [_tool("safe")]
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=[], quick_wins=[],
         auth_config={"type": "oauth", "scope": "read"},
-    ))
+    )
     assert "client_secret" not in code
     assert "WARNING: contains credentials" not in code
 
 
 def test_bearer_auth_config_emits_warning_comment():
     tools = [_tool("safe")]
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=[], quick_wins=[],
         auth_config={"type": "bearer", "token": "t"},
-    ))
+    )
     assert "WARNING: contains credentials" in code
 
 
@@ -144,8 +143,8 @@ def test_removed_tools_comment_handles_newlines():
     nasty = f"evil\nimport os; {_SYS}('id')"
     tools = [_tool(nasty), _tool("safe")]
     qws = [{"id": "qw_1", "type": "remove_unused", "source_tools": [nasty]}]
-    code, _ = asyncio.run(build_proxy(
+    code, _ = build_proxy(
         tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
         recommendations=[], quick_wins=qws,
-    ))
+    )
     _assert_no_top_level_calls(code)

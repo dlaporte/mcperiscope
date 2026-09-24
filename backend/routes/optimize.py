@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -166,6 +167,7 @@ class _AgentRun:
     messages: list[dict]
     final_answer: str = ""
     step: int = 0  # tool calls made
+    rounds: int = 0  # LLM API calls made
     tool_chain: list[dict] = field(default_factory=list)
     trace_events: list[dict] = field(default_factory=list)
     input_tokens: int = 0
@@ -202,6 +204,7 @@ async def _run_agent_loop(
             yield "error", {"message": f"Max tool call rounds ({max_rounds}) exceeded"}
             return
         yield "thinking", {"step": run.step, "context_tokens": context_base + context_delta}
+        run.rounds += 1
 
         if stream:
             # Stream the LLM response — yields text deltas then final LLMResponse
@@ -378,7 +381,7 @@ async def evaluate(req: EvaluateRequest):
             "output_tokens": run.output_tokens,
             "total_tokens": run.input_tokens + run.output_tokens,
             "peak_context_tokens": run.peak_input_tokens,  # Actual context window usage (last round)
-            "api_rounds": run.step + 1,  # Number of API calls made
+            "api_rounds": run.rounds,  # Number of LLM API calls made
         }
 
         # Capture the full context window contents for inspection
@@ -670,10 +673,10 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             "original_tokens": len(text) // 4,
                             "condensed_tokens": len(response.text) // 4,
                         }
-                    except Exception as e:
-                        logger.debug(f"Failed to condense resource {name}: {e}")
-            except Exception as e:
-                logger.debug(f"Failed to list resources for condensing: {e}")
+                    except Exception:
+                        logger.warning("Failed to condense resource %s", name, exc_info=True)
+            except Exception:
+                logger.warning("Failed to list resources for condensing", exc_info=True)
 
         # --- Step 2: Generate proxy ---
         from backend.proxy_builder import build_proxy, batch_rewrite_descriptions
@@ -707,7 +710,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         # Step 2b: Assemble proxy code (deterministic, fast)
         yield _sse("progress", {"phase": "proxy", "message": "Assembling proxy..."})
         try:
-            proxy_code, proxy_stats = await build_proxy(
+            proxy_code, proxy_stats = build_proxy(
                 tools=session.tools,
                 upstream_url=mcp_manager.get_url() or "",
                 token_dir=token_dir,
@@ -730,7 +733,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             yield _sse("progress", {
                 "phase": "proxy",
                 "message": (
-                    f"Proxy generated: {proxy_stats['total']} tools "
+                    f"Proxy generated: {proxy_stats['total']} tools from {proxy_stats['upstream']} "
                     f"({proxy_stats['removed']} removed, {proxy_stats['consolidated']} consolidated)"
                 ),
             })
@@ -746,7 +749,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if proxy_code:
             yield _sse("progress", {"phase": "proxy", "message": "Starting proxy server..."})
             try:
-                proxy_port, proxy_process, proxy_stderr_file = _start_proxy(proxy_code)
+                proxy_port, proxy_process, proxy_stderr_file = _start_proxy()
                 # Track it immediately so a client disconnect mid-wait can't orphan it
                 session.proxy_process = proxy_process
 
@@ -1031,6 +1034,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             timestamp=time.time(),
             name=f"Run {session.run_counter}",
             enabled_rec_ids=run_enabled_ids,
+            enabled_recs=copy.deepcopy(filtered_recs + filtered_qws),
             proxy_code=proxy_code,
             comparison=comparison,
             proxy_answers=proxy_answers,
@@ -1059,10 +1063,12 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
 
 
-def _start_proxy(proxy_code: str) -> tuple[int, subprocess.Popen, Path]:
-    """Start the proxy server on a random port. Returns (port, process, stderr_file).
+def _start_proxy() -> tuple[int, subprocess.Popen, Path]:
+    """Start the saved proxy (<project>/proxy/server.py) on a random port.
 
-    Hardened against the case where `proxy_code` was influenced by an
+    Returns (port, process, stderr_file).
+
+    Hardened against the case where the proxy code was influenced by an
     untrusted MCP server. We:
       * Run in a new session/process group so a misbehaving child can't share
         terminal signals with the backend.

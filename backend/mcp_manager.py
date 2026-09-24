@@ -63,35 +63,32 @@ def _build_client(
 ):
     """Build a FastMCP Client honoring the requested auth_config.
 
-    - oauth (default): use the WebOAuth provider so the user can complete the
-      browser flow.
+    - oauth (default, also when auth_config is None): use the WebOAuth
+      provider. It only engages if the server answers 401, so an open server
+      still connects without auth; otherwise the user completes the browser flow.
     - oauth_client_creds: mint tokens with the user's own client ID/secret.
     - bearer: send `Authorization: Bearer <token>` on every request, no OAuth.
     - header: send `<name>: <value>` on every request, no OAuth.
     - none: no auth at all.
     """
-    if auth_config is None:
-        auth_type = "oauth"
-    else:
-        auth_type = (auth_config.type or "oauth").lower()
+    auth_type = auth_config.type if auth_config else "oauth"
 
     target = _make_transport(url, protocol)
 
     if auth_type == "bearer":
-        token = (auth_config.token if auth_config else None) or ""
+        token = auth_config.token or ""
         if not token:
             raise ValueError("bearer auth requested but no token supplied")
         return Client(target, auth=StaticHeaderAuth("Authorization", f"Bearer {token}"))
     if auth_type == "header":
-        name = (auth_config.name if auth_config else None) or ""
-        value = (auth_config.value if auth_config else None) or ""
+        name = auth_config.name or ""
+        value = auth_config.value or ""
         if not name:
             raise ValueError("header auth requested but no header name supplied")
         return Client(target, auth=StaticHeaderAuth(name, value))
     if auth_type == "oauth_client_creds":
         if not (
-            auth_config
-            and auth_config.token_endpoint
+            auth_config.token_endpoint
             and auth_config.client_id
             and auth_config.client_secret
         ):
@@ -144,7 +141,7 @@ async def connect(
     redirect_url = _get_redirect_url()
 
     oauth_kwargs: dict[str, Any] = {}
-    if auth_config and (auth_config.type or "oauth") == "oauth":
+    if auth_config and auth_config.type == "oauth":
         oauth_kwargs = dict(
             scopes=auth_config.scope,
             client_id=auth_config.client_id,

@@ -162,3 +162,19 @@ def test_agent_loop_non_streaming_counts_steps_per_loop():
     assert run.final_answer == "Done"
     assert [(t["step"], t["prompt_index"]) for t in run.trace_events] == [(1, 3)]
     assert run.input_tokens == 250
+
+
+def test_rounds_count_llm_calls_not_tool_calls():
+    llm = _FakeLLM()
+    first = llm.rounds[0][1]
+    first.tool_calls.append(ToolCall(id="t2", name="search_records", input={"query": "y"}))
+    run = optimize._AgentRun(messages=[{"role": "user", "content": "p"}])
+
+    async def go():
+        async for _ in optimize._run_agent_loop(
+            run, llm, [], _fake_call_tool, max_rounds=5, max_tokens=10, stream=False,
+        ):
+            pass
+
+    asyncio.run(go())
+    assert (run.step, run.rounds) == (2, 2)  # 2 tool calls over 2 LLM calls

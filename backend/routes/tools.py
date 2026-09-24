@@ -48,11 +48,13 @@ async def call_tool(req: ToolCallRequest):
             content.append({"type": "text", "text": str(result)})
 
         result_text = "\n".join(c["text"] for c in content if c["type"] == "text")
+        is_error = bool(getattr(result, "isError", False))
+        error = (result_text or "Tool returned an error") if is_error else None
         session.traces.append(_make_trace_event(
-            len(session.traces), start, req.name, req.arguments, result_text, duration,
+            len(session.traces), start, req.name, req.arguments, result_text, duration, error,
         ))
 
-        return {"content": content, "isError": getattr(result, "isError", False)}
+        return {"content": content, "isError": is_error}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

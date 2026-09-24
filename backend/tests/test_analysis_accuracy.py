@@ -80,7 +80,7 @@ def test_run_plan_includes_quick_wins_and_low_recs():
          "estimated_savings": 100},
     ]
     inventory = {"tool_count": 10}
-    md = generate_plan_md("u", inventory, {}, recs, [], [], [], filter_by_impact=False)
+    md = generate_plan_md("u", inventory, recs, [], [], [], filter_by_impact=False)
     assert "low rec" in md and "unused qw" in md
     assert "`z1`" in md and "~100 tokens" in md
     assert "| Estimated token savings | 150 |" in md
@@ -90,7 +90,7 @@ def test_run_plan_includes_quick_wins_and_low_recs():
 
 def test_plan_metrics_ignore_manual_calls():
     traces = [_t("a", 0), _t("b", 1), _t("manual", None, error_category="boom")]
-    md = generate_plan_md("u", {}, {}, [], [], traces, [])
+    md = generate_plan_md("u", {}, [], [], traces, [])
     assert "**Avg calls/prompt:** 1.0" in md
     assert "**Error rate:** 0.0%" in md
 

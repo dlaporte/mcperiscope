@@ -401,13 +401,13 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
     inventory: inventoryRes.status === "fulfilled" ? inventoryRes.value : null,
   });
 
-  // Auto-load all resources into the evaluation context
+  // Auto-load all resources into the evaluation context (failed loads are skipped)
+  const results = await Promise.allSettled(resourceList.map((r: any) => api.loadResource(r.uri)));
   const loaded: Array<{ uri: string; name: string; tokens: number }> = [];
-  for (const r of resourceList) {
-    try {
-      const result = await api.loadResource(r.uri);
-      loaded.push({ uri: result.uri, name: result.name, tokens: result.tokens });
-    } catch { /* skip failed loads */ }
+  for (const res of results) {
+    if (res.status === "fulfilled") {
+      loaded.push({ uri: res.value.uri, name: res.value.name, tokens: res.value.tokens });
+    }
   }
   set({ loadedResources: loaded });
 }

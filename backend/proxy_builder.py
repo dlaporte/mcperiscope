@@ -364,12 +364,12 @@ def _gen_passthrough(
     props = schema.get("properties", {})
     required_set = set(schema.get("required", []))
 
-    # Use rewritten description if available, otherwise truncate original
+    # Use rewritten description if available, otherwise the full original.
+    # json.dumps makes any content (newlines, quotes) a safe literal.
     if rewritten_descriptions and tool.name in rewritten_descriptions:
         desc = rewritten_descriptions[tool.name]
     else:
-        desc = (tool.description or "")[:500]
-    desc = desc.replace("\n", " ")
+        desc = tool.description or ""
     desc_json = json.dumps(desc)
 
     safe_name = safe_ident(tool.name, used_idents, fallback="tool")
@@ -495,7 +495,7 @@ async def batch_rewrite_descriptions(tools_to_rewrite: list, analyst) -> dict[st
 # Main builder
 # ---------------------------------------------------------------------------
 
-async def build_proxy(
+def build_proxy(
     tools: list,
     upstream_url: str,
     token_dir: str,
@@ -530,7 +530,8 @@ async def build_proxy(
 
     Returns:
         A tuple of (source_code, stats_dict) where stats_dict has keys:
-        total, removed, consolidated, passthrough.
+        total (tools the proxy exposes), upstream (tools upstream),
+        removed, consolidated (upstream tools merged), passthrough.
     """
     rewritten_descriptions = rewritten_descriptions or {}
     disabled_tools_set = set(disabled_tools) if disabled_tools else set()
@@ -573,7 +574,7 @@ async def build_proxy(
     }
 
     # Track which consolidation recs we've already generated
-    generated_consolidation_ids: set[str] = set()
+    generated_consolidation_ids: set[int] = set()
 
     # Generate lookup consolidations
     for tool_name, info in classification.items():
@@ -609,7 +610,7 @@ async def build_proxy(
             passthrough_lines.extend(_gen_passthrough(t, rewritten_descriptions, used_idents))
 
     if passthrough_lines:
-        lines.append("# --- Passthrough tools (unmodified) ---")
+        lines.append("# --- Passthrough tools (original or rewritten descriptions) ---")
         lines.append("")
         lines.extend(passthrough_lines)
 
@@ -635,7 +636,9 @@ async def build_proxy(
         raise RuntimeError(f"Generated proxy has syntax error at line {e.lineno}: {e.msg}")
 
     return code, {
-        "total": len(tools),
+        # Each generated consolidation is one proxy tool
+        "total": passthrough_count + len(generated_consolidation_ids),
+        "upstream": len(tools),
         "removed": removed_count,
         "consolidated": consolidated_count,
         "passthrough": passthrough_count,

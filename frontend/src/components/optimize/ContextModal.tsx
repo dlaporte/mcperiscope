@@ -23,7 +23,7 @@ function formatMessageContent(content: string): string {
 interface ContextData {
   tools: Array<{ name: string; description: string }>;
   tool_count: number;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string }>; // backend serializes content to text
   message_count: number;
 }
 
@@ -45,10 +45,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
     if (!context) return { messageTokens: 0, toolTokens: 0 };
 
     // Calculate raw char counts for proportional split
-    const msgChars = context.messages.reduce((sum, m) => {
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      return sum + content.length;
-    }, 0);
+    const msgChars = context.messages.reduce((sum, m) => sum + m.content.length, 0);
 
     const toolChars = context.tools.reduce((sum, t) => {
       return sum + `${t.name}: ${t.description}`.length;
@@ -68,6 +65,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
   }, [context, totalTokens]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     fetch(`/api/optimize/context/${evalIndex}`)
@@ -75,9 +73,10 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to load");
         return res.json();
       })
-      .then(setContext)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .then((data: ContextData) => { if (!cancelled) setContext(data); })
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [evalIndex]);
 
   return (
@@ -207,9 +206,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
                       border: "1px solid var(--sub-rivet)",
                     }}
                   >
-                    {formatMessageContent(
-                      typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content, null, 2)
-                    )}
+                    {formatMessageContent(msg.content)}
                   </pre>
                 </div>
               ))}
