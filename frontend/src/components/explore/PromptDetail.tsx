@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore } from "../../store";
 import { SchemaForm } from "../shared/SchemaForm";
 import { JsonViewer } from "../shared/JsonViewer";
@@ -11,21 +11,22 @@ export function PromptDetail() {
     if (result) harvestResultParams(result);
   }, [result, harvestResultParams]);
 
-  if (!prompt) return null;
-
-  // Build a schema from prompt arguments
-  const schema: any = { type: "object", properties: {}, required: [] };
-  if (prompt.arguments) {
-    for (const arg of prompt.arguments) {
-      schema.properties[arg.name] = {
+  // Build a schema from prompt arguments; memoized so SchemaForm's memos stay stable
+  const schema = useMemo(() => {
+    const built: any = { type: "object", properties: {}, required: [] };
+    for (const arg of prompt?.arguments ?? []) {
+      built.properties[arg.name] = {
         type: "string",
         description: arg.description,
       };
       if (arg.required) {
-        schema.required.push(arg.name);
+        built.required.push(arg.name);
       }
     }
-  }
+    return built;
+  }, [prompt]);
+
+  if (!prompt) return null;
 
   const handleSubmit = (args: Record<string, string>) => {
     harvestParams(args);

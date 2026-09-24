@@ -1,19 +1,10 @@
 import { useState } from "react";
 import { useStore } from "../../store";
 import type { ParamEntry } from "../../store";
-
-function formatContext(context: Record<string, unknown>): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(context)) {
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-      parts.push(`${k}: ${v}`);
-    }
-  }
-  return parts.join(", ");
-}
+import { formatParamContext } from "../../utils/params";
 
 function ParamValueBadge({ entry }: { entry: ParamEntry }) {
-  const tooltip = formatContext(entry.context);
+  const tooltip = formatParamContext(entry);
   return (
     <span
       className="inline-block text-xs font-mono px-2 py-0.5 rounded cursor-default max-w-full truncate"

@@ -1,15 +1,9 @@
 import { useState, useMemo } from "react";
 import { useStore } from "../../store";
+import { estimateResourceTokens } from "../../utils/tokens";
 
 type SortMode = "name" | "tokens";
 
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function estimateResourceTokens(resource: any): number {
-  return estimateTokens(`${resource.name || ""}: ${resource.description || ""} (${resource.uri || ""})`);
-}
 
 export function ResourcePicker() {
   const resources = useStore((s) => s.resources);

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { useStore } from "../../store";
-import { MODEL_CONTEXT } from "../../config/models";
+import { useStore, selectContextWindow } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
+import { UsageBar } from "../shared/UsageBar";
 import { PromptInput } from "./PromptInput";
 import { ResourcePicker } from "./ResourcePicker";
 import { EvalHistory } from "./EvalHistory";
@@ -11,8 +11,7 @@ import { ContextModal } from "./ContextModal";
 export function OptimizeTab() {
   const evalResults = useStore((s) => s.evalResults);
   const inventory = useStore((s) => s.inventory);
-  const model = useStore((s) => s.model);
-  const customContextWindow = useStore((s) => s.customContextWindow);
+  const contextWindow = useStore(selectContextWindow);
   const evalLoading = useStore((s) => s.evalLoading);
   const liveContextTokens = useStore((s) => s.liveContextTokens);
   const loadedResources = useStore((s) => s.loadedResources);
@@ -59,20 +58,12 @@ export function OptimizeTab() {
     return { total: toolDefTokens + loadedResourceTokens };
   }, [evalResults, inventory, evalLoading, liveContextTokens, loadedResourceTokens]);
 
-  const contextWindow = inventory?.contextWindow ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000;
-
   return (
     <div className="h-full flex flex-col relative">
       {/* Context usage bar */}
-      <div
-        className="flex items-center gap-4 px-4 py-3"
-        style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
-      >
-        <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
-          Session usage
-        </span>
+      <UsageBar>
         <ContextGauge tokens={tokenUsage.total} max={contextWindow} onClick={latestBackendIndex !== null ? () => setShowContext(true) : undefined} />
-      </div>
+      </UsageBar>
 
       <div className="flex-1 flex min-h-0">
         {/* Left panel: prompt input + eval history */}

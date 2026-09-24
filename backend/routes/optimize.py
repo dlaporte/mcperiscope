@@ -7,7 +7,10 @@ import subprocess
 import sys
 import time
 import socket
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -19,6 +22,8 @@ from backend.state import OptimizationRun, session
 from backend import mcp_manager
 from backend.credentials import bind_analyst_credentials, bind_primary_credentials
 from backend.llm_client import LLMClient
+from backend.mcp_optimizer.inventory import estimate_tokens
+from backend.routes._common import _make_trace_event, _menu_tokens, _run_and_store_analysis, _sse
 from backend.url_validation import validate_external_url
 
 logger = logging.getLogger(__name__)
@@ -55,19 +60,6 @@ def _serialize_mcp_result(result) -> str:
     else:
         parts.append(str(result))
     return "\n".join(parts)
-
-
-def _extract_fields(text: str) -> list[str]:
-    """Extract top-level JSON keys from text."""
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return list(data.keys())
-        elif isinstance(data, list) and data and isinstance(data[0], dict):
-            return list(data[0].keys())
-    except (json.JSONDecodeError, IndexError, TypeError):
-        pass
-    return []
 
 
 def _llm_error_message(e: Exception) -> str:
@@ -109,6 +101,180 @@ def _analyst_pairs(proxy_answers: list[dict], eval_results: list[dict]) -> list[
     return pairs
 
 
+def _tools_for_llm(tool_objs: Iterable) -> list[dict]:
+    """Convert MCP Tool objects to the tool dicts LLMClient expects."""
+    return [{
+        "name": t.name,
+        "description": t.description or "",
+        "input_schema": t.inputSchema or {"type": "object", "properties": {}},
+    } for t in tool_objs]
+
+
+def _resource_preamble(resources: Iterable[dict]) -> list[dict]:
+    """Messages that put loaded resources ({name, content}) in the LLM context."""
+    resource_parts = [f"## {res['name']}\n\n{res['content']}" for res in resources]
+    if not resource_parts:
+        return []
+    return [
+        {
+            "role": "user",
+            "content": (
+                "The following resources have been loaded for reference:\n\n"
+                + "\n\n---\n\n".join(resource_parts)
+            ),
+        },
+        {"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."},
+    ]
+
+
+def _analyst_llm() -> LLMClient | None:
+    """Build the analyst LLM client, or None if there is no key it may use.
+
+    Blank analyst fields inherit the primary LLM's. Without an analyst key the
+    primary key is reused, but only when the analyst destination is exactly
+    the (provider, endpoint) the primary key is bound to — the primary key is
+    never sent anywhere else.
+    """
+    model = session.analyst_model or session.model
+    provider = session.analyst_provider or session.provider
+    endpoint = session.analyst_endpoint or session.custom_endpoint
+    if session.analyst_api_key:
+        key = session.analyst_api_key
+    elif session.api_key and (provider, endpoint) == (session.api_key_provider, session.api_key_endpoint):
+        key = session.api_key
+    else:
+        return None
+    if not model:
+        return None
+    return LLMClient(key, model, provider, endpoint)
+
+
+@dataclass
+class _AgentRun:
+    """State of one agent loop. Totals stay valid if the loop raises midway."""
+    messages: list[dict]
+    final_answer: str = ""
+    step: int = 0  # tool calls made
+    tool_chain: list[dict] = field(default_factory=list)
+    trace_events: list[dict] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    peak_input_tokens: int = 0  # Last round's input_tokens = actual context window usage
+    hit_max_rounds: bool = False
+
+
+async def _run_agent_loop(
+    run: _AgentRun,
+    llm: LLMClient,
+    tools: list[dict],
+    call_tool: Callable[[str, dict], Awaitable[Any]],
+    *,
+    max_rounds: int,
+    max_tokens: int,
+    stream: bool,
+    context_base: int = 0,
+    trace_step_offset: int | None = None,
+) -> AsyncGenerator[tuple[str, dict], None]:
+    """Run the LLM tool-calling loop until a final answer, yielding (event, data).
+
+    The events are the evaluate SSE events (thinking, text_delta,
+    context_update, tool_calling, tool_result, error). `run` is updated in
+    place; LLM errors propagate to the caller. Trace event steps count per
+    loop unless `trace_step_offset` is given, in which case they continue
+    from that offset.
+    """
+    context_delta = 0  # Estimated tokens added since last API report
+    round_num = 0
+    while True:
+        round_num += 1
+        if round_num > max_rounds:
+            run.hit_max_rounds = True
+            yield "error", {"message": f"Max tool call rounds ({max_rounds}) exceeded"}
+            return
+        yield "thinking", {"step": run.step, "context_tokens": context_base + context_delta}
+
+        if stream:
+            # Stream the LLM response — yields text deltas then final LLMResponse
+            response = None
+            async for item in llm.chat_stream(messages=run.messages, tools=tools, max_tokens=max_tokens):
+                if isinstance(item, str):
+                    yield "text_delta", {"text": item}
+                else:
+                    response = item
+            if response is None:
+                yield "error", {"message": "No response from LLM"}
+                return
+        else:
+            response = await llm.chat(messages=run.messages, tools=tools, max_tokens=max_tokens)
+
+        # Replace estimate with API-reported value — this is authoritative
+        run.input_tokens += response.input_tokens
+        run.output_tokens += response.output_tokens
+        run.peak_input_tokens = response.input_tokens
+        if response.input_tokens > 0:
+            context_base = response.input_tokens
+            context_delta = 0  # Reset delta — base is now accurate
+            yield "context_update", {"context_tokens": context_base, "source": "api"}
+
+        if not response.tool_calls:
+            run.final_answer = response.text
+            return
+
+        run.messages.append({
+            "role": "assistant",
+            "content": llm.to_anthropic_blocks(response),
+        })
+
+        tool_results = []
+        for tool_use in response.tool_calls:
+            run.step += 1
+            start = time.time()
+            error = None
+
+            yield "tool_calling", {
+                "step": run.step,
+                "tool": tool_use.name,
+                "input": tool_use.input,
+            }
+
+            try:
+                result = await call_tool(tool_use.name, tool_use.input)
+                result_text = _serialize_mcp_result(result)
+            except Exception as e:
+                error = str(e)
+                result_text = f"Error: {error}"
+
+            duration = time.time() - start
+
+            # Update context delta estimate (~4 chars/token, standard BPE approximation)
+            context_delta += estimate_tokens(json.dumps(tool_use.input)) + estimate_tokens(result_text)
+
+            tool_step = {
+                "step": run.step,
+                "tool": tool_use.name,
+                "input": tool_use.input,
+                "output": result_text,
+                "duration": round(duration, 3),
+                "error": error,
+                "context_tokens": context_base + context_delta,
+            }
+            run.tool_chain.append(tool_step)
+            yield "tool_result", tool_step
+
+            trace_step = run.step if trace_step_offset is None else trace_step_offset + len(run.trace_events)
+            run.trace_events.append(_make_trace_event(
+                trace_step, start, tool_use.name, tool_use.input, result_text, duration, error,
+            ))
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use.id,
+                "content": result_text,
+            })
+
+        run.messages.append({"role": "user", "content": tool_results})
+
+
 @router.post("/optimize/evaluate")
 async def evaluate(req: EvaluateRequest):
     """Run an evaluation prompt with SSE streaming of tool calls."""
@@ -143,30 +309,13 @@ async def evaluate(req: EvaluateRequest):
             yield _sse("error", {"message": f"Failed to initialize LLM client: {e}"})
             return
 
-        tools = []
-        for t in session.tools:
-            tools.append({
-                "name": t.name,
-                "description": t.description or "",
-                "input_schema": t.inputSchema or {"type": "object", "properties": {}},
-            })
+        tools = _tools_for_llm(session.tools)
 
         # Build conversation history from previous evaluations
         # Include the FULL message history (tool calls + results) to mirror
         # real-world behavior where tool responses accumulate in context
-        messages = []
-
         # Inject loaded resources as context at the start
-        if session.loaded_resources:
-            resource_parts = []
-            for uri, res in session.loaded_resources.items():
-                resource_parts.append(f"## {res['name']}\n\n{res['content']}")
-            resource_context = (
-                "The following resources have been loaded for reference:\n\n"
-                + "\n\n---\n\n".join(resource_parts)
-            )
-            messages.append({"role": "user", "content": resource_context})
-            messages.append({"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."})
+        messages = _resource_preamble(session.loaded_resources.values())
 
         for prev in session.eval_results:
             raw = prev.get("raw_messages")
@@ -179,13 +328,7 @@ async def evaluate(req: EvaluateRequest):
                 messages.append({"role": "assistant", "content": prev["answer"]})
         messages.append({"role": "user", "content": req.prompt})
         this_eval_start = len(messages) - 1  # Index where this eval's messages begin
-        tool_chain: list[dict] = []
-        trace_events: list[dict] = []
-        step = 0
-        final_answer = ""
-        total_input_tokens = 0
-        total_output_tokens = 0
-        peak_input_tokens = 0  # Last round's input_tokens = actual context window usage
+
         # Context tracking: use API-reported base + estimated delta from new content
         # Initialize base from prior eval's peak if available, otherwise estimate from messages
         context_base = 0
@@ -195,130 +338,38 @@ async def evaluate(req: EvaluateRequest):
                 context_base = peak
         if context_base == 0:
             # Estimate from tool definitions + messages
-            context_base = sum(
-                len(f"{t['name']}: {t['description']}") // 4 + len(json.dumps(t['input_schema'])) // 4
-                for t in tools
-            )
+            context_base = _menu_tokens(session.tools)
             for m in messages:
                 c = m.get("content", "")
-                context_base += max(1, len(c if isinstance(c, str) else json.dumps(c)) // 4)
-        context_delta = 0  # Estimated tokens added since last API report
-        round_num = 0
+                context_base += estimate_tokens(c if isinstance(c, str) else json.dumps(c))
 
+        run = _AgentRun(messages=messages)
         try:
-            while True:
-                round_num += 1
-                if round_num > _max_rounds:
-                    final_answer = f"[Stopped after {_max_rounds} tool call rounds — increase limit in Settings]"
-                    yield _sse("error", {"message": f"Max tool call rounds ({_max_rounds}) exceeded"})
-                    break
-                yield _sse("thinking", {"step": step, "context_tokens": context_base + context_delta})
-
-                # Stream the LLM response — yields text deltas then final LLMResponse
-                response = None
-                async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=_max_tokens):
-                    if isinstance(item, str):
-                        yield _sse("text_delta", {"text": item})
-                    else:
-                        # Final LLMResponse
-                        response = item
-
-                if response is None:
-                    yield _sse("error", {"message": "No response from LLM"})
-                    break
-
-                # Replace estimate with API-reported value — this is authoritative
-                total_input_tokens += response.input_tokens
-                total_output_tokens += response.output_tokens
-                peak_input_tokens = response.input_tokens
-                if response.input_tokens > 0:
-                    context_base = response.input_tokens
-                    context_delta = 0  # Reset delta — base is now accurate
-                    # Send corrected value so frontend can update
-                    yield _sse("context_update", {"context_tokens": context_base, "source": "api"})
-
-                if not response.tool_calls:
-                    final_answer = response.text
-                    break
-
-                messages.append({
-                    "role": "assistant",
-                    "content": client.to_anthropic_blocks(response),
-                })
-
-                tool_results = []
-                for tool_use in response.tool_calls:
-                    step += 1
-                    start = time.time()
-                    error = None
-                    result_text = ""
-
-                    yield _sse("tool_calling", {
-                        "step": step,
-                        "tool": tool_use.name,
-                        "input": tool_use.input,
-                    })
-
-                    try:
-                        result = await mcp_manager.call_tool(
-                            tool_use.name, tool_use.input
-                        )
-                        result_text = _serialize_mcp_result(result)
-                    except Exception as e:
-                        error = str(e)
-                        result_text = f"Error: {error}"
-
-                    duration = time.time() - start
-
-                    # Update context delta estimate (~4 chars/token, standard BPE approximation)
-                    input_str = json.dumps(tool_use.input)
-                    context_delta += max(1, len(input_str) // 4) + max(1, len(result_text) // 4)
-
-                    tool_step = {
-                        "step": step,
-                        "tool": tool_use.name,
-                        "input": tool_use.input,
-                        "output": result_text,
-                        "duration": round(duration, 3),
-                        "error": error,
-                        "context_tokens": context_base + context_delta,
-                    }
-                    tool_chain.append(tool_step)
-
-                    yield _sse("tool_result", tool_step)
-
-                    trace_event = {
-                        "step": len(session.traces) + len(trace_events),
-                        "timestamp": start,
-                        "tool_name": tool_use.name,
-                        "tool_input": tool_use.input,
-                        "tool_response_chars": len(result_text),
-                        "tool_response_tokens_est": max(1, len(result_text) // 4),
-                        "tool_response_fields": _extract_fields(result_text),
-                        "tool_duration_s": round(duration, 3),
-                        "error_category": error if error else None,
-                    }
-                    trace_events.append(trace_event)
-
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use.id,
-                        "content": result_text,
-                    })
-
-                messages.append({"role": "user", "content": tool_results})
-
+            async for event, data in _run_agent_loop(
+                run, client, tools, mcp_manager.call_tool,
+                max_rounds=_max_rounds,
+                max_tokens=_max_tokens,
+                stream=True,
+                context_base=context_base,
+                trace_step_offset=len(session.traces),
+            ):
+                yield _sse(event, data)
         except Exception as e:
             logger.exception("Evaluation error")
             # Show a clean error message without the full traceback
-            final_answer = _llm_error_message(e)
+            run.final_answer = _llm_error_message(e)
+        if run.hit_max_rounds:
+            run.final_answer = f"[Stopped after {_max_rounds} tool call rounds — increase limit in Settings]"
+        final_answer = run.final_answer
+        tool_chain = run.tool_chain
+        trace_events = run.trace_events
 
         usage = {
-            "input_tokens": total_input_tokens,
-            "output_tokens": total_output_tokens,
-            "total_tokens": total_input_tokens + total_output_tokens,
-            "peak_context_tokens": peak_input_tokens,  # Actual context window usage (last round)
-            "api_rounds": step + 1,  # Number of API calls made
+            "input_tokens": run.input_tokens,
+            "output_tokens": run.output_tokens,
+            "total_tokens": run.input_tokens + run.output_tokens,
+            "peak_context_tokens": run.peak_input_tokens,  # Actual context window usage (last round)
+            "api_rounds": run.step + 1,  # Number of API calls made
         }
 
         # Capture the full context window contents for inspection
@@ -450,13 +501,7 @@ async def analyze_tools():
         raise HTTPException(status_code=400, detail="Not connected")
     if not session.traces:
         raise HTTPException(status_code=400, detail="No evaluation traces. Run prompts on the Evaluate tab first.")
-    from backend.mcp_optimizer.analyze import run_analysis
-    analysis_result = run_analysis(session.tools, session.traces, [])
-    session.analysis = analysis_result
-    session.recommendations = analysis_result.get("recommendations", [])
-    # Assign IDs to recommendations
-    for i, rec in enumerate(session.recommendations):
-        rec["id"] = f"rec_{i}"
+    _run_and_store_analysis()
     return {
         "recommendations": session.recommendations,
         "quickWins": _get_visible_quick_wins(),
@@ -523,17 +568,12 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
     async def event_stream():
         import asyncio
-        from backend.mcp_optimizer.analyze import run_analysis
 
         # --- Step 1: Analyze (only if not already done) ---
         if not session.analysis:
             yield _sse("progress", {"phase": "analyze", "message": "Analyzing tool usage patterns..."})
             try:
-                analysis_result = run_analysis(session.tools, session.traces, [])
-                session.analysis = analysis_result
-                session.recommendations = analysis_result.get("recommendations", [])
-                for i, rec in enumerate(session.recommendations):
-                    rec["id"] = f"rec_{i}"
+                _run_and_store_analysis()
             except Exception as e:
                 yield _sse("error", {"message": f"Analysis failed: {e}"})
                 return
@@ -575,13 +615,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if resource_recs_enabled:
             yield _sse("progress", {"phase": "resources", "message": "Condensing resources..."})
             try:
-                resources = await mcp_manager.list_resources()
-                items = resources if isinstance(resources, list) else getattr(resources, "resources", [])
-
-                analyst_key = session.analyst_api_key or session.api_key
-                analyst_model_name = session.analyst_model or session.model
-                analyst_prov = session.analyst_provider or session.provider
-                analyst_ep = session.analyst_endpoint or session.custom_endpoint
+                analyst = _analyst_llm()
+                items = await mcp_manager.list_resources() if analyst else []
 
                 for r in items:
                     mime_type = getattr(r, "mimeType", "") or ""
@@ -591,21 +626,13 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     name = getattr(r, "name", "") or ""
 
                     try:
-                        result = await mcp_manager.read_resource(uri)
-                        text = ""
-                        contents = result if isinstance(result, list) else getattr(result, "contents", [])
-                        for c in contents:
-                            if isinstance(c, str):
-                                text += c
-                            else:
-                                text += getattr(c, "text", "") or ""
+                        text = mcp_manager.extract_resource_text(await mcp_manager.read_resource(uri))
 
                         if len(text) < 500:
                             continue  # Too short to bother condensing
 
                         yield _sse("progress", {"phase": "resources", "message": f"Condensing {name}..."})
 
-                        analyst = LLMClient(analyst_key, analyst_model_name, analyst_prov, analyst_ep)
                         response = await analyst.chat(
                             messages=[{
                                 "role": "user",
@@ -651,18 +678,12 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     affected_names.add(name)
             tools_to_rewrite = [t for t in session.tools if t.name in affected_names]
 
-            analyst_key = session.analyst_api_key or session.api_key
-            analyst_model_name = session.analyst_model or session.model
-            analyst_prov = session.analyst_provider or session.provider
-            analyst_ep = session.analyst_endpoint or session.custom_endpoint
-
-            if tools_to_rewrite and analyst_key and analyst_model_name:
-                yield _sse("progress", {"phase": "proxy", "message": f"Rewriting {len(tools_to_rewrite)} tool descriptions..."})
+            if tools_to_rewrite:
                 try:
-                    rewritten_descriptions = await batch_rewrite_descriptions(
-                        tools_to_rewrite, analyst_key, analyst_model_name,
-                        analyst_prov, analyst_ep,
-                    )
+                    analyst = _analyst_llm()
+                    if analyst:
+                        yield _sse("progress", {"phase": "proxy", "message": f"Rewriting {len(tools_to_rewrite)} tool descriptions..."})
+                        rewritten_descriptions = await batch_rewrite_descriptions(tools_to_rewrite, analyst)
                 except Exception as e:
                     logger.warning("Description rewriting failed, using originals: %s", e)
                     yield _sse("progress", {"phase": "proxy", "message": f"Description rewriting skipped: {e}"})
@@ -759,10 +780,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         proxy_tools_list = await proxy_client.list_tools()
                         proxy_tools = len(proxy_tools_list)
                         # Calculate proxy menu tokens
-                        proxy_menu_tokens = sum(
-                            len(f"{t.name}: {t.description or ''}") // 4 + len(json.dumps(t.inputSchema or {})) // 4
-                            for t in proxy_tools_list
-                        )
+                        proxy_menu_tokens = _menu_tokens(proxy_tools_list)
                     yield _sse("progress", {
                         "phase": "proxy",
                         "message": f"Proxy running with {proxy_tools} tools (was {len(session.tools)})"
@@ -792,27 +810,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 # Build tool list from proxy — keep connection open for all prompts
                 proxy_mcp = McpClient(f"http://localhost:{proxy_port}/mcp")
                 async with proxy_mcp:
-                    proxy_tools_defs = await proxy_mcp.list_tools()
-                    proxy_tools_list = [{
-                        "name": t.name,
-                        "description": t.description or "",
-                        "input_schema": t.inputSchema or {"type": "object", "properties": {}},
-                    } for t in proxy_tools_defs]
+                    proxy_tools_list = _tools_for_llm(await proxy_mcp.list_tools())
                     included_evals = [(i, e) for i, e in enumerate(session.eval_results) if i in included]
 
                     # Build resource context once (only enabled resources)
                     disabled_res_set = set(req.disabled_resources) if req and req.disabled_resources else set()
-                    active_resources = {
-                        uri: res for uri, res in session.loaded_resources.items()
+                    resource_preamble = _resource_preamble(
+                        res for uri, res in session.loaded_resources.items()
                         if uri not in disabled_res_set
-                    }
-                    resource_preamble: list[dict] = []
-                    if active_resources:
-                        resource_parts = [f"## {res['name']}\n\n{res['content']}" for res in active_resources.values()]
-                        resource_preamble = [
-                            {"role": "user", "content": "The following resources have been loaded for reference:\n\n" + "\n\n---\n\n".join(resource_parts)},
-                            {"role": "assistant", "content": "I've reviewed the loaded resources and will use them to help answer your questions."},
-                        ]
+                    )
 
                     yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(included_evals)} prompts through proxy..."})
                     for eval_num, (i, eval_result) in enumerate(included_evals, 1):
@@ -823,74 +829,28 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         })
 
                         # Clean context: only enabled resources + the prompt (no history)
-                        messages = [*resource_preamble, {"role": "user", "content": prompt}]
-                        step = 0
-                        round_num = 0
-                        proxy_answer = ""
+                        run = _AgentRun(messages=[*resource_preamble, {"role": "user", "content": prompt}])
                         try:
-                            while True:
-                                round_num += 1
-                                if round_num > max_rounds:
-                                    proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: stopped after {max_rounds} tool call rounds"})
-                                    yield _sse("progress", {
-                                        "phase": "evaluate",
-                                        "message": f"Prompt {i+1} exceeded max tool call rounds ({max_rounds})",
-                                    })
-                                    break
-
-                                response = await llm.chat(messages=messages, tools=proxy_tools_list, max_tokens=4096)
-
-                                if not response.tool_calls:
-                                    proxy_answer = response.text
-                                    proxy_answers.append({"index": i, "prompt": prompt, "answer": proxy_answer})
-                                    break
-
-                                messages.append({
-                                    "role": "assistant",
-                                    "content": llm.to_anthropic_blocks(response),
+                            async for _event in _run_agent_loop(
+                                run, llm, proxy_tools_list, proxy_mcp.call_tool,
+                                max_rounds=max_rounds, max_tokens=4096, stream=False,
+                            ):
+                                pass
+                            if run.hit_max_rounds:
+                                proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: stopped after {max_rounds} tool call rounds"})
+                                yield _sse("progress", {
+                                    "phase": "evaluate",
+                                    "message": f"Prompt {i+1} exceeded max tool call rounds ({max_rounds})",
                                 })
-
-                                tool_results = []
-                                for tool_use in response.tool_calls:
-                                    step += 1
-                                    start = time.time()
-                                    error = None
-                                    result_text = ""
-
-                                    try:
-                                        result = await proxy_mcp.call_tool(tool_use.name, tool_use.input)
-                                        result_text = _serialize_mcp_result(result)
-                                    except Exception as e:
-                                        error = str(e)
-                                        result_text = f"Error: {error}"
-
-                                    duration = time.time() - start
-
-                                    proxy_traces.append({
-                                        "step": step,
-                                        "timestamp": start,
-                                        "tool_name": tool_use.name,
-                                        "tool_input": tool_use.input,
-                                        "tool_response_chars": len(result_text),
-                                        "tool_response_tokens_est": max(1, len(result_text) // 4),
-                                        "tool_response_fields": _extract_fields(result_text),
-                                        "tool_duration_s": round(duration, 3),
-                                        "error_category": error if error else None,
-                                    })
-
-                                    tool_results.append({
-                                        "type": "tool_result",
-                                        "tool_use_id": tool_use.id,
-                                        "content": result_text,
-                                    })
-
-                                messages.append({"role": "user", "content": tool_results})
+                            else:
+                                proxy_answers.append({"index": i, "prompt": prompt, "answer": run.final_answer})
                         except Exception as e:
                             proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: {e}"})
                             yield _sse("progress", {
                                 "phase": "evaluate",
                                 "message": f"Prompt {i+1} failed: {str(e)[:100]}"
                             })
+                        proxy_traces.extend(run.trace_events)
 
             except Exception as e:
                 logger.exception("Proxy evaluation failed")
@@ -900,17 +860,17 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         analyst_results = []
         proxy_correct = 0
         proxy_total = 0
-        analyst_key = session.analyst_api_key or session.api_key
-        if proxy_answers and analyst_key:
+        analyst = None
+        if proxy_answers:
+            try:
+                analyst = _analyst_llm()
+            except Exception as e:
+                yield _sse("progress", {"phase": "analyst", "message": f"Answer comparison failed: {str(e)[:100]}"})
+            if analyst is None:
+                logger.info("Skipping answer comparison: no API key usable for the analyst LLM")
+        if analyst:
             yield _sse("progress", {"phase": "analyst", "message": "Comparing baseline vs optimized answers..."})
             try:
-                analyst = LLMClient(
-                    analyst_key,
-                    session.analyst_model or session.model,
-                    session.analyst_provider or session.provider,
-                    session.analyst_endpoint or session.custom_endpoint,
-                )
-
                 for i, (prompt, baseline_answer, proxy_answer) in enumerate(
                     _analyst_pairs(proxy_answers, session.eval_results)
                 ):
@@ -984,10 +944,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
         num_prompts = max(len(session.eval_results), 1)
 
-        orig_menu = sum(
-            len(f"{t.name}: {t.description or ''}") // 4 + len(json.dumps(t.inputSchema or {})) // 4
-            for t in session.tools
-        )
+        orig_menu = _menu_tokens(session.tools)
 
         # Accuracy from analyst results
         analyst_correct = sum(1 for r in analyst_results if r.get("verdict") == "equivalent")
@@ -1164,7 +1121,5 @@ def _serialize_message_content(content) -> str:
     return "\n\n".join(parts)
 
 
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 

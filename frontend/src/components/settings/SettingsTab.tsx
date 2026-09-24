@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useStore, KNOWN_MODELS, MCP_CONFIG_DEFAULTS } from "../../store";
+import { useStore, MCP_CONFIG_DEFAULTS, LS_PREFIX, generateId } from "../../store";
+import { DEFAULT_MODEL, KNOWN_MODELS, MODEL_CONTEXT } from "../../config/models";
 import type { LLMConfig, MCPServerConfig } from "../../store";
 import { api } from "../../api/client";
 
@@ -620,20 +621,20 @@ export function SettingsTab() {
 
   const handleAddLLM = () => {
     const config: LLMConfig = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      id: generateId(),
       name: "New LLM",
       provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      model: DEFAULT_MODEL,
       apiKey: "",
       endpoint: "",
-      contextWindow: 1000000,
+      contextWindow: MODEL_CONTEXT[DEFAULT_MODEL],
     };
     addLLMConfig(config);
   };
 
   const handleAddMCP = () => {
     const config: MCPServerConfig = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      id: generateId(),
       name: "New Server",
       url: "",
       authMethod: "none",
@@ -816,7 +817,6 @@ function ClearCredentialsSection() {
         await api.signOut(cfg.url).catch(() => {});
       }
     }
-    const LS_PREFIX = "mcperiscope:";
     // Sensitive keys: anything that holds an API key, bearer token, header
     // value, or OAuth client secret. We intentionally drop the *entire*
     // llmConfigs and mcpConfigs entries — they hold credentials inside the

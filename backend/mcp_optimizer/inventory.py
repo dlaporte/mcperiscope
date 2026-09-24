@@ -76,6 +76,9 @@ def tool_token_budget(tool: Tool) -> ToolBudgetEntry:
 # Levenshtein distance
 # ---------------------------------------------------------------------------
 
+# Two different tool names within this edit distance count as "similar".
+SIMILAR_NAME_MAX_DISTANCE = 2
+
 
 def levenshtein(a: str, b: str) -> int:
     """Standard dynamic-programming Levenshtein distance."""

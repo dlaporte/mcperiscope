@@ -4,10 +4,17 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from backend.state import MODEL_CONTEXT_WINDOWS, session
+from backend import mcp_manager
+from backend.mcp_optimizer.inventory import (
+    SIMILAR_NAME_MAX_DISTANCE,
+    estimate_tokens,
+    find_name_clusters,
+    levenshtein,
+    tool_token_budget,
+)
+from backend.state import context_window_for, session
 
 logger = logging.getLogger(__name__)
-from backend.mcp_optimizer.inventory import find_name_clusters, levenshtein, tool_token_budget
 
 router = APIRouter()
 
@@ -25,7 +32,7 @@ def generate_quick_wins(
     analysis cannot detect statically.
     """
     wins = []
-    ctx_window = MODEL_CONTEXT_WINDOWS.get(model, session.custom_context_window or 200_000)
+    ctx_window = context_window_for(model)
 
     # 1. Trim verbose descriptions — tools with oversized token footprints
     #    Action: use analyst LLM to rewrite descriptions more concisely
@@ -130,7 +137,7 @@ async def get_inventory():
     if not session.inventory:
         raise HTTPException(status_code=400, detail="Not connected or no inventory")
 
-    ctx_window = MODEL_CONTEXT_WINDOWS.get(session.model, session.custom_context_window or 200_000)
+    ctx_window = context_window_for(session.model)
     tool_budget = session.inventory.get("total_budget_tokens", 0)
 
     # Estimate resource and prompt definition tokens
@@ -138,33 +145,24 @@ async def get_inventory():
     prompt_tokens = 0
     resource_details: list[dict] = []  # For quick wins analysis
 
-    from backend import mcp_manager
     if mcp_manager.is_connected():
         try:
-            resources = await mcp_manager.list_resources()
-            items = resources if isinstance(resources, list) else getattr(resources, "resources", [])
-            for r in items:
+            for r in await mcp_manager.list_resources():
                 name = getattr(r, "name", "") or ""
                 uri = str(getattr(r, "uri", ""))
                 desc = getattr(r, "description", "") or ""
                 mime_type = getattr(r, "mimeType", "") or ""
-                def_tokens = max(1, len(f"{name}: {desc} ({uri})") // 4)
-                resource_tokens += def_tokens
+                resource_tokens += estimate_tokens(f"{name}: {desc} ({uri})")
 
                 # Read markdown resources to measure their content size
                 if mime_type == "text/markdown":
                     try:
-                        result = await mcp_manager.read_resource(uri)
-                        contents = result if isinstance(result, list) else getattr(result, "contents", [])
-                        text = ""
-                        for c in contents:
-                            text += getattr(c, "text", "") or ""
-                        content_tokens = max(1, len(text) // 4)
+                        text = mcp_manager.extract_resource_text(await mcp_manager.read_resource(uri))
                         resource_details.append({
                             "name": name,
                             "uri": uri,
                             "mime_type": mime_type,
-                            "tokens": content_tokens,
+                            "tokens": estimate_tokens(text),
                             "char_count": len(text),
                         })
                     except Exception:
@@ -180,7 +178,7 @@ async def get_inventory():
                 desc = getattr(p, "description", "") or ""
                 args = getattr(p, "arguments", []) or []
                 args_text = ", ".join(getattr(a, "name", "") for a in args)
-                prompt_tokens += max(1, len(f"{name}({args_text}): {desc}") // 4)
+                prompt_tokens += estimate_tokens(f"{name}({args_text}): {desc}")
         except Exception:
             logger.debug("Failed to list prompts for inventory", exc_info=True)
 
@@ -214,12 +212,12 @@ async def get_tool_stats(name: str):
 
     budget = tool_token_budget(tool)
 
-    # Similar tools (Levenshtein distance <= 3)
+    # Similar tools (small Levenshtein distance)
     similar = []
     for t in session.tools:
         if t.name != name:
             dist = levenshtein(t.name, name)
-            if dist <= 3:
+            if dist <= SIMILAR_NAME_MAX_DISTANCE:
                 similar.append({"name": t.name, "distance": dist})
     similar.sort(key=lambda x: x["distance"])
 
@@ -232,7 +230,7 @@ async def get_tool_stats(name: str):
             break
 
     # Context window calculation
-    ctx_window = MODEL_CONTEXT_WINDOWS.get(session.model, session.custom_context_window or 200_000)
+    ctx_window = context_window_for(session.model)
 
     return {
         "name": name,

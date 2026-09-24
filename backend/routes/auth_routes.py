@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.models import OAuthCallbackRequest, SignOutRequest
 from backend import mcp_manager
 from backend.credentials import bind_primary_credentials
+from backend.routes._common import _sse
 from backend.routes.connection import validate_primary_key
 from backend.state import session
 from backend.url_validation import validate_external_url
 
 router = APIRouter()
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 @router.post("/auth/callback")

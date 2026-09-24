@@ -1,13 +1,10 @@
+import { gaugeFillColors, GAUGE_TRACK_STYLE } from "../explore/ContextGauge";
+import { UsageBar } from "../shared/UsageBar";
+
 interface Props {
   baseline: number;
   optimized: number | null;
   max: number;
-}
-
-function fillColors(pct: number) {
-  if (pct > 75) return { fill: "#dd4040", glow: "rgba(221,64,64,0.5)" };
-  if (pct > 50) return { fill: "#c9a030", glow: "rgba(201,160,48,0.4)" };
-  return { fill: "#30cc30", glow: "rgba(48,204,48,0.4)" };
 }
 
 export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
@@ -18,27 +15,17 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
   const savings = optimized != null ? baseline - optimized : null;
   const savingsPct = savings != null && baseline > 0 ? (savings / baseline) * 100 : null;
 
-  const baselineColors = fillColors(baselinePct);
-  const optimizedColors = optimizedPct != null ? fillColors(optimizedPct) : null;
+  const baselineColors = gaugeFillColors(baselinePct);
+  const optimizedColors = optimizedPct != null ? gaugeFillColors(optimizedPct) : null;
 
   return (
-    <div
-      className="flex items-center gap-4 px-4 py-3"
-      style={{ backgroundColor: 'var(--sub-panel)', borderBottom: '1px solid var(--sub-rivet)' }}
-    >
-      <span className="font-stencil text-xs whitespace-nowrap" style={{ color: 'var(--sub-text-dim)' }}>
-        Session usage
-      </span>
+    <UsageBar>
 
       <div className="flex items-center gap-4 flex-1 min-w-0">
       {/* Gauge bar */}
       <div
         className="flex-1 h-6 rounded-sm overflow-hidden relative"
-        style={{
-          backgroundColor: "#0e1012",
-          border: "1px solid var(--sub-brass-dim)",
-          boxShadow: "inset 0 2px 4px rgba(0,0,0,0.7)",
-        }}
+        style={GAUGE_TRACK_STYLE}
       >
         {/* Optimized fill — shown when we have an optimized value */}
         {optimizedPct != null && optimizedColors && (
@@ -46,7 +33,7 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
             className="absolute top-0 left-0 h-full rounded-sm"
             style={{
               width: `${Math.max(Math.min(optimizedPct, 100), 1.5)}%`,
-              background: `linear-gradient(180deg, ${optimizedColors.fill} 0%, ${optimizedColors.fill} 100%)`,
+              background: optimizedColors.fill,
               boxShadow: `0 0 10px ${optimizedColors.glow}, 0 0 20px ${optimizedColors.glow}, inset 0 0 4px rgba(255,255,255,0.1)`,
               minWidth: "6px",
               zIndex: 2,
@@ -62,7 +49,7 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
             width: `${Math.max(Math.min(baselinePct, 100), 1.5)}%`,
             background: optimizedPct != null
               ? `linear-gradient(180deg, ${baselineColors.fill}40 0%, ${baselineColors.fill}20 100%)`
-              : `linear-gradient(180deg, ${baselineColors.fill} 0%, ${baselineColors.fill} 100%)`,
+              : baselineColors.fill,
             boxShadow: optimizedPct != null
               ? "none"
               : `0 0 10px ${baselineColors.glow}, inset 0 0 4px rgba(255,255,255,0.1)`,
@@ -121,6 +108,6 @@ export function OptimizeContextGauge({ baseline, optimized, max }: Props) {
         )}
       </div>
       </div>
-    </div>
+    </UsageBar>
   );
 }

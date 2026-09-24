@@ -10,12 +10,20 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter, defaultdict
+from dataclasses import asdict
 from itertools import combinations
 from typing import Any
 
 from mcp.types import Tool
 
-from backend.mcp_optimizer.inventory import estimate_tokens, levenshtein
+from backend.mcp_optimizer.inventory import (
+    SIMILAR_NAME_MAX_DISTANCE,
+    _CAMEL_BOUNDARY,
+    _extract_prefix,
+    estimate_tokens,
+    levenshtein,
+    tool_token_budget,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -29,24 +37,13 @@ def analyze_token_budget(tools: list[Tool]) -> list[dict[str, Any]]:
     Returns a list sorted by total_tokens descending, each entry containing
     name, description_tokens, schema_tokens, total_tokens.
     """
-    rows: list[dict[str, Any]] = []
-    for tool in tools:
-        desc_text = f"{tool.name}: {tool.description or ''}"
-        schema_text = json.dumps(tool.inputSchema) if tool.inputSchema else ""
-        desc_tok = estimate_tokens(desc_text)
-        schema_tok = estimate_tokens(schema_text)
-        rows.append({
-            "name": tool.name,
-            "description_tokens": desc_tok,
-            "schema_tokens": schema_tok,
-            "total_tokens": desc_tok + schema_tok,
-        })
+    rows = [asdict(tool_token_budget(tool)) for tool in tools]
     rows.sort(key=lambda r: r["total_tokens"], reverse=True)
     return rows
 
 
 def analyze_name_clarity(tools: list[Tool]) -> dict[str, Any]:
-    """Prefix clusters, Levenshtein pairs < 3, and ambiguous naming flags."""
+    """Prefix clusters, similar-name Levenshtein pairs, and ambiguous naming flags."""
     # Prefix clusters
     prefix_groups: dict[str, list[str]] = {}
     for tool in tools:
@@ -60,14 +57,14 @@ def analyze_name_clarity(tools: list[Tool]) -> dict[str, Any]:
     ]
     clusters.sort(key=lambda c: (-c["count"], c["prefix"]))
 
-    # Levenshtein pairs with distance < 3
+    # Levenshtein pairs within the similarity threshold
     similar_pairs: list[dict[str, Any]] = []
     names = [t.name for t in tools]
     for a, b in combinations(names, 2):
-        if abs(len(a) - len(b)) > 2:
+        if abs(len(a) - len(b)) > SIMILAR_NAME_MAX_DISTANCE:
             continue
         dist = levenshtein(a, b)
-        if 0 < dist < 3:
+        if 0 < dist <= SIMILAR_NAME_MAX_DISTANCE:
             similar_pairs.append({"tool_a": a, "tool_b": b, "distance": dist})
     similar_pairs.sort(key=lambda p: (p["distance"], p["tool_a"]))
 
@@ -90,19 +87,6 @@ def analyze_name_clarity(tools: list[Tool]) -> dict[str, Any]:
         "similar_pairs": similar_pairs,
         "ambiguous_names": ambiguous,
     }
-
-
-_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-
-
-def _extract_prefix(name: str) -> str:
-    """Return the first logical word of a tool name."""
-    if "_" in name:
-        return name.split("_", 1)[0].lower()
-    parts = _CAMEL_BOUNDARY.split(name)
-    if parts:
-        return parts[0].lower()
-    return name.lower()
 
 
 def analyze_descriptions(tools: list[Tool]) -> list[dict[str, Any]]:

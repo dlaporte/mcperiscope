@@ -45,3 +45,47 @@ def test_llm_error_message_no_substring_matching():
     # "generate" contains "rate"; must not be reported as a rate limit.
     msg = _llm_error_message(ValueError("failed to generate response"))
     assert msg == "Error: failed to generate response"
+
+
+def _set_creds(monkeypatch, **fields):
+    from backend.state import session
+
+    defaults = {
+        "model": "m", "provider": "anthropic", "custom_endpoint": "",
+        "api_key": "primary", "api_key_provider": "anthropic", "api_key_endpoint": "",
+        "analyst_model": "", "analyst_provider": "", "analyst_endpoint": "",
+        "analyst_api_key": "",
+    }
+    for k, v in {**defaults, **fields}.items():
+        monkeypatch.setattr(session, k, v)
+
+
+def test_analyst_llm_reuses_primary_key_for_same_destination(monkeypatch):
+    from backend.routes import optimize
+
+    seen = []
+    monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
+    _set_creds(monkeypatch, analyst_model="analyst-m")
+    assert optimize._analyst_llm() is not None
+    assert seen == [("primary", "analyst-m", "anthropic", "")]
+
+
+def test_analyst_llm_never_sends_primary_key_elsewhere(monkeypatch):
+    from backend.routes import optimize
+
+    monkeypatch.setattr(optimize, "LLMClient", lambda *a: object())
+    _set_creds(monkeypatch, analyst_provider="custom", analyst_endpoint="https://evil.example/v1")
+    assert optimize._analyst_llm() is None
+    _set_creds(monkeypatch, analyst_provider="openai")
+    assert optimize._analyst_llm() is None
+
+
+def test_analyst_llm_uses_analyst_key(monkeypatch):
+    from backend.routes import optimize
+
+    seen = []
+    monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
+    _set_creds(monkeypatch, analyst_api_key="ak", analyst_provider="custom",
+               analyst_endpoint="https://llm.example/v1")
+    assert optimize._analyst_llm() is not None
+    assert seen == [("ak", "m", "custom", "https://llm.example/v1")]

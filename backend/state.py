@@ -111,3 +111,8 @@ class Session:
 
 
 session = Session()
+
+
+def context_window_for(model: str) -> int:
+    """Context window for a model: known size, else the user's custom setting."""
+    return MODEL_CONTEXT_WINDOWS.get(model) or session.custom_context_window

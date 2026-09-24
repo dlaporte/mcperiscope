@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useStore } from "../../store";
+import { useStore, PENDING_OAUTH_KEY } from "../../store";
 
 function LLMDisplay() {
   const { llmConfigs, primaryLLM, analystLLM, setActiveTab } = useStore();
@@ -68,9 +68,9 @@ export function ConnectTab() {
   // Check backend status on mount, and resume pending OAuth if needed
   useEffect(() => {
     checkStatus();
-    const pendingCallback = sessionStorage.getItem("mcperiscope:pending-oauth-callback");
+    const pendingCallback = sessionStorage.getItem(PENDING_OAUTH_KEY);
     if (pendingCallback) {
-      sessionStorage.removeItem("mcperiscope:pending-oauth-callback");
+      sessionStorage.removeItem(PENDING_OAUTH_KEY);
       completeOAuth(pendingCallback);
     }
   }, [checkStatus, completeOAuth]);

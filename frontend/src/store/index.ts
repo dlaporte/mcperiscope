@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { api } from "../api/client";
 import type { AuthConfig } from "../api/client";
+import { KNOWN_MODELS, MODEL_CONTEXT } from "../config/models";
+import { estimateTokens } from "../utils/tokens";
 
-function generateId(): string {
+export function generateId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
@@ -60,33 +62,6 @@ export const MCP_CONFIG_DEFAULTS = {
   protocol: "auto" as const,
 };
 
-export const KNOWN_MODELS = [
-  // Anthropic — latest
-  { id: "claude-fable-5-1", label: "Claude Fable 5.1", context: 1000000, provider: "anthropic" as const },
-  { id: "claude-opus-5-5", label: "Claude Opus 5.5", context: 1000000, provider: "anthropic" as const },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5", context: 1000000, provider: "anthropic" as const },
-  // Anthropic — Claude 4.8
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8", context: 1000000, provider: "anthropic" as const },
-  // Anthropic — Claude 4.6 family
-  { id: "claude-opus-4-6", label: "Claude Opus 4.6", context: 1000000, provider: "anthropic" as const },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", context: 1000000, provider: "anthropic" as const },
-  // Anthropic — Claude 4.5 (Haiku 4.5 is the latest Haiku)
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", context: 200000, provider: "anthropic" as const },
-  // OpenAI — GPT-6 family
-  { id: "gpt-6-astra", label: "GPT-6 Astra", context: 1000000, provider: "openai" as const },
-  { id: "gpt-6-sol", label: "GPT-6 Sol", context: 1000000, provider: "openai" as const },
-  { id: "gpt-6-luna", label: "GPT-6 Luna", context: 1000000, provider: "openai" as const },
-  // OpenAI — GPT-5.x family
-  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", context: 1000000, provider: "openai" as const },
-  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", context: 1000000, provider: "openai" as const },
-  { id: "gpt-5.4", label: "GPT-5.4", context: 1000000, provider: "openai" as const },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", context: 400000, provider: "openai" as const },
-  { id: "gpt-5.2", label: "GPT-5.2", context: 400000, provider: "openai" as const },
-  // OpenAI — GPT-4o family
-  { id: "gpt-4o", label: "GPT-4o", context: 128000, provider: "openai" as const },
-  { id: "gpt-4o-mini", label: "GPT-4o Mini", context: 128000, provider: "openai" as const },
-];
-
 export type Tab = "connect" | "explore" | "evaluate" | "optimize" | "settings";
 
 interface OptimizationRun {
@@ -138,12 +113,6 @@ interface AppState {
   // Auth
   oauthPending: boolean;
   connectProgress: string | null;
-
-  // Model config (derived from primary LLM config for backward compat)
-  model: string;
-  apiKey: string;
-  customEndpoint: string;
-  customContextWindow: number;
 
   // LLM configurations
   llmConfigs: LLMConfig[];
@@ -256,7 +225,13 @@ interface AppState {
   selectEval: (index: number) => void;
 }
 
-const LS_PREFIX = "mcperiscope:";
+export const LS_PREFIX = "mcperiscope:";
+
+// sessionStorage key: OAuthCallback stashes the callback URL here for ConnectTab to finish
+export const PENDING_OAUTH_KEY = LS_PREFIX + "pending-oauth-callback";
+
+// Pre-LLMConfig flat model settings, read only by migrateToLLMConfigs()
+const LEGACY_LLM_KEYS = ["model", "apiKey", "customEndpoint", "customContextWindow"];
 
 function lsGet(key: string): string {
   try {
@@ -374,8 +349,28 @@ function buildAuthConfig(config: MCPServerConfig): AuthConfig | undefined {
   }
 }
 
-function getPrimaryConfig(state: AppState): LLMConfig | undefined {
+export function selectPrimaryLLM(state: Pick<AppState, "llmConfigs" | "primaryLLM">): LLMConfig | undefined {
   return state.llmConfigs.find((c) => c.id === state.primaryLLM);
+}
+
+// Context window for gauges: server-reported, else the primary LLM's, else the
+// 128k fallback the backend also uses.
+export function selectContextWindow(state: Pick<AppState, "inventory" | "llmConfigs" | "primaryLLM">): number {
+  const primary = selectPrimaryLLM(state);
+  return state.inventory?.contextWindow
+    || primary?.contextWindow
+    || (primary ? MODEL_CONTEXT[primary.model] : undefined)
+    || 128_000;
+}
+
+// Request-body fields that tell the backend which LLM to use
+function llmRequestFields(config: LLMConfig | null | undefined) {
+  return {
+    model: config?.model || undefined,
+    api_key: config?.apiKey || undefined,
+    provider: config?.provider || undefined,
+    custom_endpoint: config?.provider === "custom" ? config.endpoint || undefined : undefined,
+  };
 }
 
 // Backend session indices of the evals checked for optimization. Evals that never
@@ -517,6 +512,13 @@ function migrateToLLMConfigs(): { configs: LLMConfig[]; primaryId: string } {
       lsSet("primaryLLM", config.id);
     }
   }
+  // Drop the legacy keys once migrated (older builds also mirrored the primary
+  // config into them) so a deleted config can't be resurrected from them.
+  if (configs.length > 0) {
+    for (const key of LEGACY_LLM_KEYS) {
+      try { localStorage.removeItem(LS_PREFIX + key); } catch { /* ignore */ }
+    }
+  }
 
   return { configs, primaryId };
 }
@@ -533,7 +535,7 @@ function loadMCPConfigs(): MCPServerConfig[] {
     // Migration: if no configs exist and there's exactly one URL in history, create a config
     if (configs.length === 0) {
       try {
-        const historyRaw = localStorage.getItem("mcperiscope:url-history");
+        const historyRaw = localStorage.getItem(LS_PREFIX + "url-history");
         if (historyRaw) {
           const history = JSON.parse(historyRaw);
           if (Array.isArray(history) && history.length === 1 && typeof history[0] === "string") {
@@ -588,10 +590,6 @@ export const useStore = create<AppState>((set, get) => ({
   error: null,
   oauthPending: false,
   connectProgress: null,
-  model: lsGet("model") || "claude-sonnet-4-6",
-  apiKey: lsGet("apiKey"),
-  customEndpoint: lsGet("customEndpoint"),
-  customContextWindow: parseInt(lsGet("customContextWindow") || "128000", 10),
   llmConfigs: _migrated.configs,
   primaryLLM: _migrated.primaryId,
   analystLLM: lsGet("analystLLM"),
@@ -755,8 +753,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ optimizeRunning: true, optimizeProgress: "Starting optimization...", planMarkdown: "" });
     try {
       const state = get();
-      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
-      const analystConfig = state.getAnalystConfig();
+      const analyst = llmRequestFields(state.getAnalystConfig());
       const included = includedBackendIndices(state);
       const response = await fetch("/api/optimize/run", {
         method: "POST",
@@ -764,14 +761,11 @@ export const useStore = create<AppState>((set, get) => ({
         body: JSON.stringify({
           included_indices: included,
           enabled_rec_ids: [...state.enabledRecIds],
-          api_key: primaryConfig?.apiKey || state.apiKey || undefined,
-          model: primaryConfig?.model || state.model || undefined,
-          provider: primaryConfig?.provider || undefined,
-          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
-          analyst_model: analystConfig?.model || undefined,
-          analyst_provider: analystConfig?.provider || undefined,
-          analyst_api_key: analystConfig?.apiKey || undefined,
-          analyst_endpoint: analystConfig?.provider === "custom" ? analystConfig?.endpoint : undefined,
+          ...llmRequestFields(selectPrimaryLLM(state)),
+          analyst_model: analyst.model,
+          analyst_provider: analyst.provider,
+          analyst_api_key: analyst.api_key,
+          analyst_endpoint: analyst.custom_endpoint,
           disabled_tools: [...state.disabledTools],
           disabled_resources: [...state.disabledResources],
           disabled_prompts: [...state.disabledPrompts],
@@ -889,22 +883,6 @@ export const useStore = create<AppState>((set, get) => ({
     const configs = get().llmConfigs.map((c) => c.id === id ? { ...c, ...updates } : c);
     lsSet("llmConfigs", JSON.stringify(configs));
     set({ llmConfigs: configs });
-    // If this is the primary config, sync derived fields
-    if (id === get().primaryLLM) {
-      const config = configs.find((c) => c.id === id);
-      if (config) {
-        set({
-          model: config.model,
-          apiKey: config.apiKey,
-          customEndpoint: config.provider === "custom" ? config.endpoint : "",
-          customContextWindow: config.contextWindow,
-        });
-        lsSet("model", config.model);
-        lsSet("apiKey", config.apiKey);
-        lsSet("customEndpoint", config.provider === "custom" ? config.endpoint : "");
-        lsSet("customContextWindow", String(config.contextWindow));
-      }
-    }
   },
 
   removeLLMConfig: (id) => {
@@ -924,22 +902,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   setPrimaryLLM: (id) => {
     lsSet("primaryLLM", id);
-    const config = get().llmConfigs.find((c) => c.id === id);
-    if (config) {
-      set({
-        primaryLLM: id,
-        model: config.model,
-        apiKey: config.apiKey,
-        customEndpoint: config.provider === "custom" ? config.endpoint : "",
-        customContextWindow: config.contextWindow,
-      });
-      lsSet("model", config.model);
-      lsSet("apiKey", config.apiKey);
-      lsSet("customEndpoint", config.provider === "custom" ? config.endpoint : "");
-      lsSet("customContextWindow", String(config.contextWindow));
-    } else {
-      set({ primaryLLM: id });
-    }
+    set({ primaryLLM: id });
   },
 
   setAnalystLLM: (id) => {
@@ -985,14 +948,15 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const state = get();
       const authConfig = buildAuthConfig(config);
-      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
+      const primaryConfig = selectPrimaryLLM(state);
+      const llm = llmRequestFields(primaryConfig);
       const res = await api.connect(
         config.url, authConfig,
-        primaryConfig?.model || state.model,
-        primaryConfig?.provider,
-        primaryConfig?.apiKey || state.apiKey,
-        primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
-        primaryConfig?.contextWindow || state.customContextWindow,
+        llm.model,
+        llm.provider,
+        llm.api_key,
+        llm.custom_endpoint,
+        primaryConfig?.contextWindow,
         config.protocol,
       );
 
@@ -1013,16 +977,12 @@ export const useStore = create<AppState>((set, get) => ({
   completeOAuth: async (callbackUrl: string) => {
     set({ connecting: true, error: null, connectProgress: "Starting authentication..." });
     try {
-      const primaryConfig = getPrimaryConfig(get());
       const response = await fetch("/api/auth/callback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           callback_url: callbackUrl,
-          model: primaryConfig?.model || undefined,
-          api_key: primaryConfig?.apiKey || undefined,
-          provider: primaryConfig?.provider || undefined,
-          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig.endpoint : undefined,
+          ...llmRequestFields(selectPrimaryLLM(get())),
         }),
       });
 
@@ -1133,7 +1093,7 @@ export const useStore = create<AppState>((set, get) => ({
       const content = (result as any)?.content;
       if (Array.isArray(content)) {
         for (const block of content) {
-          if (block?.text) tokens += Math.ceil(block.text.length / 4);
+          if (block?.text) tokens += estimateTokens(block.text);
         }
       }
       set({ result, resultLoading: false, resultMeta: { durationMs, tokens } });
@@ -1306,16 +1266,12 @@ export const useStore = create<AppState>((set, get) => ({
 
     try {
       const state = get();
-      const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
       const response = await fetch("/api/optimize/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          api_key: primaryConfig?.apiKey || state.apiKey || undefined,
-          model: primaryConfig?.model || state.model || undefined,
-          provider: primaryConfig?.provider || undefined,
-          custom_endpoint: primaryConfig?.provider === "custom" ? primaryConfig?.endpoint : undefined,
+          ...llmRequestFields(selectPrimaryLLM(state)),
           max_tool_rounds: state.maxToolRounds || undefined,
           max_tokens: state.maxTokensPerResponse || undefined,
         }),

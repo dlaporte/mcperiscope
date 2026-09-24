@@ -417,27 +417,16 @@ def _gen_entry_point() -> list[str]:
 # Batch description rewriting (the ONE LLM call)
 # ---------------------------------------------------------------------------
 
-async def batch_rewrite_descriptions(
-    tools_to_rewrite: list,
-    analyst_key: str,
-    analyst_model: str,
-    analyst_provider: str = "",
-    analyst_endpoint: str = "",
-) -> dict[str, str]:
+async def batch_rewrite_descriptions(tools_to_rewrite: list, analyst) -> dict[str, str]:
     """Rewrite all tool descriptions in a single LLM call.
 
     Args:
         tools_to_rewrite: List of tool objects whose descriptions need rewriting.
-        analyst_key: API key for the analyst LLM.
-        analyst_model: Model name for the analyst LLM.
-        analyst_provider: Provider for the analyst LLM.
-        analyst_endpoint: Custom endpoint for the analyst LLM.
+        analyst: The analyst LLMClient.
 
     Returns:
         Dict mapping tool_name -> rewritten description.
     """
-    from backend.llm_client import LLMClient
-
     if not tools_to_rewrite:
         return {}
 
@@ -456,7 +445,6 @@ async def batch_rewrite_descriptions(
         + "\n\nRespond with ONLY valid JSON: {\"tool_name\": \"concise description\", ...}"
     )
 
-    analyst = LLMClient(analyst_key, analyst_model, analyst_provider, analyst_endpoint)
     response = await analyst.chat(
         messages=[{"role": "user", "content": prompt}],
         max_tokens=4096,

@@ -340,10 +340,11 @@ async def call_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
     return await _client.call_tool(name, arguments or {})
 
 
-async def list_resources():
+async def list_resources() -> list:
     if not _client:
         raise RuntimeError("Not connected")
-    return await _client.list_resources()
+    result = await _client.list_resources()
+    return result if isinstance(result, list) else list(getattr(result, "resources", []))
 
 
 async def list_resource_templates():
@@ -356,6 +357,23 @@ async def read_resource(uri: str):
     if not _client:
         raise RuntimeError("Not connected")
     return await _client.read_resource(uri)
+
+
+def resource_contents(result) -> list:
+    """Normalize a read_resource result to a list of content items (str or objects)."""
+    if isinstance(result, str):
+        return [result]
+    if isinstance(result, list):
+        return result
+    return list(getattr(result, "contents", [result]))
+
+
+def extract_resource_text(result) -> str:
+    """Join the text of every content item in a read_resource result."""
+    return "\n\n".join(
+        c if isinstance(c, str) else (getattr(c, "text", "") or "")
+        for c in resource_contents(result)
+    )
 
 
 async def list_prompts():

@@ -2,6 +2,7 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useStore } from "../../store";
+import { estimateTokens } from "../../utils/tokens";
 
 function ToolLink({ name, args }: { name: string; args?: Record<string, unknown> }) {
   const navigateToTool = useStore((s) => s.navigateToTool);
@@ -132,7 +133,7 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
                 {(() => {
                   const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
                   const outputStr = step.output ?? "";
-                  const tokens = Math.ceil(inputStr.length / 4) + Math.ceil(outputStr.length / 4);
+                  const tokens = estimateTokens(inputStr) + estimateTokens(outputStr);
                   return `${tokens.toLocaleString()} tok`;
                 })()}
               </span>
@@ -178,7 +179,7 @@ export function ToolChainViewer() {
             className="text-xs px-2 py-0.5 rounded-full"
             style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
           >
-            {Math.ceil((evalResult.prompt?.length ?? 0) / 4).toLocaleString()} tok
+            {estimateTokens(evalResult.prompt ?? "").toLocaleString()} tok
           </span>
         </div>
         <p className="text-sm mt-1" style={{ color: 'var(--sub-text)' }}>{evalResult.prompt}</p>
@@ -228,12 +229,12 @@ export function ToolChainViewer() {
                 style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
               >
                 {(() => {
-                  let total = Math.ceil((evalResult.prompt?.length ?? 0) / 4);
+                  let total = estimateTokens(evalResult.prompt ?? "");
                   for (const step of toolChain) {
                     const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
-                    total += Math.ceil(inputStr.length / 4) + Math.ceil((step.output ?? "").length / 4);
+                    total += estimateTokens(inputStr) + estimateTokens(step.output ?? "");
                   }
-                  total += Math.ceil((evalResult.answer?.length ?? 0) / 4);
+                  total += estimateTokens(evalResult.answer ?? "");
                   return `~${total.toLocaleString()} tok`;
                 })()}
               </span>

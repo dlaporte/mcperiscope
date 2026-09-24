@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-
-const PENDING_KEY = "mcperiscope:pending-oauth-callback";
+import { PENDING_OAUTH_KEY } from "../../store";
 
 export function OAuthCallback() {
   const [localError, setLocalError] = useState<string | null>(null);
@@ -22,7 +21,7 @@ export function OAuthCallback() {
 
     // Stash the full callback URL and redirect to Connect tab.
     // The Connect tab will pick it up and run completeOAuth with progress.
-    sessionStorage.setItem(PENDING_KEY, window.location.href);
+    sessionStorage.setItem(PENDING_OAUTH_KEY, window.location.href);
     window.location.replace("/");
   }, []);
 

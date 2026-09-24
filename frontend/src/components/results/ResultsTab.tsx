@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useStore, includedBackendIndices } from "../../store";
-import { MODEL_CONTEXT } from "../../config/models";
+import { useStore, includedBackendIndices, selectContextWindow } from "../../store";
+import { estimateTokens } from "../../utils/tokens";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
@@ -115,8 +115,7 @@ export function ResultsTab() {
   const evalResults = useStore((s) => s.evalResults);
   const loadedResources = useStore((s) => s.loadedResources);
   const inventory = useStore((s) => s.inventory);
-  const model = useStore((s) => s.model);
-  const customContextWindow = useStore((s) => s.customContextWindow);
+  const contextWindow = useStore(selectContextWindow);
 
   const [showResponses, setShowResponses] = useState(false);
   const [showResources, setShowResources] = useState(false);
@@ -145,7 +144,7 @@ export function ResultsTab() {
       if (peak) peakContext = peak;
       for (const step of (ev.toolChain || [])) {
         totalCalls++;
-        totalTraceTokens += Math.max(1, (step.output?.length || 0) / 4);
+        totalTraceTokens += Math.max(1, estimateTokens(step.output ?? ""));
         totalLatency += step.duration || 0;
       }
     }
@@ -214,7 +213,7 @@ export function ResultsTab() {
       <OptimizeContextGauge
         baseline={comparisonData?.baseline?.total_context || 0}
         optimized={selectedRun ? (comparisonData?.proxy?.total_context ?? null) : null}
-        max={inventory?.contextWindow ?? MODEL_CONTEXT[model] ?? customContextWindow ?? 200_000}
+        max={contextWindow}
       />
 
       <div className="flex-1 flex min-h-0">

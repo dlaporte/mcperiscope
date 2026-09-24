@@ -3,6 +3,7 @@ import type { ReactNode, ErrorInfo } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { LS_PREFIX } from './store'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -22,14 +23,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   handleClearSession = () => {
     // Only clear ephemeral session data, preserve user configurations
     const PRESERVE_KEYS = [
-      "mcperiscope:llmConfigs",
-      "mcperiscope:primaryLLM",
-      "mcperiscope:analystLLM",
-      "mcperiscope:mcpConfigs",
-      "mcperiscope:maxToolRounds",
-      "mcperiscope:maxTokensPerResponse",
-    ];
-    const LS_PREFIX = "mcperiscope:";
+      "llmConfigs",
+      "primaryLLM",
+      "analystLLM",
+      "mcpConfigs",
+      "maxToolRounds",
+      "maxTokensPerResponse",
+    ].map((k) => LS_PREFIX + k);
     const keys = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);

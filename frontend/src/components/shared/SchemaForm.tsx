@@ -1,6 +1,8 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useStore } from "../../store";
 import type { ParamEntry } from "../../store";
+import { formatParamContext } from "../../utils/params";
+import { useClickOutside } from "../../hooks/useClickOutside";
 
 interface JsonSchema {
   type?: string;
@@ -16,46 +18,18 @@ interface Props {
   initialValues?: Record<string, unknown>;
 }
 
-function formatContextHint(entry: ParamEntry): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(entry.context)) {
-    if (String(v) !== String(entry.value) && (typeof v === "string" || typeof v === "number")) {
-      parts.push(`${k}: ${v}`);
-    }
-  }
-  if (parts.length === 0) return String(entry.value);
-  return parts.join(", ");
-}
-
 function ValuePicker({
-  fieldKey,
   entries,
   currentValue,
   onSelect,
 }: {
-  fieldKey: string;
   entries: ParamEntry[];
   currentValue: unknown;
   onSelect: (value: string | number | boolean) => void;
 }) {
-  // Use a key-scoped ID to keep dropdown state stable across re-renders
-  const [openField, setOpenField] = useState<string | null>(null);
-  const open = openField === fieldKey;
+  const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      // Delay check so the button click can process first
-      setTimeout(() => {
-        if (ref.current && !ref.current.contains(e.target as Node)) {
-          setOpenField(null);
-        }
-      }, 0);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  useClickOutside(ref, () => setOpen(false), open);
 
   const sortedEntries = useMemo(
     () => [...entries].sort((a, b) => String(a.value).localeCompare(String(b.value))),
@@ -69,7 +43,7 @@ function ValuePicker({
       <button
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
-        onClick={() => setOpenField(open ? null : fieldKey)}
+        onClick={() => setOpen(!open)}
         className="text-[10px] ml-1.5 tabular-nums"
         style={{ color: 'var(--sub-brass)' }}
         onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
@@ -91,7 +65,7 @@ function ValuePicker({
           </div>
           {sortedEntries.map((entry, i) => {
             const isSelected = String(entry.value) === String(currentValue);
-            const hint = formatContextHint(entry);
+            const hint = formatParamContext(entry, { omitValue: true }) || String(entry.value);
             return (
               <button
                 key={i}
@@ -106,7 +80,7 @@ function ValuePicker({
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = isSelected ? 'rgba(196,154,42,0.15)' : 'transparent')}
                 onClick={() => {
                   onSelect(entry.value);
-                  setOpenField(null);
+                  setOpen(false);
                 }}
               >
                 <div className="flex items-center gap-2">
@@ -145,19 +119,7 @@ function LinkDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (ref.current && !ref.current.contains(e.target as Node)) {
-      setOpen(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [open, handleClickOutside]);
+  useClickOutside(ref, () => setOpen(false), open);
 
   if (storeEntries.length === 0) return null;
 
@@ -211,6 +173,9 @@ function LinkDropdown({
   );
 }
 
+// Stable fallback so memos keyed on `properties` don't re-run every render
+const EMPTY_PROPERTIES: Record<string, any> = {};
+
 // Convert between naming conventions
 function toCamelCase(s: string): string {
   return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
@@ -220,7 +185,7 @@ function toSnakeCase(s: string): string {
 }
 
 export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValues }: Props) {
-  const properties = schema.properties || {};
+  const properties = schema.properties || EMPTY_PROPERTIES;
   const required = new Set(schema.required || []);
   const { parameterStore, parameterAliases, removedAliases, addParamAlias } = useStore();
 
@@ -389,7 +354,6 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
               )}
               {multiEntries.length > 1 && (
                 <ValuePicker
-                  fieldKey={key}
                   entries={multiEntries}
                   currentValue={values[key]}
                   onSelect={(v) => handleChange(key, v)}

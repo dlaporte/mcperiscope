@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import time
 
 from fastapi import APIRouter, HTTPException
 
 from backend.models import ToolCallRequest
 from backend import mcp_manager
+from backend.routes._common import _make_trace_event
 from backend.state import session
 
 router = APIRouter()
@@ -47,33 +47,12 @@ async def call_tool(req: ToolCallRequest):
         else:
             content.append({"type": "text", "text": str(result)})
 
-        trace_event = {
-            "step": len(session.traces),
-            "timestamp": start,
-            "tool_name": req.name,
-            "tool_input": req.arguments,
-            "tool_response_chars": sum(len(c.get("text", "")) for c in content),
-            "tool_response_tokens_est": max(1, sum(len(c.get("text", "")) for c in content) // 4),
-            "tool_response_fields": _extract_fields(content),
-            "tool_duration_s": round(duration, 3),
-            "error_category": None,
-        }
-        session.traces.append(trace_event)
+        result_text = "\n".join(c["text"] for c in content if c["type"] == "text")
+        session.traces.append(_make_trace_event(
+            len(session.traces), start, req.name, req.arguments, result_text, duration,
+        ))
 
         return {"content": content, "isError": getattr(result, "isError", False)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-def _extract_fields(content: list[dict]) -> list[str]:
-    for c in content:
-        if c.get("type") == "text":
-            try:
-                data = json.loads(c["text"])
-                if isinstance(data, dict):
-                    return list(data.keys())
-                elif isinstance(data, list) and data and isinstance(data[0], dict):
-                    return list(data[0].keys())
-            except (json.JSONDecodeError, IndexError):
-                pass
-    return []

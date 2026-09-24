@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useStore } from "../../store";
+import { estimateToolTokens, estimateResourceTokens, estimatePromptTokens } from "../../utils/tokens";
 
 type SortMode = "name" | "tokens";
 
@@ -53,25 +54,6 @@ function Section({
       {open && <div>{children}</div>}
     </div>
   );
-}
-
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function estimateToolTokens(tool: any): number {
-  const desc = tool.description || "";
-  const schema = JSON.stringify(tool.inputSchema || {});
-  return estimateTokens(`${tool.name}: ${desc}`) + estimateTokens(schema);
-}
-
-function estimateResourceTokens(resource: any): number {
-  return estimateTokens(`${resource.name || ""}: ${resource.description || ""} (${resource.uri || ""})`);
-}
-
-function estimatePromptTokens(prompt: any): number {
-  const args = (prompt.arguments || []).map((a: any) => a.name).join(", ");
-  return estimateTokens(`${prompt.name}(${args}): ${prompt.description || ""}`);
 }
 
 export function Sidebar() {
