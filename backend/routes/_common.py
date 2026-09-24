@@ -40,10 +40,16 @@ def _make_trace_event(
     result_text: str,
     duration: float,
     error: str | None = None,
+    prompt_index: int | None = None,
 ) -> dict:
-    """Build one tool-call trace event as consumed by mcp_optimizer.analyze."""
+    """Build one tool-call trace event as consumed by mcp_optimizer.analyze.
+
+    `prompt_index` is the eval index the call belongs to; None for manual
+    (Explore tab) calls, which per-prompt analysis ignores.
+    """
     return {
         "step": step,
+        "prompt_index": prompt_index,
         "timestamp": start,
         "tool_name": tool_name,
         "tool_input": tool_input,
@@ -58,8 +64,12 @@ def _make_trace_event(
 def _run_and_store_analysis() -> None:
     """Run trace analysis and store it, with stable rec IDs, on the session."""
     from backend.mcp_optimizer.analyze import run_analysis
+    from backend.proxy_builder import mark_plan_only
 
-    session.analysis = run_analysis(session.tools, session.traces, [])
+    # session.ratings is positional and padded with None for unrated evals.
+    ratings = [r for r in session.ratings if r is not None]
+    session.analysis = run_analysis(session.tools, session.traces, ratings)
     session.recommendations = session.analysis.get("recommendations", [])
     for i, rec in enumerate(session.recommendations):
         rec["id"] = f"rec_{i}"
+    mark_plan_only(session.recommendations)

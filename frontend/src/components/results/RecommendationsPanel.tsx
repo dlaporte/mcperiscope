@@ -32,11 +32,12 @@ interface RecItemProps {
   type: string;
   description: string;
   impact?: string;
+  planOnly?: boolean;
   checked: boolean;
   onToggle: () => void;
 }
 
-function RecItem({ type, description, impact, checked, onToggle }: RecItemProps) {
+function RecItem({ type, description, impact, planOnly, checked, onToggle }: RecItemProps) {
   const [expanded, setExpanded] = useState(false);
   const typeLower = (type || "").toLowerCase();
   const badgeStyle = TYPE_STYLES[typeLower] || defaultBadgeStyle;
@@ -67,6 +68,15 @@ function RecItem({ type, description, impact, checked, onToggle }: RecItemProps)
                 style={IMPACT_STYLES[impact.toUpperCase()] || IMPACT_STYLES.LOW}
               >
                 {impact.toUpperCase()}
+              </span>
+            )}
+            {planOnly && (
+              <span
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                style={defaultBadgeStyle}
+                title="Included in the remediation plan; not applied by the generated proxy"
+              >
+                plan-only
               </span>
             )}
           </div>
@@ -170,6 +180,7 @@ export function RecommendationsPanel() {
                   type={rec.type}
                   description={rec.description}
                   impact={rec.impact}
+                  planOnly={rec.plan_only === true}
                   checked={enabledRecIds.has(rec.id)}
                   onToggle={() => toggleRecEnabled(rec.id)}
                 />
@@ -190,6 +201,7 @@ export function RecommendationsPanel() {
                 <RecItem
                   type={win.type}
                   description={win.description}
+                  planOnly={win.plan_only === true}
                   checked={enabledRecIds.has(win.id)}
                   onToggle={() => toggleRecEnabled(win.id)}
                 />

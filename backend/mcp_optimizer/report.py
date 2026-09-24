@@ -13,21 +13,40 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.mcp_optimizer.analyze import group_traces_by_prompt
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _count_prompts(traces: list[dict]) -> int:
-    """Count distinct prompt groups in traces (step resets to 0)."""
-    if not traces:
-        return 0
-    count = 1
-    for i in range(1, len(traces)):
-        if traces[i].get("step", 0) == 0 and traces[i - 1].get("step", -1) != -1:
-            count += 1
-    return count
+def _rec_tools(rec: dict) -> list[str]:
+    """Tools a rec applies to (behavior recs: source_tools; quick wins: tools)."""
+    return rec.get("source_tools") or rec.get("tools") or []
+
+
+def _rec_savings(rec: dict) -> int:
+    """Estimated token savings (behavior recs vs quick wins use different keys)."""
+    return rec.get("estimated_token_savings") or rec.get("estimated_savings") or 0
+
+
+# (label, key, format) rows of the before/after comparison (session.comparison)
+_COMPARISON_METRICS = [
+    ("Tool Count", "tool_count", "number"),
+    ("Menu Tokens", "menu_tokens", "number"),
+    ("Avg Tokens/Prompt", "avg_tokens_per_prompt", "number"),
+    ("Avg Calls/Prompt", "avg_calls_per_prompt", "decimal"),
+    ("Total Context", "total_context", "number"),
+    ("Avg Latency (ms)", "avg_latency", "number"),
+    ("Accuracy", "accuracy", "percent"),
+    ("Error Rate", "error_rate", "percent"),
+]
+
+
+def _delta_value(delta: Any) -> Any:
+    """session.comparison stores deltas as {"value", "pct"}; reports show the value."""
+    return delta.get("value") if isinstance(delta, dict) else delta
 
 
 # ---------------------------------------------------------------------------
@@ -43,8 +62,14 @@ def generate_plan_md(
     ratings: list[dict],
     traces: list[dict],
     prompts: list[str],
+    filter_by_impact: bool = True,
 ) -> str:
-    """Generate an optimisation plan as Markdown."""
+    """Generate an optimisation plan as Markdown.
+
+    `recommendations` may mix behavior recs and quick wins. With
+    `filter_by_impact`, only HIGH/MEDIUM recs are listed (all of them if none
+    qualify); pass False when the caller already chose the recs.
+    """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines: list[str] = []
 
@@ -63,11 +88,14 @@ def generate_plan_md(
     lines.append(f"- **Menu token cost:** {budget:,}")
     lines.append(f"- **Assessment:** {inventory.get('budget_assessment', 'N/A')}")
 
-    if traces:
-        prompt_count = _count_prompts(traces)
-        total_tokens = sum(t.get("tool_response_tokens_est", 0) for t in traces)
-        total_calls = len(traces)
-        error_calls = sum(1 for t in traces if t.get("error_category") is not None)
+    # Per-prompt metrics cover eval traces only, not manual Explore-tab calls.
+    trace_groups = group_traces_by_prompt(traces)
+    prompt_traces = [t for group in trace_groups.values() for t in group]
+    if prompt_traces:
+        prompt_count = len(trace_groups)
+        total_tokens = sum(t.get("tool_response_tokens_est", 0) for t in prompt_traces)
+        total_calls = len(prompt_traces)
+        error_calls = sum(1 for t in prompt_traces if t.get("error_category") is not None)
         lines.append(f"- **Avg calls/prompt:** {total_calls / prompt_count:.1f}" if prompt_count else "")
         lines.append(f"- **Avg response tokens/prompt:** {total_tokens / prompt_count:,.0f}" if prompt_count else "")
         lines.append(f"- **Error rate:** {error_calls / total_calls * 100:.1f}%" if total_calls else "")
@@ -79,9 +107,9 @@ def generate_plan_md(
     lines.append("")
 
     # --- Approved Optimisations ---
-    approved = [r for r in recommendations if r.get("impact") in ("HIGH", "MEDIUM")]
-    if not approved:
-        approved = recommendations
+    approved = recommendations
+    if filter_by_impact:
+        approved = [r for r in recommendations if r.get("impact") in ("HIGH", "MEDIUM")] or recommendations
 
     lines.append("## Approved Optimizations")
     lines.append("")
@@ -93,10 +121,14 @@ def generate_plan_md(
             lines.append(f"### {i}. {rec.get('description', 'Unnamed')}")
             lines.append("")
             lines.append(f"- **Type:** `{rec.get('type', '?')}`")
-            lines.append(f"- **Impact:** {rec.get('impact', '?')}")
-            lines.append(f"- **Risk:** {rec.get('risk', '?')}")
+            if rec.get("impact"):
+                lines.append(f"- **Impact:** {rec['impact']}")
+            if rec.get("risk"):
+                lines.append(f"- **Risk:** {rec['risk']}")
+            if rec.get("plan_only"):
+                lines.append("- **Plan only:** not applied by the generated proxy")
 
-            source_tools = rec.get("source_tools", [])
+            source_tools = _rec_tools(rec)
             if source_tools:
                 lines.append(f"- **Source tools:** {', '.join(f'`{t}`' for t in source_tools)}")
 
@@ -108,7 +140,7 @@ def generate_plan_md(
                 if target.get("description"):
                     lines.append(f"  - Description: {target['description']}")
 
-            savings = rec.get("estimated_token_savings", 0)
+            savings = _rec_savings(rec)
             if savings:
                 lines.append(f"- **Estimated savings:** ~{savings:,} tokens")
 
@@ -118,7 +150,7 @@ def generate_plan_md(
             lines.append("")
 
     # --- Summary ---
-    total_savings = sum(r.get("estimated_token_savings", 0) for r in approved)
+    total_savings = sum(_rec_savings(r) for r in approved)
     lines.append("## Summary")
     lines.append("")
     lines.append("| Metric | Value |")
@@ -126,11 +158,13 @@ def generate_plan_md(
     lines.append(f"| Optimizations | {len(approved)} |")
     lines.append(f"| Estimated token savings | {total_savings:,} |")
     lines.append(f"| Tools before | {tool_count} |")
-    new_count = tool_count - sum(
-        max(0, len(r.get("source_tools", [])) - 1)
+    removed = sum(len(_rec_tools(r)) for r in approved if r.get("type") in ("remove", "remove_unused"))
+    merged = sum(
+        max(0, len(_rec_tools(r)) - 1)
         for r in approved
-        if r.get("type") in ("consolidate", "remove")
+        if r.get("type") in ("consolidate", "consolidate_lookups")
     )
+    new_count = max(0, tool_count - removed - merged)
     lines.append(f"| Tools after (est.) | {new_count} |")
     lines.append("")
 
@@ -273,47 +307,38 @@ def generate_report_md(data: dict) -> str:
             lines.append(f"> {prompt_text}")
             lines.append("")
             lines.append(f"- **Correctness:** {correctness}")
-            if rating.get("explanation"):
-                lines.append(f"- **Explanation:** {rating['explanation']}")
-            if rating.get("tool_chain"):
-                chain = " -> ".join(rating["tool_chain"])
-                lines.append(f"- **Tool chain:** {chain}")
+            if rating.get("notes"):
+                lines.append(f"- **Notes:** {rating['notes']}")
             lines.append("")
     lines.append("")
 
     # ---- 5. Before/After Comparison ----
-    baseline_results = data.get("baseline_results")
-    if baseline_results:
+    comp = data.get("comparison")
+    if isinstance(comp, dict) and "baseline" in comp and "proxy" in comp:
         lines.append("## 5. Before / After Comparison")
         lines.append("")
-        comp = baseline_results if isinstance(baseline_results, dict) else {}
-        if "baseline" in comp and "proxy" in comp:
-            bl = comp["baseline"]
-            px = comp["proxy"]
-            dl = comp.get("delta", {})
-            lines.append("| Metric | Baseline | Proxy | Delta |")
-            lines.append("|--------|----------|-------|-------|")
-            for key in ["tool_count", "menu_tokens", "avg_tokens_per_prompt",
-                        "avg_calls_per_prompt", "accuracy", "error_rate"]:
-                bv = bl.get(key, "N/A")
-                pv = px.get(key, "N/A")
-                dv = dl.get(key, "N/A")
-                if isinstance(dv, float) and key in ("accuracy", "error_rate"):
-                    dv = f"{dv:+.2%}"
-                elif isinstance(dv, (int, float)):
-                    dv = f"{dv:+}" if dv != 0 else "0"
-                if isinstance(bv, float) and key in ("accuracy", "error_rate"):
-                    bv = f"{bv:.2%}"
-                if isinstance(pv, float) and key in ("accuracy", "error_rate"):
-                    pv = f"{pv:.2%}"
-                label = key.replace("_", " ").title()
-                lines.append(f"| {label} | {bv} | {pv} | {dv} |")
-            lines.append("")
+        bl = comp["baseline"]
+        px = comp["proxy"]
+        dl = comp.get("delta", {})
+        lines.append("| Metric | Baseline | Proxy | Delta |")
+        lines.append("|--------|----------|-------|-------|")
+        for label, key, fmt in _COMPARISON_METRICS:
+            bv = _fmt_value(bl.get(key), fmt)
+            pv = _fmt_value(px.get(key), fmt)
+            dv = _delta_value(dl.get(key))
+            if isinstance(dv, (int, float)) and fmt == "percent":
+                dv = f"{dv:+.2%}"
+            elif isinstance(dv, (int, float)):
+                dv = f"{dv:+}" if dv != 0 else "0"
+            else:
+                dv = "N/A"
+            lines.append(f"| {label} | {bv} | {pv} | {dv} |")
+        lines.append("")
 
-            warning = comp.get("accuracy_warning")
-            if warning:
-                lines.append(f"> **Warning:** {warning}")
-                lines.append("")
+        warning = comp.get("accuracy_warning")
+        if warning:
+            lines.append(f"> **Warning:** {warning}")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -332,7 +357,7 @@ def generate_report_html(data: dict) -> str:
     ratings = data.get("ratings", [])
     traces = data.get("traces", [])
     prompts = data.get("prompts", [])
-    baseline_results = data.get("baseline_results")
+    comparison = data.get("comparison")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     tool_count = inventory.get("tool_count", 0)
@@ -371,7 +396,7 @@ def generate_report_html(data: dict) -> str:
     eval_html = _html_evaluation_results(ratings, prompts, traces)
 
     # Comparison section
-    comparison_html = _html_comparison(baseline_results)
+    comparison_html = _html_comparison(comparison)
 
     # Plan section
     plan_html = f"""<pre id="plan-content">{html.escape(plan_md)}</pre>"""
@@ -574,7 +599,7 @@ def _html_evaluation_results(
         return "<p>No evaluation results available.</p>"
 
     # Group traces by prompt
-    trace_groups = _group_traces_by_prompt(traces)
+    trace_groups = group_traces_by_prompt(traces)
 
     parts = []
     for i, rating in enumerate(ratings):
@@ -587,13 +612,12 @@ def _html_evaluation_results(
             "partial": "partial",
             "wrong": "wrong",
         }.get(correctness, "unrated")
-        explanation = rating.get("explanation", "")
-        tool_chain = rating.get("tool_chain", [])
+        notes = rating.get("notes", "")
 
-        # Build tool call timeline
+        # Build tool call timeline (ratings and trace groups share the eval index)
         timeline_html = ""
-        if i < len(trace_groups):
-            group = trace_groups[i]
+        group = trace_groups.get(i)
+        if group:
             steps = []
             for t in group:
                 t_name = t.get("tool_name", "?")
@@ -610,52 +634,34 @@ def _html_evaluation_results(
                     f'</div>'
                 )
 
-        chain_html = ""
-        if tool_chain:
-            chain_html = (
-                f'<div class="tool-chain">'
-                f'{" &rarr; ".join(f"<code>{html.escape(t)}</code>" for t in tool_chain)}'
-                f'</div>'
-            )
-
         parts.append(
             f'<div class="eval-card">'
             f'<div class="eval-header">'
             f'<span class="badge correctness-{badge_cls}">{html.escape(correctness.upper())}</span>'
             f'<span class="eval-prompt">Prompt {i + 1}: {html.escape(prompt_text)}</span>'
             f'</div>'
-            f'{chain_html}'
             f'{timeline_html}'
-            f'<div class="eval-explanation">{html.escape(explanation)}</div>'
+            f'<div class="eval-explanation">{html.escape(notes)}</div>'
             f'</div>'
         )
 
     return "\n".join(parts)
 
 
-def _html_comparison(baseline_results: Any) -> str:
-    if not baseline_results or not isinstance(baseline_results, dict):
-        return "<p>No comparison data available. Run with <code>--baseline</code> to generate.</p>"
+def _html_comparison(comparison: Any) -> str:
+    if not comparison or not isinstance(comparison, dict):
+        return "<p>No comparison data yet. Run an optimization to generate it.</p>"
 
-    bl = baseline_results.get("baseline", {})
-    px = baseline_results.get("proxy", {})
-    dl = baseline_results.get("delta", {})
-    warning = baseline_results.get("accuracy_warning")
-
-    metrics = [
-        ("Tool Count", "tool_count", "number"),
-        ("Menu Tokens", "menu_tokens", "number"),
-        ("Avg Tokens/Prompt", "avg_tokens_per_prompt", "number"),
-        ("Avg Calls/Prompt", "avg_calls_per_prompt", "decimal"),
-        ("Accuracy", "accuracy", "percent"),
-        ("Error Rate", "error_rate", "percent"),
-    ]
+    bl = comparison.get("baseline", {})
+    px = comparison.get("proxy", {})
+    dl = comparison.get("delta", {})
+    warning = comparison.get("accuracy_warning")
 
     rows = []
-    for label, key, fmt in metrics:
+    for label, key, fmt in _COMPARISON_METRICS:
         bv = bl.get(key)
         pv = px.get(key)
-        dv = dl.get(key)
+        dv = _delta_value(dl.get(key))
 
         bv_str = _fmt_value(bv, fmt)
         pv_str = _fmt_value(pv, fmt)
@@ -715,23 +721,6 @@ def _fmt_value(v: Any, fmt: str) -> str:
     if fmt == "number" and isinstance(v, (int, float)):
         return f"{v:,}"
     return str(v)
-
-
-def _group_traces_by_prompt(traces: list[dict]) -> list[list[dict]]:
-    """Group traces into per-prompt evaluation runs."""
-    if not traces:
-        return []
-    groups: list[list[dict]] = []
-    current: list[dict] = [traces[0]]
-    for trace in traces[1:]:
-        if trace.get("step", 0) == 0 and current[-1].get("step", -1) >= 0:
-            groups.append(current)
-            current = [trace]
-        else:
-            current.append(trace)
-    if current:
-        groups.append(current)
-    return groups
 
 
 # ---------------------------------------------------------------------------

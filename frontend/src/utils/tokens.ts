@@ -22,3 +22,9 @@ export function estimatePromptTokens(prompt: any): number {
   const args = (prompt.arguments || []).map((a: any) => a.name).join(", ");
   return estimateAtLeastOne(`${prompt.name}(${args}): ${prompt.description || ""}`);
 }
+
+// "Menu tokens": what the server's tools + resources + prompts listing costs in
+// context (the /analysis/inventory totalBudgetTokens, not the tools-only figure)
+export function menuTokens(inventory: any): number {
+  return inventory?.totalBudgetTokens ?? 0;
+}

@@ -330,33 +330,24 @@ def analyze_lookup_tools(tools: list[Tool]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def _group_traces_by_prompt(traces: list[dict]) -> list[list[dict]]:
-    """Group traces into per-prompt evaluation runs.
+def group_traces_by_prompt(traces: list[dict]) -> dict[int, list[dict]]:
+    """Group trace events by the evaluation prompt that produced them.
 
-    Uses the 'step' field: each time step resets to 0 (or decreases),
-    we start a new group.
+    Keys are the eval index (``prompt_index``), in ascending order; each
+    group keeps the call order. Events without a prompt_index (manual calls
+    from the Explore tab) belong to no prompt and are left out.
     """
-    if not traces:
-        return []
-
-    groups: list[list[dict]] = []
-    current: list[dict] = [traces[0]]
-
-    for trace in traces[1:]:
-        if trace.get("step", 0) <= current[-1].get("step", -1) and trace.get("step", 0) == 0:
-            groups.append(current)
-            current = [trace]
-        else:
-            current.append(trace)
-
-    if current:
-        groups.append(current)
-    return groups
+    groups: dict[int, list[dict]] = {}
+    for trace in traces:
+        idx = trace.get("prompt_index")
+        if idx is not None:
+            groups.setdefault(idx, []).append(trace)
+    return dict(sorted(groups.items()))
 
 
 def find_confusion_pairs(traces: list[dict]) -> list[dict[str, Any]]:
     """Find sequences where tool A errors, then tool B is called (wrong-then-correct)."""
-    groups = _group_traces_by_prompt(traces)
+    groups = group_traces_by_prompt(traces).values()
     pair_counts: Counter[tuple[str, str]] = Counter()
     pair_examples: dict[tuple[str, str], list[dict]] = defaultdict(list)
 
@@ -391,10 +382,9 @@ def find_confusion_pairs(traces: list[dict]) -> list[dict[str, Any]]:
 
 def find_redundant_calls(traces: list[dict]) -> list[dict[str, Any]]:
     """Find cases where the same tool is called with same/similar args in one eval run."""
-    groups = _group_traces_by_prompt(traces)
     redundancies: list[dict[str, Any]] = []
 
-    for group_idx, group in enumerate(groups):
+    for group_idx, group in group_traces_by_prompt(traces).items():
         seen: dict[str, list[dict]] = defaultdict(list)
         for trace in group:
             tool_name = trace["tool_name"]
@@ -464,7 +454,7 @@ def _inputs_similar(a: dict, b: dict) -> bool:
 
 def find_parameter_hops(traces: list[dict]) -> list[dict[str, Any]]:
     """Detect chains where tool A output values appear in tool B inputs (ID passing)."""
-    groups = _group_traces_by_prompt(traces)
+    groups = group_traces_by_prompt(traces).values()
     hop_counts: Counter[tuple[str, str]] = Counter()
     hop_fields: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     hop_examples: dict[tuple[str, str], list[dict]] = defaultdict(list)
@@ -575,7 +565,7 @@ def compute_error_cost(traces: list[dict]) -> dict[str, Any]:
 def find_sequence_patterns(traces: list[dict]) -> list[dict[str, Any]]:
     """N-gram analysis of tool_name sequences. Tools called together >60% of time
     are consolidation candidates."""
-    groups = _group_traces_by_prompt(traces)
+    groups = list(group_traces_by_prompt(traces).values())
     if not groups:
         return []
 
@@ -647,7 +637,7 @@ def analyze_correctness_correlation(
     traces: list[dict], ratings: list[dict]
 ) -> list[dict[str, Any]]:
     """Which tools appear more in wrong-answer vs correct-answer traces."""
-    groups = _group_traces_by_prompt(traces)
+    groups = group_traces_by_prompt(traces)
 
     # Map prompt_index to correctness
     correctness_map: dict[int, str] = {}
@@ -660,13 +650,13 @@ def analyze_correctness_correlation(
     total_correct = 0
     total_incorrect = 0
 
-    for idx, group in enumerate(groups):
+    for idx, group in groups.items():
         correctness = correctness_map.get(idx, "unknown")
         if correctness == "correct":
             total_correct += 1
             for trace in group:
                 tool_correct[trace["tool_name"]] += 1
-        elif correctness in ("incorrect", "wrong"):
+        elif correctness == "wrong":  # RatingRequest: correct | partial | wrong | skipped
             total_incorrect += 1
             for trace in group:
                 tool_incorrect[trace["tool_name"]] += 1

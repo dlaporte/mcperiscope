@@ -122,7 +122,8 @@ def test_evaluate_event_sequence(fake_session):
     }
     assert done["toolChain"] == [dict(tool_result, duration=done["toolChain"][0]["duration"])]
     trace = done["traceEvents"][0]
-    assert trace["step"] == 0
+    assert trace["step"] == 1  # per-eval step
+    assert trace["prompt_index"] == 0  # this eval's backend index
     assert trace["tool_name"] == "search_records"
     assert trace["tool_response_fields"] == ["a"]
     assert trace["error_category"] is None
@@ -153,10 +154,11 @@ def test_agent_loop_non_streaming_counts_steps_per_loop():
     async def go():
         return [e async for e in optimize._run_agent_loop(
             run, llm, [], _fake_call_tool, max_rounds=5, max_tokens=10, stream=False,
+            prompt_index=3,
         )]
 
     events = asyncio.run(go())
     assert "text_delta" not in [e for e, _ in events]
     assert run.final_answer == "Done"
-    assert [t["step"] for t in run.trace_events] == [1]
+    assert [(t["step"], t["prompt_index"]) for t in run.trace_events] == [(1, 3)]
     assert run.input_tokens == 250

@@ -42,7 +42,7 @@ def _build_report_data() -> dict:
         "ratings": session.ratings,
         "traces": session.traces,
         "prompts": session.prompts,
-        "baseline_results": [],
+        "comparison": session.comparison,
     }
 
 
@@ -159,5 +159,6 @@ async def get_run_plan(run_id: str):
         ratings=session.ratings,
         traces=session.traces,
         prompts=session.prompts,
+        filter_by_impact=False,  # the user already picked this run's recs
     )
     return Response(content=plan_md, media_type="text/markdown")

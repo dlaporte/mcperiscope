@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useStore, includedBackendIndices, selectContextWindow } from "../../store";
-import { estimateTokens } from "../../utils/tokens";
+import { estimateTokens, menuTokens } from "../../utils/tokens";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
@@ -132,7 +132,7 @@ export function ResultsTab() {
 
   // Build baseline-only comparison from eval results (always available)
   const baselineComparison = useMemo(() => {
-    const toolTokens = inventory?.total_budget_tokens ?? inventory?.totalBudgetTokens ?? 0;
+    const menuTokenCount = menuTokens(inventory);
     const numPrompts = Math.max(evalResults.length, 1);
     let totalTraceTokens = 0;
     let totalCalls = 0;
@@ -154,16 +154,16 @@ export function ResultsTab() {
     const toolCount = inventory?.tool_count ?? 0;
     // Use real API-reported context, fall back to estimate including loaded resources
     const loadedResourceTokens = loadedResources.reduce((sum, r) => sum + r.tokens, 0);
-    const totalContext = peakContext > 0 ? peakContext : toolTokens + avgTokens + loadedResourceTokens;
+    const totalContext = peakContext > 0 ? peakContext : menuTokenCount + avgTokens + loadedResourceTokens;
 
     return {
       baseline: {
         tool_count: toolCount,
-        menu_tokens: toolTokens,
+        menu_tokens: menuTokenCount,
         avg_tokens_per_prompt: avgTokens,
         avg_calls_per_prompt: avgCalls,
         total_context: totalContext,
-        accuracy: 1.0,
+        accuracy: 1.0, // baseline is the reference that proxy answers are judged against
         avg_latency: avgLatency,
       },
       proxy: {},

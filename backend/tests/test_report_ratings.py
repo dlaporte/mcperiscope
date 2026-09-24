@@ -22,7 +22,7 @@ def _data() -> dict:
         "ratings": _RATINGS,
         "traces": [],
         "prompts": _PROMPTS,
-        "baseline_results": [],
+        "comparison": None,
     }
 
 

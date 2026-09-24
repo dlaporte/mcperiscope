@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useStore, selectContextWindow } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
 import { UsageBar } from "../shared/UsageBar";
+import { menuTokens } from "../../utils/tokens";
 import { PromptInput } from "./PromptInput";
 import { ResourcePicker } from "./ResourcePicker";
 import { EvalHistory } from "./EvalHistory";
@@ -54,8 +55,7 @@ export function OptimizeTab() {
       return { total: peakContext };
     }
 
-    const toolDefTokens = inventory?.totalBudgetTokens ?? 0;
-    return { total: toolDefTokens + loadedResourceTokens };
+    return { total: menuTokens(inventory) + loadedResourceTokens };
   }, [evalResults, inventory, evalLoading, liveContextTokens, loadedResourceTokens]);
 
   return (

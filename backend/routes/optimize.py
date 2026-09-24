@@ -82,6 +82,17 @@ def _llm_error_message(e: Exception) -> str:
     return f"Error: {e}"
 
 
+def _baseline_population(eval_results: list[dict], included: set[int]) -> tuple[list[dict], int]:
+    """Baseline traces and prompt count for the before/after comparison.
+
+    Covers only the included evals, matching what the proxy re-runs.
+    Returns (trace events of those evals, number of included evals, min 1).
+    """
+    evals = [e for i, e in enumerate(eval_results) if i in included]
+    traces = [t for e in evals for t in e.get("traceEvents", [])]
+    return traces, max(len(evals), 1)
+
+
 def _analyst_pairs(proxy_answers: list[dict], eval_results: list[dict]) -> list[tuple[str, str, str]]:
     """Pair each proxy answer with the baseline answer of the eval it re-ran.
 
@@ -173,15 +184,14 @@ async def _run_agent_loop(
     max_tokens: int,
     stream: bool,
     context_base: int = 0,
-    trace_step_offset: int | None = None,
+    prompt_index: int | None = None,
 ) -> AsyncGenerator[tuple[str, dict], None]:
     """Run the LLM tool-calling loop until a final answer, yielding (event, data).
 
     The events are the evaluate SSE events (thinking, text_delta,
     context_update, tool_calling, tool_result, error). `run` is updated in
-    place; LLM errors propagate to the caller. Trace event steps count per
-    loop unless `trace_step_offset` is given, in which case they continue
-    from that offset.
+    place; LLM errors propagate to the caller. Trace events are tagged with
+    `prompt_index` and number their steps from 1 within this loop.
     """
     context_delta = 0  # Estimated tokens added since last API report
     round_num = 0
@@ -261,9 +271,9 @@ async def _run_agent_loop(
             run.tool_chain.append(tool_step)
             yield "tool_result", tool_step
 
-            trace_step = run.step if trace_step_offset is None else trace_step_offset + len(run.trace_events)
             run.trace_events.append(_make_trace_event(
-                trace_step, start, tool_use.name, tool_use.input, result_text, duration, error,
+                run.step, start, tool_use.name, tool_use.input, result_text, duration, error,
+                prompt_index=prompt_index,
             ))
 
             tool_results.append({
@@ -351,7 +361,6 @@ async def evaluate(req: EvaluateRequest):
                 max_tokens=_max_tokens,
                 stream=True,
                 context_base=context_base,
-                trace_step_offset=len(session.traces),
             ):
                 yield _sse(event, data)
         except Exception as e:
@@ -405,6 +414,10 @@ async def evaluate(req: EvaluateRequest):
             "contextWindow": context_window,
             "raw_messages": this_eval_messages,
         }
+        # Tag traces with this eval's index (its position in eval_results) at
+        # append time, so concurrent evals can't mislabel them.
+        for t in trace_events:
+            t["prompt_index"] = len(session.eval_results)
         session.eval_results.append(eval_result)
         session.traces.extend(trace_events)
         session.prompts.append(req.prompt)
@@ -502,6 +515,9 @@ async def analyze_tools():
     if not session.traces:
         raise HTTPException(status_code=400, detail="No evaluation traces. Run prompts on the Evaluate tab first.")
     _run_and_store_analysis()
+    # Traces exist now, so quick wins like remove_unused can be generated.
+    from backend.routes.analysis import refresh_quick_wins
+    await refresh_quick_wins()
     return {
         "recommendations": session.recommendations,
         "quickWins": _get_visible_quick_wins(),
@@ -834,6 +850,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             async for _event in _run_agent_loop(
                                 run, llm, proxy_tools_list, proxy_mcp.call_tool,
                                 max_rounds=max_rounds, max_tokens=4096, stream=False,
+                                prompt_index=i,
                             ):
                                 pass
                             if run.hit_max_rounds:
@@ -935,14 +952,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         # --- Step 7: Compute comparison ---
         yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
 
-        # Build comparison from measured data
-        baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in session.traces)
+        # Build comparison from measured data. Both sides cover the same
+        # prompts: the included evals (manual Explore-tab calls aren't part of any).
+        baseline_traces, num_prompts = _baseline_population(session.eval_results, included)
+        baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in baseline_traces)
         proxy_tokens_total = sum(t.get("tool_response_tokens_est", 0) for t in proxy_traces)
-        baseline_calls = len(session.traces)
+        baseline_calls = len(baseline_traces)
         proxy_calls = len(proxy_traces)
-        baseline_errors = sum(1 for t in session.traces if t.get("error_category"))
+        baseline_errors = sum(1 for t in baseline_traces if t.get("error_category"))
         proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
-        num_prompts = max(len(session.eval_results), 1)
 
         orig_menu = _menu_tokens(session.tools)
 
@@ -952,7 +970,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         accuracy = analyst_correct / max(analyst_total, 1) if analyst_total > 0 else None
 
         # Avg latency per prompt
-        baseline_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in session.traces) / max(num_prompts, 1) * 1000, 1)
+        baseline_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in baseline_traces) / max(num_prompts, 1) * 1000, 1)
         proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / max(num_prompts, 1) * 1000, 1) if proxy_traces else None
 
         baseline_avg = round(baseline_tokens / num_prompts, 1)
@@ -974,6 +992,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             "total_context": baseline_total_context,
             "accuracy": 1.0,
             "avg_latency": baseline_avg_latency,
+            "error_rate": round(baseline_errors / baseline_calls, 4) if baseline_calls else 0.0,
         }
 
         proxy_avg = round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None
@@ -985,6 +1004,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             "total_context": round(proxy_menu_tokens + proxy_avg, 1) if proxy_menu_tokens and proxy_avg is not None else None,
             "accuracy": accuracy,
             "avg_latency": proxy_avg_latency,
+            "error_rate": round(proxy_errors / proxy_calls, 4) if proxy_calls else None,
         }
 
         # Calculate deltas with percentages

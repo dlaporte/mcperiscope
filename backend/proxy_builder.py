@@ -78,6 +78,27 @@ def _quote(s: str) -> str:
 # Tool classification
 # ---------------------------------------------------------------------------
 
+# Rec / quick-win types the optimization run actually applies: _classify_tools
+# handles the tool ones, and routes/optimize.py condenses resources. Anything
+# else (trim_response, batch, add_defaults, ...) only appears in the plan.
+PROXY_IMPLEMENTED_REC_TYPES = frozenset({
+    "remove",
+    "remove_unused",
+    "consolidate",
+    "consolidate_lookups",
+    "rewrite_description",
+    "trim_descriptions",
+    "resource_context_usage",
+})
+
+
+def mark_plan_only(recs: list[dict]) -> list[dict]:
+    """Set rec["plan_only"] (bool): True when the proxy won't apply the rec."""
+    for rec in recs:
+        rec["plan_only"] = rec.get("type") not in PROXY_IMPLEMENTED_REC_TYPES
+    return recs
+
+
 def _classify_tools(
     tools: list,
     recommendations: list[dict],

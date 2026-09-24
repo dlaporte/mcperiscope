@@ -12,6 +12,7 @@ from backend.mcp_optimizer.inventory import (
     levenshtein,
     tool_token_budget,
 )
+from backend.proxy_builder import mark_plan_only
 from backend.state import context_window_for, session
 
 logger = logging.getLogger(__name__)
@@ -128,8 +129,47 @@ def generate_quick_wins(
     # Assign unique IDs
     for i, win in enumerate(wins):
         win["id"] = f"qw_{i}"
+    mark_plan_only(wins)
 
     return wins
+
+
+async def _scan_resources() -> tuple[int, list[dict]]:
+    """Return (resource definition tokens, markdown resource details for quick wins)."""
+    resource_tokens = 0
+    resource_details: list[dict] = []
+    try:
+        for r in await mcp_manager.list_resources():
+            name = getattr(r, "name", "") or ""
+            uri = str(getattr(r, "uri", ""))
+            desc = getattr(r, "description", "") or ""
+            mime_type = getattr(r, "mimeType", "") or ""
+            resource_tokens += estimate_tokens(f"{name}: {desc} ({uri})")
+
+            # Read markdown resources to measure their content size
+            if mime_type == "text/markdown":
+                try:
+                    text = mcp_manager.extract_resource_text(await mcp_manager.read_resource(uri))
+                    resource_details.append({
+                        "name": name,
+                        "uri": uri,
+                        "mime_type": mime_type,
+                        "tokens": estimate_tokens(text),
+                        "char_count": len(text),
+                    })
+                except Exception:
+                    logger.debug("Failed to read markdown resource content", exc_info=True)
+    except Exception:
+        logger.debug("Failed to list resources for inventory", exc_info=True)
+    return resource_tokens, resource_details
+
+
+async def refresh_quick_wins() -> None:
+    """Regenerate quick wins from the current traces and resources (new IDs)."""
+    resource_details: list[dict] = []
+    if mcp_manager.is_connected():
+        _, resource_details = await _scan_resources()
+    session.quick_wins = generate_quick_wins(session.tools, session.model, resource_details)
 
 
 @router.get("/analysis/inventory")
@@ -146,29 +186,7 @@ async def get_inventory():
     resource_details: list[dict] = []  # For quick wins analysis
 
     if mcp_manager.is_connected():
-        try:
-            for r in await mcp_manager.list_resources():
-                name = getattr(r, "name", "") or ""
-                uri = str(getattr(r, "uri", ""))
-                desc = getattr(r, "description", "") or ""
-                mime_type = getattr(r, "mimeType", "") or ""
-                resource_tokens += estimate_tokens(f"{name}: {desc} ({uri})")
-
-                # Read markdown resources to measure their content size
-                if mime_type == "text/markdown":
-                    try:
-                        text = mcp_manager.extract_resource_text(await mcp_manager.read_resource(uri))
-                        resource_details.append({
-                            "name": name,
-                            "uri": uri,
-                            "mime_type": mime_type,
-                            "tokens": estimate_tokens(text),
-                            "char_count": len(text),
-                        })
-                    except Exception:
-                        logger.debug("Failed to read markdown resource content", exc_info=True)
-        except Exception:
-            logger.debug("Failed to list resources for inventory", exc_info=True)
+        resource_tokens, resource_details = await _scan_resources()
 
         try:
             prompts = await mcp_manager.list_prompts()
@@ -184,7 +202,8 @@ async def get_inventory():
 
     total_budget = tool_budget + resource_tokens + prompt_tokens
 
-    # Only generate quick wins if not already set (preserves stable IDs across optimize runs)
+    # Only generate quick wins if not already set (preserves stable IDs across
+    # optimize runs); /optimize/analyze refreshes them once traces exist.
     if not session.quick_wins:
         session.quick_wins = generate_quick_wins(session.tools, session.model, resource_details)
 
