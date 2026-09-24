@@ -6,7 +6,6 @@ import os
 import subprocess
 import sys
 import time
-import traceback
 import socket
 from pathlib import Path
 
@@ -204,22 +203,20 @@ async def evaluate(req: EvaluateRequest):
                 c = m.get("content", "")
                 context_base += max(1, len(c if isinstance(c, str) else json.dumps(c)) // 4)
         context_delta = 0  # Estimated tokens added since last API report
-        max_rounds = req.max_tool_rounds or 20
-        max_tokens = req.max_tokens or 4096
         round_num = 0
 
         try:
             while True:
                 round_num += 1
-                if round_num > max_rounds:
-                    final_answer = f"[Stopped after {max_rounds} tool call rounds — increase limit in Settings]"
-                    yield _sse("error", {"message": f"Max tool call rounds ({max_rounds}) exceeded"})
+                if round_num > _max_rounds:
+                    final_answer = f"[Stopped after {_max_rounds} tool call rounds — increase limit in Settings]"
+                    yield _sse("error", {"message": f"Max tool call rounds ({_max_rounds}) exceeded"})
                     break
                 yield _sse("thinking", {"step": step, "context_tokens": context_base + context_delta})
 
                 # Stream the LLM response — yields text deltas then final LLMResponse
                 response = None
-                async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=max_tokens):
+                async for item in client.chat_stream(messages=messages, tools=tools, max_tokens=_max_tokens):
                     if isinstance(item, str):
                         yield _sse("text_delta", {"text": item})
                     else:
@@ -527,8 +524,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     async def event_stream():
         import asyncio
         from backend.mcp_optimizer.analyze import run_analysis
-        from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
-        from backend.mcp_optimizer.report import compute_comparison
 
         # --- Step 1: Analyze (only if not already done) ---
         if not session.analysis:

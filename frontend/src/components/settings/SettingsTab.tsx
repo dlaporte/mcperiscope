@@ -3,12 +3,6 @@ import { useStore, KNOWN_MODELS, MCP_CONFIG_DEFAULTS } from "../../store";
 import type { LLMConfig, MCPServerConfig } from "../../store";
 import { api } from "../../api/client";
 
-const PROVIDER_BADGE_STYLES: Record<string, React.CSSProperties> = {
-  anthropic: { backgroundColor: "rgba(196,154,42,0.2)", color: "var(--sub-brass)" },
-  openai: { backgroundColor: "rgba(100,149,237,0.2)", color: "#6495ed" },
-  custom: { backgroundColor: "rgba(204,51,51,0.15)", color: "var(--sub-red)" },
-};
-
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
@@ -415,11 +409,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
               onChange={(e) => setAuthMethod(e.target.value as MCPServerConfig["authMethod"])}
               className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
             >
-              <option value="none">None</option>
-              <option value="bearer">Bearer Token</option>
-              <option value="header">Custom Header</option>
-              <option value="oauth">OAuth 2.1</option>
-              <option value="oauth_client_creds">OAuth 2.1 Client Credentials</option>
+              {Object.entries(AUTH_METHOD_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
           </div>
 

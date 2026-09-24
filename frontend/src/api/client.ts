@@ -39,11 +39,6 @@ export interface ConnectResult {
   authorizationUrl?: string;
 }
 
-export interface ModelConfig {
-  model: string;
-  apiKey: string;
-}
-
 export const api = {
   // === Connection ===
   connect: (url: string, auth?: AuthConfig, model?: string, provider?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number, protocol?: string) =>
@@ -64,12 +59,6 @@ export const api = {
   status: () =>
     request<{ connected: boolean; serverInfo: unknown }>("/status"),
 
-  authCallback: (callbackUrl: string, model?: string, apiKey?: string) =>
-    request<ConnectResult>("/auth/callback", {
-      method: "POST",
-      body: JSON.stringify({ callback_url: callbackUrl, model: model || undefined, api_key: apiKey || undefined }),
-    }),
-
   // === Explore ===
   listTools: () => request<{ tools: unknown[] }>("/tools"),
 
@@ -86,9 +75,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ uri }),
     }),
-
-  listResourceTemplates: () =>
-    request<{ resourceTemplates: unknown[] }>("/resource-templates"),
 
   listPrompts: () => request<{ prompts: unknown[] }>("/prompts"),
 
@@ -110,15 +96,9 @@ export const api = {
       body: JSON.stringify({ uri }),
     }),
 
-  getLoadedResources: () =>
-    request<{ resources: Array<{ uri: string; name: string; tokens: number }> }>("/resources/loaded"),
-
   // === Analysis ===
   getInventory: () =>
     request<unknown>("/analysis/inventory"),
-
-  getToolStats: () =>
-    request<unknown>("/analyze/tool-stats"),
 
   // === Optimize ===
   analyzeTools: () =>
@@ -126,43 +106,10 @@ export const api = {
       method: "POST",
     }),
 
-  evaluate: (prompt: string, apiKey?: string, model?: string) =>
-    request<unknown>("/optimize/evaluate", {
-      method: "POST",
-      body: JSON.stringify({ prompt, api_key: apiKey || undefined, model: model || undefined }),
-    }),
-
-  submitRating: (promptIndex: number, correctness: string, notes: string) =>
-    request<unknown>("/optimize/rate", {
-      method: "POST",
-      body: JSON.stringify({ prompt_index: promptIndex, correctness, notes }),
-    }),
-
-  runOptimize: () =>
-    request<unknown>("/optimize/run", {
-      method: "POST",
-    }),
-
   // === Results ===
-  getComparison: () =>
-    request<unknown>("/results/comparison"),
-
   getRecommendations: () =>
     request<unknown>("/results/recommendations"),
 
-  getReportHtml: () =>
-    request<unknown>("/results/report/html"),
-
-  getReportMd: () =>
-    request<unknown>("/results/report/md"),
-
-  getPlan: () =>
-    request<unknown>("/results/plan"),
-
-  getProxyCode: () =>
-    request<unknown>("/results/proxy"),
-
   // === Optimization Runs ===
-  getRuns: () => request<{ runs: any[] }>("/results/runs"),
   getRun: (runId: string) => request<any>(`/results/runs/${runId}`),
 };

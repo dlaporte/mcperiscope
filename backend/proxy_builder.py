@@ -101,7 +101,6 @@ def _classify_tools(
     for rec in all_recs:
         rec_type = rec.get("type", "")
         source_tools = rec.get("source_tools", []) or rec.get("tools", [])
-        affected_tools = rec.get("affected_tools", [])
 
         # Remove tools (behavior "remove" or inventory "remove_unused")
         if rec_type in ("remove", "remove_unused"):
@@ -184,8 +183,6 @@ def _gen_header(
 
 def _gen_lookup_consolidation(
     rec: dict,
-    tools: list,
-    rewritten_descriptions: dict[str, str] | None = None,
     used_idents: set[str] | None = None,
 ) -> list[str]:
     """Generate a consolidated lookup() tool for no-param reference tools."""
@@ -238,7 +235,6 @@ def _gen_lookup_consolidation(
 def _gen_prefix_consolidation(
     rec: dict,
     tools: list,
-    rewritten_descriptions: dict[str, str] | None = None,
     used_idents: set[str] | None = None,
 ) -> list[str]:
     """Generate a consolidated dispatch tool for prefix-grouped tools."""
@@ -579,7 +575,7 @@ async def build_proxy(
         if rec_id in generated_consolidation_ids:
             continue
         generated_consolidation_ids.add(rec_id)
-        lines.extend(_gen_lookup_consolidation(rec, tools, rewritten_descriptions, used_idents))
+        lines.extend(_gen_lookup_consolidation(rec, used_idents))
 
     # Generate prefix consolidations
     for tool_name, info in classification.items():
@@ -590,7 +586,7 @@ async def build_proxy(
         if rec_id in generated_consolidation_ids:
             continue
         generated_consolidation_ids.add(rec_id)
-        lines.extend(_gen_prefix_consolidation(rec, tools, rewritten_descriptions, used_idents))
+        lines.extend(_gen_prefix_consolidation(rec, tools, used_idents))
 
     # Generate condensed resources
     if condensed_resources:

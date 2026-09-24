@@ -1,11 +1,8 @@
 from __future__ import annotations
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from subprocess import Popen
 from typing import Any
-
-from backend.mcp_optimizer.connections import MCPConnection
 
 
 MODEL_CONTEXT_WINDOWS = {
@@ -51,7 +48,6 @@ class OptimizationRun:
 
 @dataclass
 class Session:
-    connection: MCPConnection | None = None
     tools: list[Any] = field(default_factory=list)
     inventory: dict | None = None
     traces: list[dict] = field(default_factory=list)

@@ -211,18 +211,18 @@ function LinkDropdown({
   );
 }
 
+// Convert between naming conventions
+function toCamelCase(s: string): string {
+  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+function toSnakeCase(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
 export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValues }: Props) {
   const properties = schema.properties || {};
   const required = new Set(schema.required || []);
   const { parameterStore, parameterAliases, removedAliases, addParamAlias } = useStore();
-
-  // Convert between naming conventions
-  function toCamelCase(s: string): string {
-    return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-  }
-  function toSnakeCase(s: string): string {
-    return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-  }
 
   // Resolve the store key for each field -- pick the key with the most entries
   function resolveStoreKey(fieldKey: string): string | null {
@@ -297,7 +297,6 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
       }
     }
     return { seeded: out, aliasesToCreate: newAliases };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialValues, properties, parameterAliases, removedAliases]);
 
   // Auto-create aliases for case-variation matches (side effect)

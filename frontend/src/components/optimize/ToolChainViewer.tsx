@@ -103,9 +103,7 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
 
       {/* Card */}
       <div
-        className={`flex-1 mb-3 p-3 rounded-lg panel-riveted ${
-          hasError ? "" : ""
-        }`}
+        className="flex-1 mb-3 p-3 rounded-lg panel-riveted"
         style={hasError ? { borderColor: 'var(--sub-red)', backgroundColor: 'rgba(204,51,51,0.1)' } : {}}
       >
         <div className="flex items-center justify-between">

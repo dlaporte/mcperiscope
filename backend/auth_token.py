@@ -61,10 +61,6 @@ def init_token() -> str:
     return _TOKEN
 
 
-def get_token() -> str | None:
-    return _TOKEN
-
-
 def token_path() -> Path:
     return _TOKEN_PATH
 

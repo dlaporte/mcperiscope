@@ -15,104 +15,8 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# Comparison metrics
+# Helpers
 # ---------------------------------------------------------------------------
-
-
-def compute_comparison(
-    baseline_traces: list[dict],
-    baseline_ratings: list[dict],
-    proxy_traces: list[dict],
-    proxy_ratings: list[dict],
-    original_tools: list,
-    proxy_tool_count: int,
-) -> dict:
-    """Compute before/after comparison metrics.
-
-    Returns a dict with ``baseline``, ``proxy``, ``delta``, and optionally
-    ``accuracy_warning`` keys.
-    """
-
-    def _metrics(traces: list[dict], ratings: list[dict], tool_count: int) -> dict:
-        # Count distinct prompts by grouping on step resets
-        prompt_count = _count_prompts(traces)
-        total_response_tokens = sum(
-            t.get("tool_response_tokens_est", 0) for t in traces
-        )
-        total_calls = len(traces)
-        error_calls = sum(1 for t in traces if t.get("error_category") is not None)
-        rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
-        correct = sum(1 for r in rated if r.get("correctness") == "correct")
-
-        return {
-            "tool_count": tool_count,
-            "avg_tokens_per_prompt": (
-                round(total_response_tokens / prompt_count) if prompt_count else 0
-            ),
-            "avg_calls_per_prompt": (
-                round(total_calls / prompt_count, 2) if prompt_count else 0
-            ),
-            "accuracy": round(correct / len(rated), 4) if rated else None,
-            "error_rate": (
-                round(error_calls / total_calls, 4) if total_calls else 0.0
-            ),
-            "total_calls": total_calls,
-            "total_response_tokens": total_response_tokens,
-            "prompt_count": prompt_count,
-        }
-
-    baseline_tool_count = len(original_tools) if original_tools else 0
-    # Estimate menu tokens from tool definitions
-    baseline_menu = _estimate_menu_tokens(original_tools) if original_tools else 0
-
-    baseline = _metrics(baseline_traces, baseline_ratings, baseline_tool_count)
-    baseline["menu_tokens"] = baseline_menu
-
-    proxy = _metrics(proxy_traces, proxy_ratings, proxy_tool_count)
-    # We don't have the proxy tool objects here, so approximate menu savings
-    # proportional to tool count reduction
-    if baseline_tool_count > 0 and proxy_tool_count > 0:
-        proxy["menu_tokens"] = round(
-            baseline_menu * (proxy_tool_count / baseline_tool_count)
-        )
-    else:
-        proxy["menu_tokens"] = 0
-
-    # Compute deltas
-    delta: dict[str, Any] = {}
-    for key in [
-        "tool_count",
-        "menu_tokens",
-        "avg_tokens_per_prompt",
-        "avg_calls_per_prompt",
-        "error_rate",
-    ]:
-        bv = baseline.get(key, 0) or 0
-        pv = proxy.get(key, 0) or 0
-        delta[key] = round(pv - bv, 4)
-
-    if baseline["accuracy"] is not None and proxy["accuracy"] is not None:
-        delta["accuracy"] = round(proxy["accuracy"] - baseline["accuracy"], 4)
-    else:
-        delta["accuracy"] = None
-
-    result: dict[str, Any] = {
-        "baseline": baseline,
-        "proxy": proxy,
-        "delta": delta,
-    }
-
-    # Warn if accuracy decreased
-    if (
-        delta.get("accuracy") is not None
-        and delta["accuracy"] < 0
-    ):
-        result["accuracy_warning"] = (
-            f"Accuracy decreased by {abs(delta['accuracy']) * 100:.1f}% after optimisation. "
-            f"Review removed/consolidated tools for correctness regressions."
-        )
-
-    return result
 
 
 def _count_prompts(traces: list[dict]) -> int:
@@ -124,20 +28,6 @@ def _count_prompts(traces: list[dict]) -> int:
         if traces[i].get("step", 0) == 0 and traces[i - 1].get("step", -1) != -1:
             count += 1
     return count
-
-
-def _estimate_menu_tokens(tools: list) -> int:
-    """Rough menu token estimate from tool objects."""
-    total = 0
-    for tool in tools:
-        desc = getattr(tool, "description", "") or ""
-        schema = getattr(tool, "inputSchema", None)
-        name = getattr(tool, "name", "") or ""
-        text = f"{name}: {desc}"
-        total += max(1, len(text) // 4)
-        if schema:
-            total += max(1, len(json.dumps(schema)) // 4)
-    return total
 
 
 # ---------------------------------------------------------------------------

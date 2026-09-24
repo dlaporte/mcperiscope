@@ -7,7 +7,6 @@ The redirect URI points to the mcperiscope frontend.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from pathlib import Path
@@ -274,7 +273,6 @@ async def disconnect() -> dict:
     _url = None
     _tools = None
     _auth_config = None
-    session.connection = None
     session.reset()
     return {"status": "disconnected"}
 
@@ -379,9 +377,8 @@ async def _finish_connect() -> dict:
     session.tools = _tools or []
     inventory = analyze_inventory(session.tools)
     session.inventory = analysis_to_dict(inventory)
-    total_tokens = session.inventory.get("total_budget_tokens", 0)
     if not session.quick_wins:
-        session.quick_wins = generate_quick_wins(session.tools, total_tokens, session.model)
+        session.quick_wins = generate_quick_wins(session.tools, session.model)
     return {
         "status": "connected",
         "serverInfo": server_info(),

@@ -18,7 +18,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, SupportsFloat
 
-import anyio
 from anyio import Path as AsyncPath
 
 logger = logging.getLogger(__name__)
@@ -43,7 +42,7 @@ class FileKeyValueStore:
     DEFAULT_COLLECTION = "__default__"
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = base_dir or (Path.home() / ".mcp-optimizer" / "tokens")
+        self._base_dir = base_dir or (Path.home() / ".mcperiscope" / "tokens")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -64,7 +63,6 @@ class FileKeyValueStore:
             return None
 
     async def _write(self, path: Path, value: Mapping[str, Any]) -> None:
-        apath = AsyncPath(path)
         await AsyncPath(path.parent).mkdir(parents=True, exist_ok=True)
         # Tighten directory permissions to 0700 so other local users can't
         # enumerate token files.

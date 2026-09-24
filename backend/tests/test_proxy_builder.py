@@ -166,7 +166,7 @@ def _lookup_map(lines: list[str]) -> dict:
 
 def test_lookup_short_name_collision_keeps_full_names():
     rec = {"source_tools": ["get_foo", "list_foo", "get_bar", "baz", "get_baz"]}
-    m = _lookup_map(_gen_lookup_consolidation(rec, [], None, set()))
+    m = _lookup_map(_gen_lookup_consolidation(rec, set()))
     assert m == {
         "get_foo": "get_foo",
         "list_foo": "list_foo",

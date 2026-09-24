@@ -773,46 +773,6 @@ def generate_recommendations(
                 ),
             })
 
-    # --- From schema overlap: identical schemas with 3+ tools ---
-    # Group overlapping tools into clusters to avoid combinatorial explosion.
-    # Only recommend clusters with 3+ tools (pairs are too granular).
-    seen_overlap_tools: set[str] = set()
-    for overlap in static.get("schema_overlap", []):
-        source_tools = overlap["tools"]
-        if len(source_tools) < 3:
-            continue
-        # Skip if these tools are already covered by a prefix cluster
-        key = frozenset(source_tools)
-        if key & seen_overlap_tools:
-            continue
-        seen_overlap_tools.update(source_tools)
-        savings = sum(
-            budget_by_name.get(n, {}).get("total_tokens", 0)
-            for n in source_tools[1:]
-        )
-        if savings > 0:
-            recommendations.append({
-                "id": _next_id(),
-                "type": "consolidate",
-                "impact": _impact_level(savings),
-                "source_tools": source_tools,
-                "target_tool": {
-                    "name": _common_name(source_tools),
-                    "parameters": _merged_params(source_tools, tool_map),
-                    "description": f"Unified tool replacing {', '.join(source_tools[:5])}{'...' if len(source_tools) > 5 else ''}",
-                },
-                "estimated_token_savings": savings,
-                "risk": "LOW",
-                "evidence": (
-                    f"{len(source_tools)} tools share {overlap['overlap']} "
-                    f"parameter schemas (overlap ratio: {overlap['overlap_ratio']})"
-                ),
-                "description": (
-                    f"Merge {len(source_tools)} tools with {overlap['overlap']} schemas "
-                    f"into a single tool"
-                ),
-            })
-
     # --- From descriptions: poor-scoring descriptions ---
     for desc_info in static.get("descriptions", []):
         if desc_info["overall_score"] < 4.0 and desc_info.get("issues"):

@@ -40,12 +40,10 @@ async def auth_callback(req: OAuthCallbackRequest):
             return
 
         # Step 2: Exchange OAuth code and reconnect
-        yield _sse("progress", {"message": "Exchanging authorization code..."})
+        yield _sse("progress", {"message": "Exchanging authorization code and connecting..."})
         try:
-            # The callback_url might be a full URL or just the code
-            callback = req.callback_url
-            yield _sse("progress", {"message": "Connecting to MCP server..."})
-            result = await mcp_manager.complete_oauth(callback)
+            # complete_oauth requires the full callback URL (code + state)
+            await mcp_manager.complete_oauth(req.callback_url)
         except Exception as e:
             yield _sse("error", {"message": f"OAuth completion failed: {e}"})
             return

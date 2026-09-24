@@ -108,7 +108,6 @@ export function ResultsTab() {
   const quickWins = useStore((s) => s.quickWins);
   const planMarkdown = useStore((s) => s.planMarkdown);
   const fetchRecommendations = useStore((s) => s.fetchRecommendations);
-  const fetchPlan = useStore((s) => s.fetchPlan);
   const analyzeTools = useStore((s) => s.analyzeTools);
   const optimizationRuns = useStore((s) => s.optimizationRuns);
   const selectedRunId = useStore((s) => s.selectedRunId);
@@ -130,7 +129,7 @@ export function ResultsTab() {
       analyzeTools().finally(() => setAnalyzing(false));
     }
     fetchRecommendations();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Build baseline-only comparison from eval results (always available)
   const baselineComparison = useMemo(() => {

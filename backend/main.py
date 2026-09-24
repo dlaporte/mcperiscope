@@ -5,17 +5,16 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth_token import init_token, require_token, token_path
 from backend import mcp_manager
 from backend.routes import analysis, auth_routes, connection, optimize, prompts, resources, results, tools
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 

@@ -29,7 +29,6 @@ function truncate(s: string, max: number): string {
 }
 
 interface RecItemProps {
-  id: string;
   type: string;
   description: string;
   impact?: string;
@@ -37,7 +36,7 @@ interface RecItemProps {
   onToggle: () => void;
 }
 
-function RecItem({ id, type, description, impact, checked, onToggle }: RecItemProps) {
+function RecItem({ type, description, impact, checked, onToggle }: RecItemProps) {
   const [expanded, setExpanded] = useState(false);
   const typeLower = (type || "").toLowerCase();
   const badgeStyle = TYPE_STYLES[typeLower] || defaultBadgeStyle;
@@ -65,7 +64,7 @@ function RecItem({ id, type, description, impact, checked, onToggle }: RecItemPr
             {impact && (
               <span
                 className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                style={IMPACT_STYLES[(impact || "LOW").toUpperCase()] || IMPACT_STYLES.LOW}
+                style={IMPACT_STYLES[impact.toUpperCase()] || IMPACT_STYLES.LOW}
               >
                 {impact.toUpperCase()}
               </span>
@@ -110,7 +109,6 @@ export function RecommendationsPanel() {
   const disabledResources = useStore((s) => s.disabledResources);
 
   const hasAny = recommendations.length > 0 || quickWins.length > 0;
-  const enabledCount = enabledRecIds.size;
 
   // Determine which recommendations are fully disabled by inventory
   const fullyDisabledRecIds = useMemo(() => {
@@ -169,7 +167,6 @@ export function RecommendationsPanel() {
             {recommendations.map((rec: any) => (
               <div key={rec.id} style={fullyDisabledRecIds.has(rec.id) ? { opacity: 0.4 } : undefined}>
                 <RecItem
-                  id={rec.id}
                   type={rec.type}
                   description={rec.description}
                   impact={rec.impact}
@@ -191,7 +188,6 @@ export function RecommendationsPanel() {
             {quickWins.map((win: any) => (
               <div key={win.id} style={fullyDisabledRecIds.has(win.id) ? { opacity: 0.4 } : undefined}>
                 <RecItem
-                  id={win.id}
                   type={win.type}
                   description={win.description}
                   checked={enabledRecIds.has(win.id)}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 
 from backend.models import AuthConfig, ConnectRequest
 from backend import mcp_manager
@@ -76,7 +76,7 @@ def _validate_auth_config(auth: AuthConfig | None) -> None:
 
 
 @router.post("/connect")
-async def connect(req: ConnectRequest, request: Request):
+async def connect(req: ConnectRequest):
     # Validate the upstream MCP URL before touching session state.
     validate_external_url(req.url, label="MCP server URL")
     if req.custom_endpoint:

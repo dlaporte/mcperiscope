@@ -112,7 +112,6 @@ export interface EvalResult {
     error: string | null;
   }>;
   traceEvents: unknown[];
-  rating?: { correctness: string; notes: string };
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -174,7 +173,6 @@ interface AppState {
   // Explore data
   tools: any[];
   resources: any[];
-  resourceTemplates: any[];
   prompts: any[];
   inventory: any | null;
 
@@ -203,11 +201,9 @@ interface AppState {
   optimizeProgress: string | null;
 
   // Results
-  comparison: any;
   recommendations: any[];
   quickWins: any[];
   planMarkdown: string;
-  resultsLoading: boolean;
 
   // Optimization workbench
   optimizationRuns: OptimizationRun[];
@@ -233,14 +229,9 @@ interface AppState {
   runOptimizeWithSelection: () => Promise<void>;
 
   // Actions
-  fetchComparison: () => Promise<void>;
   fetchRecommendations: () => Promise<void>;
   fetchPlan: () => Promise<void>;
   checkStatus: () => Promise<void>;
-  setModel: (model: string) => void;
-  setApiKey: (apiKey: string) => void;
-  setCustomEndpoint: (endpoint: string) => void;
-  setCustomContextWindow: (ctx: number) => void;
   connect: (config: MCPServerConfig) => Promise<void>;
   disconnect: () => Promise<void>;
   signOutMCP: (url: string) => Promise<void>;
@@ -258,12 +249,9 @@ interface AppState {
 
   // Resource loading
   toggleResource: (uri: string) => Promise<void>;
-  fetchLoadedResources: () => Promise<void>;
 
   // Optimize actions
   evaluate: (prompt: string) => Promise<void>;
-  submitRating: (index: number, correctness: string, notes: string) => Promise<void>;
-  runOptimize: () => Promise<void>;
   removeEval: (index: number) => void;
   selectEval: (index: number) => void;
 }
@@ -402,10 +390,9 @@ export function includedBackendIndices(state: Pick<AppState, "evalIncluded" | "e
 }
 
 async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
-  const [tools, resources, templates, prompts, inventoryRes] = await Promise.allSettled([
+  const [tools, resources, prompts, inventoryRes] = await Promise.allSettled([
     api.listTools(),
     api.listResources(),
-    api.listResourceTemplates(),
     api.listPrompts(),
     api.getInventory(),
   ]);
@@ -415,7 +402,6 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
   set({
     tools: tools.status === "fulfilled" ? (tools.value as { tools: any[] }).tools : [],
     resources: resourceList,
-    resourceTemplates: templates.status === "fulfilled" ? (templates.value as { resourceTemplates: any[] }).resourceTemplates : [],
     prompts: prompts.status === "fulfilled" ? (prompts.value as { prompts: any[] }).prompts : [],
     inventory: inventoryRes.status === "fulfilled" ? inventoryRes.value : null,
   });
@@ -614,7 +600,6 @@ export const useStore = create<AppState>((set, get) => ({
   maxTokensPerResponse: parseInt(lsGet("maxTokensPerResponse") || "4096", 10),
   tools: [],
   resources: [],
-  resourceTemplates: [],
   prompts: [],
   inventory: null,
   selection: null,
@@ -640,11 +625,9 @@ export const useStore = create<AppState>((set, get) => ({
   liveContextTokens: 0,
   optimizeRunning: false,
   optimizeProgress: null,
-  comparison: null,
   recommendations: [],
   quickWins: [],
   planMarkdown: "",
-  resultsLoading: false,
   optimizationRuns: [],
   selectedRunId: null,
   enabledRecIds: new Set<string>(),
@@ -769,7 +752,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   runOptimizeWithSelection: async () => {
-    set({ optimizeRunning: true, optimizeProgress: "Starting optimization..." });
+    set({ optimizeRunning: true, optimizeProgress: "Starting optimization...", planMarkdown: "" });
     try {
       const state = get();
       const primaryConfig = state.llmConfigs.find((c) => c.id === state.primaryLLM);
@@ -810,14 +793,11 @@ export const useStore = create<AppState>((set, get) => ({
           set({ optimizeProgress: data.message });
         } else if (event === "done") {
           // Fetch final results from backend
-          const [comparison, recs, planRes, runsRes] = await Promise.allSettled([
-            api.getComparison(),
+          const [recs] = await Promise.allSettled([
             api.getRecommendations(),
-            fetch("/api/results/plan").then((r) => r.ok ? r.text() : ""),
-            api.getRuns(),
+            get().fetchPlan(),
           ]);
           const recsData = recs.status === "fulfilled" ? recs.value as any : {};
-          const runsData = runsRes.status === "fulfilled" ? (runsRes.value as any).runs : [];
 
           // Also fetch the full run data for the new run
           const runId = data.runId;
@@ -845,10 +825,8 @@ export const useStore = create<AppState>((set, get) => ({
           set({
             optimizeRunning: false,
             optimizeProgress: null,
-            comparison: data.comparison ?? (comparison.status === "fulfilled" ? comparison.value : null),
             recommendations: recsData?.recommendations ?? [],
             quickWins: recsData?.quickWins ?? [],
-            planMarkdown: planRes.status === "fulfilled" ? planRes.value as string : "",
             optimizationRuns: updatedRuns,
             selectedRunId: runId || null,
           });
@@ -863,16 +841,6 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       set({ optimizeRunning: false, optimizeProgress: null, error: message });
-    }
-  },
-
-  fetchComparison: async () => {
-    set({ resultsLoading: true });
-    try {
-      const data = await api.getComparison();
-      set({ comparison: data, resultsLoading: false });
-    } catch {
-      set({ resultsLoading: false });
     }
   },
 
@@ -909,26 +877,6 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // Backend not reachable, stay disconnected
     }
-  },
-
-  setModel: (model) => {
-    lsSet("model", model);
-    set({ model });
-  },
-
-  setApiKey: (apiKey) => {
-    lsSet("apiKey", apiKey);
-    set({ apiKey });
-  },
-
-  setCustomEndpoint: (endpoint) => {
-    lsSet("customEndpoint", endpoint);
-    set({ customEndpoint: endpoint });
-  },
-
-  setCustomContextWindow: (ctx) => {
-    lsSet("customContextWindow", String(ctx));
-    set({ customContextWindow: ctx });
   },
 
   addLLMConfig: (config) => {
@@ -1133,7 +1081,6 @@ export const useStore = create<AppState>((set, get) => ({
       oauthPending: false,
       tools: [],
       resources: [],
-      resourceTemplates: [],
       prompts: [],
       inventory: null,
       selection: null,
@@ -1148,7 +1095,6 @@ export const useStore = create<AppState>((set, get) => ({
       evalLoading: false,
       optimizeRunning: false,
       optimizeProgress: null,
-      comparison: null,
       recommendations: [],
       quickWins: [],
       planMarkdown: "",
@@ -1344,13 +1290,6 @@ export const useStore = create<AppState>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  fetchLoadedResources: async () => {
-    try {
-      const data = await api.getLoadedResources();
-      set({ loadedResources: data.resources });
-    } catch { /* ignore */ }
-  },
-
   // Optimize actions
   evaluate: async (prompt) => {
     // Add a placeholder entry immediately and select it
@@ -1484,33 +1423,6 @@ export const useStore = create<AppState>((set, get) => ({
         return { evalResults, evalLoading: false };
       });
     }
-  },
-
-  submitRating: async (index, correctness, notes) => {
-    const backendIndex = get().evalResults[index]?.backendIndex;
-    if (backendIndex === undefined) return;
-    try {
-      await api.submitRating(backendIndex, correctness, notes);
-      set((state) => {
-        const evalResults = [...state.evalResults];
-        if (evalResults[index]) {
-          evalResults[index] = {
-            ...evalResults[index],
-            rating: { correctness, notes },
-          };
-        }
-        return { evalResults };
-      });
-    } catch {
-      // ignore rating errors
-    }
-  },
-
-  // Dead code marker - keeping interface declaration but removing implementation
-  // runOptimize was replaced by runOptimizeWithSelection
-  runOptimize: async () => {
-    // Delegate to runOptimizeWithSelection
-    return get().runOptimizeWithSelection();
   },
 
   removeEval: (index) => {

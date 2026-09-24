@@ -14,7 +14,6 @@ router = APIRouter()
 
 def generate_quick_wins(
     tools: list,
-    total_tokens: int,
     model: str,
     resources: list[dict] | None = None,
 ) -> list[dict]:
@@ -189,7 +188,7 @@ async def get_inventory():
 
     # Only generate quick wins if not already set (preserves stable IDs across optimize runs)
     if not session.quick_wins:
-        session.quick_wins = generate_quick_wins(session.tools, total_budget, session.model, resource_details)
+        session.quick_wins = generate_quick_wins(session.tools, session.model, resource_details)
 
     return {
         **session.inventory,
