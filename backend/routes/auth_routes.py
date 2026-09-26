@@ -30,6 +30,8 @@ async def auth_callback(req: OAuthCallbackRequest):
                 custom_endpoint=req.custom_endpoint,
                 model=req.model,
             )
+            if req.custom_context_window:
+                session.custom_context_window = req.custom_context_window
         except HTTPException as e:
             yield _sse("error", {"message": e.detail})
             return

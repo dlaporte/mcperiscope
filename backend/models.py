@@ -29,6 +29,10 @@ class AuthConfig(BaseModel):
     token_endpoint: str | None = None
 
 
+# Same bounds everywhere a caller may set the context window for unknown models.
+CustomContextWindow = Field(default=None, ge=1, le=2_000_000)
+
+
 class ConnectRequest(BaseModel):
     url: str
     auth: AuthConfig | None = None
@@ -37,7 +41,7 @@ class ConnectRequest(BaseModel):
     provider: str | None = None
     api_key: str | None = None
     custom_endpoint: str | None = None
-    custom_context_window: int | None = Field(default=None, ge=1, le=2_000_000)
+    custom_context_window: int | None = CustomContextWindow
 
 
 class ToolCallRequest(BaseModel):
@@ -62,12 +66,7 @@ class EvaluateRequest(BaseModel):
     custom_endpoint: str | None = None
     max_tool_rounds: int | None = Field(default=None, ge=1, le=MAX_TOOL_ROUNDS)
     max_tokens: int | None = Field(default=None, ge=1, le=MAX_TOKENS_PER_RESPONSE)
-
-
-class RatingRequest(BaseModel):
-    prompt_index: int
-    correctness: Literal["correct", "partial", "wrong", "skipped"]
-    notes: str = ""
+    custom_context_window: int | None = CustomContextWindow
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -76,6 +75,7 @@ class OAuthCallbackRequest(BaseModel):
     api_key: str | None = None
     provider: str | None = None
     custom_endpoint: str | None = None
+    custom_context_window: int | None = CustomContextWindow
 
 
 class SignOutRequest(BaseModel):

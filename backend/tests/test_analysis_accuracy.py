@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from backend.mcp_optimizer.analyze import (
-    analyze_correctness_correlation,
     find_redundant_calls,
     find_sequence_patterns,
     group_traces_by_prompt,
@@ -43,17 +42,6 @@ def test_redundant_calls_are_per_prompt_and_ignore_manual_calls():
     assert find_redundant_calls([_t("a", 0), _t("a", 0, step=2)])[0]["total_redundant_calls"] == 1
 
 
-def test_correctness_correlation_uses_rating_values_and_prompt_index():
-    traces = [_t("good", 0), _t("bad", 1)]
-    ratings = [
-        {"prompt_index": 0, "correctness": "correct"},
-        {"prompt_index": 1, "correctness": "wrong"},  # RatingRequest's value
-    ]
-    by_tool = {r["tool_name"]: r for r in analyze_correctness_correlation(traces, ratings)}
-    assert by_tool["bad"]["uses_in_incorrect"] == 1 and by_tool["bad"]["error_bias"] == 1.0
-    assert by_tool["good"]["uses_in_correct"] == 1 and by_tool["good"]["error_bias"] == 0.0
-
-
 def test_baseline_population_is_included_evals_only():
     evals = [
         {"traceEvents": [_t("a", 0), _t("b", 0, step=2)]},
@@ -80,7 +68,7 @@ def test_run_plan_includes_quick_wins_and_low_recs():
          "estimated_savings": 100},
     ]
     inventory = {"tool_count": 10}
-    md = generate_plan_md("u", inventory, recs, [], [], [], filter_by_impact=False)
+    md = generate_plan_md("u", inventory, recs, [], [], filter_by_impact=False)
     assert "low rec" in md and "unused qw" in md
     assert "`z1`" in md and "~100 tokens" in md
     assert "| Estimated token savings | 150 |" in md
@@ -90,7 +78,7 @@ def test_run_plan_includes_quick_wins_and_low_recs():
 
 def test_plan_metrics_ignore_manual_calls():
     traces = [_t("a", 0), _t("b", 1), _t("manual", None, error_category="boom")]
-    md = generate_plan_md("u", {}, [], [], traces, [])
+    md = generate_plan_md("u", {}, [], traces, [])
     assert "**Avg calls/prompt:** 1.0" in md
     assert "**Error rate:** 0.0%" in md
 
@@ -109,8 +97,8 @@ def _comparison() -> dict:
 def _report_data(**overrides) -> dict:
     data = {
         "url": "u", "inventory": {}, "analysis": {}, "recommendations": [],
-        "ratings": [{"prompt_index": 0, "prompt": "p", "correctness": "wrong", "notes": "missed a field"}],
         "traces": [_t("search", 0)], "prompts": ["p"], "comparison": _comparison(),
+        "analyst_results": [{"index": 0, "prompt": "p", "verdict": "different", "explanation": "missed a field"}],
     }
     data.update(overrides)
     return data
@@ -122,16 +110,27 @@ def test_report_md_comparison_and_notes():
     assert "| Tool Count | 10 | 6 | -4 |" in md
     assert "| Accuracy | 100.00% | 50.00% | -50.00% |" in md
     assert "| Total Context | 5,000 | 4,000 | N/A |" in md
-    assert "**Notes:** missed a field" in md
+    assert "### Prompt 1: DIFFERENT" in md
+    assert "**Tool calls:** `search`" in md
+    assert "**Analyst:** missed a field" in md
+    assert "**Accuracy:** 50% of proxy answers" in md
 
 
 def test_report_html_comparison_timeline_and_notes():
     out = generate_report_html(_report_data())
     assert "comparison-table" in out and "--baseline" not in out
-    assert "missed a field" in out
+    assert "missed a field" in out and "DIFFERENT" in out
+    assert ">50%<" in out  # Accuracy card from the comparison
     assert 'title="search"' in out  # timeline for prompt 1 from its prompt_index group
 
 
 def test_report_html_without_comparison():
-    out = generate_report_html(_report_data(comparison=None))
+    out = generate_report_html(_report_data(comparison=None, analyst_results=[]))
     assert "No comparison data yet" in out
+    assert ">N/A<" in out  # Accuracy card without a run
+    assert "NOT COMPARED" in out and 'title="search"' in out
+
+
+def test_report_skips_deleted_evals():
+    md = generate_report_md(_report_data(prompts=[None, "kept"], traces=[_t("gone", 0), _t("kept_tool", 1)]))
+    assert "gone" not in md and "### Prompt 2" in md and "`kept_tool`" in md

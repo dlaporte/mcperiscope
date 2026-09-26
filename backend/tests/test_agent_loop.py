@@ -116,6 +116,7 @@ def test_evaluate_event_sequence(fake_session):
     assert done["prompt"] == "find x"
     assert done["answer"] == "Done"
     assert done["index"] == 0
+    assert (done["error"], done["stopped"]) == (False, False)
     assert done["usage"] == {
         "input_tokens": 250, "output_tokens": 15, "total_tokens": 265,
         "peak_context_tokens": 150, "api_rounds": 2,
@@ -145,6 +146,42 @@ def test_evaluate_max_rounds(fake_session):
     assert names[-2:] == ["error", "done"]
     assert events[-2][1] == {"message": "Max tool call rounds (1) exceeded"}
     assert events[-1][1]["answer"].startswith("[Stopped after 1 tool call rounds")
+    assert events[-1][1]["stopped"] is True
+    assert session.eval_results[0]["stopped"] is True
+
+
+def test_evaluate_llm_error_is_flagged(fake_session):
+    async def boom(*a, **k):
+        raise RuntimeError("down")
+        yield  # pragma: no cover
+
+    fake_session.chat_stream = boom
+    events = _run_evaluate("p")
+    done = events[-1][1]
+    assert done["error"] is True and done["answer"] == "Error: down"
+    assert session.eval_results[0]["error"] is True
+
+
+def test_deleted_eval_not_replayed_and_traces_dropped(fake_session):
+    _run_evaluate("first")
+    asyncio.run(optimize.delete_eval(0))
+    assert session.eval_results[0]["deleted"] is True
+    assert session.traces == []
+    # Idempotent; out of range is a 404.
+    assert asyncio.run(optimize.delete_eval(0)) == {"index": 0, "deleted": True}
+    with pytest.raises(optimize.HTTPException) as excinfo:
+        asyncio.run(optimize.delete_eval(5))
+    assert excinfo.value.status_code == 404
+    with pytest.raises(optimize.HTTPException) as excinfo:
+        asyncio.run(optimize.get_context(0))
+    assert excinfo.value.status_code == 410
+
+    fake_session.__init__()
+    fake_session.seen_messages.clear()
+    events = _run_evaluate("second")
+    assert events[-1][1]["index"] == 1  # indices stay stable
+    first_call = fake_session.seen_messages[0]
+    assert [m["content"] for m in first_call] == ["second"]
 
 
 def test_agent_loop_non_streaming_counts_steps_per_loop():

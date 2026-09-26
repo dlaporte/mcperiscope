@@ -55,7 +55,6 @@ class Session:
     tools: list[Any] = field(default_factory=list)
     inventory: dict | None = None
     traces: list[dict] = field(default_factory=list)
-    ratings: list[dict] = field(default_factory=list)
     analysis: dict | None = None
     recommendations: list[dict] = field(default_factory=list)
     prompts: list[str] = field(default_factory=list)
@@ -101,7 +100,6 @@ class Session:
         self.tools = []
         self.inventory = None
         self.traces = []
-        self.ratings = []
         self.analysis = None
         self.recommendations = []
         self.prompts = []

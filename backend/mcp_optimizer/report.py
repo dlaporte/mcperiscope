@@ -44,6 +44,36 @@ _COMPARISON_METRICS = [
 ]
 
 
+def _comparison_accuracy(comparison: Any) -> float | None:
+    """Proxy accuracy from a run's comparison: the share of compared answers
+    the analyst judged equivalent to the baseline. The one accuracy figure
+    reports show; None when there is no run or no answers were compared."""
+    if not isinstance(comparison, dict):
+        return None
+    return (comparison.get("proxy") or {}).get("accuracy")
+
+
+def _analyst_by_index(analyst_results: list[dict], prompts: list[str | None]) -> dict[int, dict]:
+    """Map eval index -> analyst result (by "index", else by prompt text)."""
+    by_index: dict[int, dict] = {}
+    for r in analyst_results or []:
+        idx = r.get("index")
+        if idx is None and r.get("prompt") in prompts:
+            idx = prompts.index(r["prompt"])
+        if idx is not None:
+            by_index[idx] = r
+    return by_index
+
+
+# Analyst verdict -> (label, badge css suffix)
+_VERDICT_BADGES = {
+    "equivalent": ("EQUIVALENT", "correct"),
+    "partial": ("PARTIAL", "partial"),
+    "different": ("DIFFERENT", "wrong"),
+    "error": ("NOT COMPARED", "unrated"),
+}
+
+
 def _delta_value(delta: Any) -> Any:
     """session.comparison stores deltas as {"value", "pct"}; reports show the value."""
     return delta.get("value") if isinstance(delta, dict) else delta
@@ -58,13 +88,13 @@ def generate_plan_md(
     url: str,
     inventory: dict,
     recommendations: list[dict],
-    ratings: list[dict],
     traces: list[dict],
-    prompts: list[str],
+    prompts: list[str | None],
     filter_by_impact: bool = True,
 ) -> str:
     """Generate an optimisation plan as Markdown.
 
+    `prompts` is positional by eval index; None marks a deleted eval.
     `recommendations` may mix behavior recs and quick wins. With
     `filter_by_impact`, only HIGH/MEDIUM recs are listed (all of them if none
     qualify); pass False when the caller already chose the recs.
@@ -98,11 +128,6 @@ def generate_plan_md(
         lines.append(f"- **Avg calls/prompt:** {total_calls / prompt_count:.1f}" if prompt_count else "")
         lines.append(f"- **Avg response tokens/prompt:** {total_tokens / prompt_count:,.0f}" if prompt_count else "")
         lines.append(f"- **Error rate:** {error_calls / total_calls * 100:.1f}%" if total_calls else "")
-
-    if ratings:
-        rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
-        correct = sum(1 for r in rated if r.get("correctness") == "correct")
-        lines.append(f"- **Accuracy:** {correct}/{len(rated)} ({correct / len(rated) * 100:.0f}%)" if rated else "")
     lines.append("")
 
     # --- Approved Optimisations ---
@@ -168,10 +193,11 @@ def generate_plan_md(
     lines.append("")
 
     # --- Evaluation Prompts ---
-    if prompts:
+    live_prompts = [p for p in prompts if p is not None]
+    if live_prompts:
         lines.append("## Evaluation Prompts Used")
         lines.append("")
-        for j, prompt in enumerate(prompts, 1):
+        for j, prompt in enumerate(live_prompts, 1):
             lines.append(f"{j}. {prompt}")
         lines.append("")
 
@@ -189,8 +215,10 @@ def generate_report_md(data: dict) -> str:
     inventory = data.get("inventory", {})
     analysis = data.get("analysis", {})
     recommendations = data.get("recommendations", [])
-    ratings = data.get("ratings", [])
     prompts = data.get("prompts", [])
+    traces = data.get("traces", [])
+    comp = data.get("comparison")
+    analyst = _analyst_by_index(data.get("analyst_results", []), prompts)
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines: list[str] = []
@@ -207,7 +235,7 @@ def generate_report_md(data: dict) -> str:
 
     tool_count = inventory.get("tool_count", 0)
     budget = inventory.get("total_budget_tokens", 0)
-    total_savings = sum(r.get("estimated_token_savings", 0) for r in recommendations)
+    total_savings = sum(_rec_savings(r) for r in recommendations)
     high_impact = [r for r in recommendations if r.get("impact") == "HIGH"]
     med_impact = [r for r in recommendations if r.get("impact") == "MEDIUM"]
 
@@ -216,12 +244,9 @@ def generate_report_md(data: dict) -> str:
                  f"({len(high_impact)} high, {len(med_impact)} medium impact)")
     lines.append(f"- **{total_savings:,}** estimated token savings")
 
-    if ratings:
-        rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
-        correct = sum(1 for r in rated if r.get("correctness") == "correct")
-        if rated:
-            lines.append(f"- **Accuracy:** {correct}/{len(rated)} "
-                         f"({correct / len(rated) * 100:.0f}%)")
+    accuracy = _comparison_accuracy(comp)
+    if accuracy is not None:
+        lines.append(f"- **Accuracy:** {accuracy * 100:.0f}% of proxy answers equivalent to baseline")
 
     lines.append(f"- **Assessment:** {inventory.get('budget_assessment', 'N/A')}")
     lines.append("")
@@ -272,10 +297,10 @@ def generate_report_md(data: dict) -> str:
                 lines.append("")
                 lines.append(f"- Type: `{rec.get('type', '?')}`")
                 lines.append(f"- Risk: {rec.get('risk', '?')}")
-                source_tools = rec.get("source_tools", [])
+                source_tools = _rec_tools(rec)
                 if source_tools:
                     lines.append(f"- Source: {', '.join(f'`{t}`' for t in source_tools)}")
-                savings = rec.get("estimated_token_savings", 0)
+                savings = _rec_savings(rec)
                 if savings:
                     lines.append(f"- Savings: ~{savings:,} tokens")
                 evidence = rec.get("evidence", "")
@@ -287,31 +312,27 @@ def generate_report_md(data: dict) -> str:
     lines.append("## 4. Evaluation Results")
     lines.append("")
 
-    # session.ratings is positional (index = eval index) and padded with None
-    # for unrated evals.
-    if not any(ratings):
+    # Positional by eval index; trace groups and analyst results share it.
+    trace_groups = group_traces_by_prompt(traces)
+    live = [(i, p) for i, p in enumerate(prompts) if p is not None]
+    if not live:
         lines.append("_No evaluation results available._")
     else:
-        for i, rating in enumerate(ratings):
-            if rating is None:
-                continue
-            prompt_text = prompts[i] if i < len(prompts) else "Unknown prompt"
-            correctness = rating.get("correctness", "unrated")
-            badge = {"correct": "PASS", "partial": "PARTIAL", "wrong": "FAIL"}.get(
-                correctness, "UNRATED"
-            )
-            lines.append(f"### Prompt {i + 1}: {badge}")
+        for i, prompt_text in live:
+            result = analyst.get(i)
+            label = _VERDICT_BADGES.get(result.get("verdict"), ("NOT COMPARED", ""))[0] if result else "NOT COMPARED"
+            lines.append(f"### Prompt {i + 1}: {label}")
             lines.append("")
             lines.append(f"> {prompt_text}")
             lines.append("")
-            lines.append(f"- **Correctness:** {correctness}")
-            if rating.get("notes"):
-                lines.append(f"- **Notes:** {rating['notes']}")
+            calls = [t.get("tool_name", "?") for t in trace_groups.get(i, [])]
+            lines.append(f"- **Tool calls:** {' → '.join(f'`{c}`' for c in calls) if calls else 'none'}")
+            if result and result.get("explanation"):
+                lines.append(f"- **Analyst:** {result['explanation']}")
             lines.append("")
     lines.append("")
 
     # ---- 5. Before/After Comparison ----
-    comp = data.get("comparison")
     if isinstance(comp, dict) and "baseline" in comp and "proxy" in comp:
         lines.append("## 5. Before / After Comparison")
         lines.append("")
@@ -352,19 +373,18 @@ def generate_report_html(data: dict) -> str:
     inventory = data.get("inventory", {})
     analysis = data.get("analysis", {})
     recommendations = data.get("recommendations", [])
-    ratings = data.get("ratings", [])
     traces = data.get("traces", [])
     prompts = data.get("prompts", [])
     comparison = data.get("comparison")
+    analyst = _analyst_by_index(data.get("analyst_results", []), prompts)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     tool_count = inventory.get("tool_count", 0)
     budget = inventory.get("total_budget_tokens", 0)
-    total_savings = sum(r.get("estimated_token_savings", 0) for r in recommendations)
+    total_savings = sum(_rec_savings(r) for r in recommendations)
 
-    rated = [r for r in ratings if r is not None and r.get("correctness") is not None]
-    correct = sum(1 for r in rated if r.get("correctness") == "correct")
-    accuracy_pct = f"{correct / len(rated) * 100:.0f}%" if rated else "N/A"
+    accuracy = _comparison_accuracy(comparison)
+    accuracy_pct = f"{accuracy * 100:.0f}%" if accuracy is not None else "N/A"
 
     # Build description score map
     static = analysis.get("static_analysis", {})
@@ -373,9 +393,7 @@ def generate_report_html(data: dict) -> str:
         desc_scores[d["name"]] = d.get("overall_score", "?")
 
     # Generate the plan markdown for the copy-to-clipboard section
-    plan_md = generate_plan_md(
-        url, inventory, recommendations, ratings, traces, prompts
-    )
+    plan_md = generate_plan_md(url, inventory, recommendations, traces, prompts)
 
     # --- Build HTML sections ---
 
@@ -391,7 +409,7 @@ def generate_report_html(data: dict) -> str:
     recs_html = _html_recommendations(recommendations)
 
     # Evaluation results
-    eval_html = _html_evaluation_results(ratings, prompts, traces)
+    eval_html = _html_evaluation_results(prompts, traces, analyst)
 
     # Comparison section
     comparison_html = _html_comparison(comparison)
@@ -474,7 +492,7 @@ def _html_metric_cards(
     cards = [
         ("Tools", str(tool_count), "Total tool count"),
         ("Menu Budget", f"{budget:,} tok", "Token cost of tool definitions"),
-        ("Accuracy", accuracy_pct, "Evaluation correctness"),
+        ("Accuracy", accuracy_pct, "Proxy answers equivalent to baseline"),
         ("Savings", f"{total_savings:,} tok", "Estimated token savings"),
         ("Recommendations", str(rec_count), "Optimization actions"),
     ]
@@ -550,8 +568,8 @@ def _html_recommendations(recommendations: list[dict]) -> str:
         risk = rec.get("risk", "?")
         description = rec.get("description", "")
         evidence = rec.get("evidence", "")
-        savings = rec.get("estimated_token_savings", 0)
-        source_tools = rec.get("source_tools", [])
+        savings = _rec_savings(rec)
+        source_tools = _rec_tools(rec)
         target = rec.get("target_tool")
 
         impact_cls = impact.lower() if impact in ("HIGH", "MEDIUM", "LOW") else ""
@@ -591,28 +609,23 @@ def _html_recommendations(recommendations: list[dict]) -> str:
 
 
 def _html_evaluation_results(
-    ratings: list[dict], prompts: list[str], traces: list[dict]
+    prompts: list[str | None], traces: list[dict], analyst: dict[int, dict]
 ) -> str:
-    if not any(ratings):
+    """One card per live eval: prompt, tool call timeline, analyst verdict."""
+    live = [(i, p) for i, p in enumerate(prompts) if p is not None]
+    if not live:
         return "<p>No evaluation results available.</p>"
 
     # Group traces by prompt
     trace_groups = group_traces_by_prompt(traces)
 
     parts = []
-    for i, rating in enumerate(ratings):
-        if rating is None:
-            continue
-        prompt_text = prompts[i] if i < len(prompts) else "Unknown prompt"
-        correctness = rating.get("correctness", "unrated")
-        badge_cls = {
-            "correct": "correct",
-            "partial": "partial",
-            "wrong": "wrong",
-        }.get(correctness, "unrated")
-        notes = rating.get("notes", "")
+    for i, prompt_text in live:
+        result = analyst.get(i) or {}
+        label, badge_cls = _VERDICT_BADGES.get(result.get("verdict"), ("NOT COMPARED", "unrated"))
+        notes = result.get("explanation", "")
 
-        # Build tool call timeline (ratings and trace groups share the eval index)
+        # Build tool call timeline (prompts and trace groups share the eval index)
         timeline_html = ""
         group = trace_groups.get(i)
         if group:
@@ -635,7 +648,7 @@ def _html_evaluation_results(
         parts.append(
             f'<div class="eval-card">'
             f'<div class="eval-header">'
-            f'<span class="badge correctness-{badge_cls}">{html.escape(correctness.upper())}</span>'
+            f'<span class="badge correctness-{badge_cls}">{html.escape(label)}</span>'
             f'<span class="eval-prompt">Prompt {i + 1}: {html.escape(prompt_text)}</span>'
             f'</div>'
             f'{timeline_html}'

@@ -71,8 +71,10 @@ interface OptimizationRun {
   enabledRecIds: string[];
   comparison: any;
   analystResults: any[];
-  proxyAnswers: Array<{ prompt: string; answer: string }>;
+  proxyAnswers: Array<{ index: number; prompt: string; answer: string; error?: boolean; stopped?: boolean }>;
   condensedResources?: Record<string, {name: string; original: string; condensed: string; originalTokens: number; condensedTokens: number}>;
+  // Enabled recs the run could not apply
+  skippedRecs?: Array<{ id: string; type: string; reason: string }>;
 }
 
 export interface EvalResult {
@@ -96,6 +98,8 @@ export interface EvalResult {
   };
   // Index of this eval in the backend session; stable across client-side deletes
   backendIndex?: number;
+  error?: boolean;    // the agent loop failed
+  stopped?: boolean;  // hit the tool-round limit
 }
 
 interface AppState {
@@ -173,6 +177,7 @@ interface AppState {
   // Results
   recommendations: any[];
   quickWins: any[];
+  analyzing: boolean;
   planMarkdown: string;
 
   // Optimization workbench
@@ -195,12 +200,11 @@ interface AppState {
   analyzeTools: () => Promise<void>;
   toggleRecEnabled: (id: string) => void;
   setAllRecsEnabled: (enabled: boolean) => void;
-  selectRun: (runId: string | null) => void;
+  selectRun: (runId: string) => void;
   runOptimizeWithSelection: () => Promise<void>;
 
   // Actions
-  fetchRecommendations: () => Promise<void>;
-  fetchPlan: () => Promise<void>;
+  refreshRecommendations: () => Promise<void>;
   checkStatus: () => Promise<void>;
   connect: (config: MCPServerConfig) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -221,7 +225,7 @@ interface AppState {
 
   // Optimize actions
   evaluate: (prompt: string) => Promise<void>;
-  removeEval: (index: number) => void;
+  removeEval: (index: number) => Promise<void>;
   selectEval: (index: number) => void;
 }
 
@@ -439,23 +443,27 @@ export function selectPrimaryLLM(state: Pick<AppState, "llmConfigs" | "primaryLL
   return state.llmConfigs.find((c) => c.id === state.primaryLLM);
 }
 
-// Context window for gauges: server-reported, else the primary LLM's, else the
-// 128k fallback the backend also uses.
+// Context window for gauges: the current primary LLM's, else its known model size,
+// else the one reported at connect time, else the 128k fallback the backend also uses.
 export function selectContextWindow(state: Pick<AppState, "inventory" | "llmConfigs" | "primaryLLM">): number {
   const primary = selectPrimaryLLM(state);
-  return state.inventory?.contextWindow
-    || primary?.contextWindow
+  return primary?.contextWindow
     || (primary ? MODEL_CONTEXT[primary.model] : undefined)
+    || state.inventory?.contextWindow
     || 128_000;
 }
 
-// Request-body fields that tell the backend which LLM to use
-function llmRequestFields(config: LLMConfig | null | undefined) {
+// Request-body fields that tell the backend which LLM to use. A non-custom provider
+// sends custom_endpoint "" so the backend clears any endpoint left from a custom one.
+export function llmRequestFields(config: LLMConfig | null | undefined) {
   return {
     model: config?.model || undefined,
     api_key: config?.apiKey || undefined,
     provider: config?.provider || undefined,
-    custom_endpoint: config?.provider === "custom" ? config.endpoint || undefined : undefined,
+    custom_endpoint: config
+      ? (config.provider === "custom" ? config.endpoint || undefined : "")
+      : undefined,
+    custom_context_window: config?.contextWindow || undefined,
   };
 }
 
@@ -481,6 +489,9 @@ let exploreRequestId = 0;
 // the controllers let disconnect abort those streams outright.
 let sessionGeneration = 0;
 const streamControllers = new Set<AbortController>();
+
+// Settles once every in-flight eval deletion has finished
+let evalRemovals: Promise<void> = Promise.resolve();
 
 // Show an Explore result (unless it's stale) and harvest its fields into the param store
 function applyExploreResult(
@@ -508,6 +519,45 @@ function beginStream() {
     isCurrent: () => generation === sessionGeneration,
     end: () => { streamControllers.delete(controller); },
   };
+}
+
+// Delete an eval from the backend session, then locally
+async function removeEvalEntry(set: SetState, get: GetState, index: number) {
+  const backendIndex = get().evalResults[index]?.backendIndex;
+  if (backendIndex !== undefined) {
+    // Drop it from the backend session too, so it stops feeding analysis and runs
+    const generation = sessionGeneration;
+    try {
+      await api.deleteEval(backendIndex);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (generation === sessionGeneration) set({ error: `Couldn't delete evaluation: ${message}` });
+      return;
+    }
+    if (generation !== sessionGeneration) return;
+  }
+  set((state) => {
+    // Positions may have shifted while the request was in flight
+    const pos = backendIndex !== undefined
+      ? state.evalResults.findIndex((e) => e.backendIndex === backendIndex)
+      : index;
+    if (pos < 0) return {};
+    const evalResults = state.evalResults.filter((_, i) => i !== pos);
+    // Rebuild evalIncluded with shifted indices
+    const included = new Set<number>();
+    for (const i of state.evalIncluded) {
+      if (i < pos) included.add(i);
+      else if (i > pos) included.add(i - 1);
+      // i === pos is the removed one, skip
+    }
+    // Adjust selectedEvalIndex
+    let selectedEvalIndex = state.selectedEvalIndex;
+    if (selectedEvalIndex !== null) {
+      if (selectedEvalIndex === pos) selectedEvalIndex = null;
+      else if (selectedEvalIndex > pos) selectedEvalIndex--;
+    }
+    return { evalResults, evalIncluded: included, selectedEvalIndex };
+  });
 }
 
 async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
@@ -753,6 +803,7 @@ export const useStore = create<AppState>((set, get) => ({
   optimizeProgress: null,
   recommendations: [],
   quickWins: [],
+  analyzing: false,
   planMarkdown: "",
   optimizationRuns: [],
   selectedRunId: null,
@@ -843,10 +894,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   selectRun: (runId) => {
-    if (runId === null) {
-      set({ selectedRunId: null });
-      return;
-    }
     const run = get().optimizationRuns.find((r) => r.id === runId);
     if (run) {
       set({
@@ -865,6 +912,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   analyzeTools: async () => {
+    set({ analyzing: true });
     try {
       const data = await api.analyzeTools();
       set({
@@ -874,6 +922,8 @@ export const useStore = create<AppState>((set, get) => ({
       });
     } catch {
       // no traces yet — that's fine
+    } finally {
+      set({ analyzing: false });
     }
   },
 
@@ -882,7 +932,8 @@ export const useStore = create<AppState>((set, get) => ({
     const stream = beginStream();
     try {
       const state = get();
-      const analyst = llmRequestFields(state.getAnalystConfig());
+      const analystConfig = state.getAnalystConfig();
+      const analyst = llmRequestFields(analystConfig);
       const included = includedBackendIndices(state);
       const response = await fetch("/api/optimize/run", {
         method: "POST",
@@ -891,10 +942,15 @@ export const useStore = create<AppState>((set, get) => ({
           included_indices: included,
           enabled_rec_ids: [...state.enabledRecIds],
           ...llmRequestFields(selectPrimaryLLM(state)),
-          analyst_model: analyst.model,
-          analyst_provider: analyst.provider,
-          analyst_api_key: analyst.api_key,
-          analyst_endpoint: analyst.custom_endpoint,
+          // "-- Same as Agent --": the backend drops any analyst settings it holds
+          ...(analystConfig
+            ? {
+                analyst_model: analyst.model,
+                analyst_provider: analyst.provider,
+                analyst_api_key: analyst.api_key,
+                analyst_endpoint: analyst.custom_endpoint,
+              }
+            : { analyst_inherit: true }),
           disabled_tools: [...state.disabledTools],
           disabled_resources: [...state.disabledResources],
           disabled_prompts: [...state.disabledPrompts],
@@ -918,11 +974,7 @@ export const useStore = create<AppState>((set, get) => ({
           set({ optimizeProgress: data.message });
         } else if (event === "done") {
           // Fetch final results from backend
-          const [recs] = await Promise.allSettled([
-            api.getRecommendations(),
-            get().fetchPlan(),
-          ]);
-          const recsData = recs.status === "fulfilled" ? recs.value as any : {};
+          const recsData = await api.getRecommendations().catch(() => null);
 
           // Also fetch the full run data for the new run
           const runId = data.runId;
@@ -939,6 +991,7 @@ export const useStore = create<AppState>((set, get) => ({
                 analystResults: runData.analystResults,
                 proxyAnswers: runData.proxyAnswers,
                 condensedResources: runData.condensedResources,
+                skippedRecs: runData.skippedRecs,
               };
             } catch { /* ignore */ }
           }
@@ -954,8 +1007,10 @@ export const useStore = create<AppState>((set, get) => ({
             recommendations: recsData?.recommendations ?? [],
             quickWins: recsData?.quickWins ?? [],
             optimizationRuns: updatedRuns,
-            selectedRunId: runId || null,
+            selectedRunId: null,
           });
+          // Show this run's own plan, the same one its downloads use
+          if (newRun) get().selectRun(newRun.id);
         } else if (event === "error") {
           set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
         }
@@ -973,24 +1028,19 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchRecommendations: async () => {
+  refreshRecommendations: async () => {
     try {
-      const data = await api.getRecommendations() as { recommendations: any[]; quickWins: any[] };
-      set({ recommendations: data.recommendations, quickWins: data.quickWins ?? [] });
-    } catch {
-      // no recommendations yet
-    }
-  },
-
-  fetchPlan: async () => {
-    try {
-      const res = await fetch("/api/results/plan");
-      if (res.ok) {
-        const text = await res.text();
-        set({ planMarkdown: text });
+      const data = await api.getRecommendations();
+      set({ recommendations: data.recommendations ?? [], quickWins: data.quickWins ?? [] });
+      // Re-analyze when evals changed since the last analysis (older backends
+      // without the flag: only when there's nothing yet)
+      const stale = data.analysisStale
+        ?? ((data.recommendations ?? []).length === 0 && (data.quickWins ?? []).length === 0);
+      if (stale && get().evalResults.some((e) => e.backendIndex !== undefined)) {
+        await get().analyzeTools();
       }
     } catch {
-      // no plan yet
+      // no recommendations yet
     }
   },
 
@@ -1084,15 +1134,14 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const state = get();
       const authConfig = buildAuthConfig(config);
-      const primaryConfig = selectPrimaryLLM(state);
-      const llm = llmRequestFields(primaryConfig);
+      const llm = llmRequestFields(selectPrimaryLLM(state));
       const res = await api.connect(
         config.url, authConfig,
         llm.model,
         llm.provider,
         llm.api_key,
         llm.custom_endpoint,
-        primaryConfig?.contextWindow,
+        llm.custom_context_window,
         config.protocol,
       );
 
@@ -1207,6 +1256,7 @@ export const useStore = create<AppState>((set, get) => ({
       optimizeProgress: null,
       recommendations: [],
       quickWins: [],
+      analyzing: false,
       planMarkdown: "",
       optimizationRuns: [],
       selectedRunId: null,
@@ -1339,6 +1389,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // Optimize actions
   evaluate: async (prompt) => {
+    await evalRemovals;
     // Add a placeholder entry immediately and select it
     const placeholderIndex = get().evalResults.length;
     set((state) => ({
@@ -1430,6 +1481,8 @@ export const useStore = create<AppState>((set, get) => ({
               traceEvents: data.traceEvents,
               usage: data.usage,
               backendIndex: data.index,
+              error: data.error,
+              stopped: data.stopped,
             };
             // Auto-include in optimization
             const included = new Set(state.evalIncluded);
@@ -1477,24 +1530,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   removeEval: (index) => {
     // evaluate() writes to its entry by position while streaming
-    if (get().evalLoading) return;
-    set((state) => {
-      const evalResults = state.evalResults.filter((_, i) => i !== index);
-      // Rebuild evalIncluded with shifted indices
-      const included = new Set<number>();
-      for (const i of state.evalIncluded) {
-        if (i < index) included.add(i);
-        else if (i > index) included.add(i - 1);
-        // i === index is the removed one, skip
-      }
-      // Adjust selectedEvalIndex
-      let selectedEvalIndex = state.selectedEvalIndex;
-      if (selectedEvalIndex !== null) {
-        if (selectedEvalIndex === index) selectedEvalIndex = null;
-        else if (selectedEvalIndex > index) selectedEvalIndex--;
-      }
-      return { evalResults, evalIncluded: included, selectedEvalIndex };
-    });
+    if (get().evalLoading) return Promise.resolve();
+    const removal = removeEvalEntry(set, get, index);
+    // evaluate() waits for this so its placeholder position can't shift mid-stream
+    evalRemovals = Promise.all([evalRemovals, removal]).then(() => undefined);
+    return removal;
   },
 
   selectEval: (index) => set({ selectedEvalIndex: index }),

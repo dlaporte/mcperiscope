@@ -1,8 +1,8 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { api } from "../../api/client";
 import { useStore, includedBackendIndices, selectContextWindow } from "../../store";
-import { estimateTokens, menuTokens } from "../../utils/tokens";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
@@ -104,72 +104,39 @@ function CollapsibleSection({ title, defaultOpen = true, children }: { title: st
 }
 
 export function ResultsTab() {
-  const recommendations = useStore((s) => s.recommendations);
-  const quickWins = useStore((s) => s.quickWins);
   const planMarkdown = useStore((s) => s.planMarkdown);
-  const fetchRecommendations = useStore((s) => s.fetchRecommendations);
-  const analyzeTools = useStore((s) => s.analyzeTools);
+  const refreshRecommendations = useStore((s) => s.refreshRecommendations);
+  const analyzing = useStore((s) => s.analyzing);
   const optimizationRuns = useStore((s) => s.optimizationRuns);
   const selectedRunId = useStore((s) => s.selectedRunId);
   const selectRun = useStore((s) => s.selectRun);
   const evalResults = useStore((s) => s.evalResults);
-  const loadedResources = useStore((s) => s.loadedResources);
-  const inventory = useStore((s) => s.inventory);
+  // Joined so the selector result is stable between renders
+  const includedKey = useStore((s) => includedBackendIndices(s).join(","));
+  // Baseline total context includes the loaded resources
+  const loadedResourceTokens = useStore((s) => s.loadedResources.reduce((sum, r) => sum + r.tokens, 0));
   const contextWindow = useStore(selectContextWindow);
 
   const [showResponses, setShowResponses] = useState(false);
   const [showResources, setShowResources] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [baseline, setBaseline] = useState<Record<string, number>>({});
 
-  // On mount, run analysis if we have eval results but no recommendations
+  // On mount, pick up the latest recommendations, re-analyzing if evals changed since
   useEffect(() => {
-    if (evalResults.length > 0 && recommendations.length === 0 && quickWins.length === 0) {
-      setAnalyzing(true);
-      analyzeTools().finally(() => setAnalyzing(false));
-    }
-    fetchRecommendations();
-  }, []);
+    refreshRecommendations();
+  }, [refreshRecommendations]);
 
-  // Build baseline-only comparison from eval results (always available)
-  const baselineComparison = useMemo(() => {
-    const menuTokenCount = menuTokens(inventory);
-    const numPrompts = Math.max(evalResults.length, 1);
-    let totalTraceTokens = 0;
-    let totalCalls = 0;
-    let totalLatency = 0;
-    let peakContext = 0;
-    for (const ev of evalResults) {
-      // Use API-reported peak_context_tokens from most recent eval with data
-      const peak = ev.usage?.peak_context_tokens;
-      if (peak) peakContext = peak;
-      for (const step of (ev.toolChain || [])) {
-        totalCalls++;
-        totalTraceTokens += Math.max(1, estimateTokens(step.output ?? ""));
-        totalLatency += step.duration || 0;
-      }
-    }
-    const avgTokens = Math.round(totalTraceTokens / numPrompts);
-    const avgCalls = Math.round(totalCalls / numPrompts * 10) / 10;
-    const avgLatency = Math.round(totalLatency / numPrompts * 1000);
-    const toolCount = inventory?.tool_count ?? 0;
-    // Use real API-reported context, fall back to estimate including loaded resources
-    const loadedResourceTokens = loadedResources.reduce((sum, r) => sum + r.tokens, 0);
-    const totalContext = peakContext > 0 ? peakContext : menuTokenCount + avgTokens + loadedResourceTokens;
-
-    return {
-      baseline: {
-        tool_count: toolCount,
-        menu_tokens: menuTokenCount,
-        avg_tokens_per_prompt: avgTokens,
-        avg_calls_per_prompt: avgCalls,
-        total_context: totalContext,
-        accuracy: 1.0, // baseline is the reference that proxy answers are judged against
-        avg_latency: avgLatency,
-      },
-      proxy: {},
-      delta: {},
-    };
-  }, [evalResults, inventory, loadedResources]);
+  // Baseline-only comparison over the included evals, computed by the backend
+  // the same way as a run's baseline
+  useEffect(() => {
+    let cancelled = false;
+    const included = includedKey ? includedKey.split(",").map(Number) : [];
+    api.getBaseline(included)
+      .then((data) => { if (!cancelled) setBaseline(data); })
+      .catch(() => { /* keep the previous figures */ });
+    return () => { cancelled = true; };
+  }, [includedKey, loadedResourceTokens]);
+  const baselineComparison = { baseline, proxy: {}, delta: {} };
 
   const hasEvals = evalResults.length > 0;
 
@@ -198,6 +165,7 @@ export function ResultsTab() {
   const analystResults = selectedRun?.analystResults || [];
   const proxyAnswers = selectedRun?.proxyAnswers || [];
   const condensedResources = selectedRun?.condensedResources;
+  const skippedRecs = selectedRun?.skippedRecs ?? [];
 
   const runSelectorNode = optimizationRuns.length > 0 ? (
     <RunSelector
@@ -247,6 +215,16 @@ export function ResultsTab() {
         <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-6">
           <ComparisonTable data={comparisonData} runSelector={runSelectorNode} />
+
+          {skippedRecs.length > 0 && (
+            <div
+              className="rounded-lg px-4 py-3 text-sm"
+              style={{ backgroundColor: 'rgba(196,154,42,0.1)', border: '1px solid var(--sub-brass-dim)', color: 'var(--sub-brass)' }}
+            >
+              {skippedRecs.length} optimization{skippedRecs.length === 1 ? " was" : "s were"} skipped:{" "}
+              {skippedRecs.map((r) => `${r.type} (${r.reason})`).join("; ")}
+            </div>
+          )}
 
           {analystResults.length > 0 && (
             <CollapsibleSection title="Accuracy" defaultOpen={false}>

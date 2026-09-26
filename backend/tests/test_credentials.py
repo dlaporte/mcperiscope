@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from backend.credentials import bind_analyst_credentials, bind_primary_credentials
+from backend.credentials import (
+    bind_analyst_credentials,
+    bind_primary_credentials,
+    clear_analyst_credentials,
+)
 
 
 class _State:
@@ -56,12 +60,12 @@ def test_idempotent_call_preserves_stored_key():
 
 
 def test_caller_omits_endpoint_does_not_clear_it():
-    """Frontend sends api_key + provider but omits custom_endpoint.
+    """Caller resends the key + provider but omits custom_endpoint (None).
 
-    Common shape when re-binding the same custom OpenAI key. The stored
-    endpoint must be preserved when the field is `None`, otherwise a real
-    user's evaluations would silently hit api.openai.com after a
-    no-op rebind.
+    `None` means "keep": the stored endpoint must survive, otherwise a
+    re-bind of the same custom key would silently hit api.openai.com.
+    (The frontend itself sends "" for non-custom providers; see
+    test_switch_custom_to_openai_clears_endpoint.)
     """
     s = _State(
         api_key="sk-1",
@@ -70,9 +74,10 @@ def test_caller_omits_endpoint_does_not_clear_it():
         api_key_provider="custom",
         api_key_endpoint="https://api.example.com/v1",
     )
-    bind_primary_credentials(s, api_key=None, provider="custom", custom_endpoint=None, model=None)
+    bind_primary_credentials(s, api_key="sk-1", provider="custom", custom_endpoint=None, model=None)
     assert s.api_key == "sk-1"
     assert s.custom_endpoint == "https://api.example.com/v1"
+    assert s.api_key_endpoint == "https://api.example.com/v1"
 
 
 def test_destination_change_without_key_rejected_and_wipes():
@@ -186,3 +191,47 @@ def test_analyst_destination_change_without_key_rejected_and_wipes():
     assert s.analyst_api_key == ""
     assert s.analyst_api_key_provider == ""
     assert s.analyst_api_key_endpoint == ""
+
+
+# --- endpoint clearing (frontend sends "" for non-custom providers) ---
+
+def test_switch_custom_to_openai_clears_endpoint():
+    s = _State(
+        api_key="sk-custom", provider="custom", custom_endpoint="https://llm.example/v1",
+        api_key_provider="custom", api_key_endpoint="https://llm.example/v1",
+    )
+    bind_primary_credentials(s, api_key="sk-openai", provider="openai", custom_endpoint="", model=None)
+    assert (s.provider, s.custom_endpoint) == ("openai", "")
+    assert (s.api_key_provider, s.api_key_endpoint) == ("openai", "")
+
+
+def test_unchanged_provider_with_empty_endpoint_no_400():
+    s = _State(api_key="sk-1", provider="openai", api_key_provider="openai")
+    bind_primary_credentials(s, api_key=None, provider="openai", custom_endpoint="", model=None)
+    assert s.api_key == "sk-1"
+
+
+def test_analyst_switch_custom_to_openai_is_atomic():
+    s = _State(provider="anthropic")
+    bind_analyst_credentials(s, api_key="ak1", provider="custom", endpoint="https://llm.example/v1", model=None)
+    bind_analyst_credentials(s, api_key="ak2", provider="openai", endpoint="", model=None)
+    assert (s.analyst_provider, s.analyst_endpoint) == ("openai", "")
+    assert (s.analyst_api_key_provider, s.analyst_api_key_endpoint) == ("openai", "")
+    # Resending the same destination without the key is no destination change.
+    bind_analyst_credentials(s, api_key=None, provider="openai", endpoint="", model=None)
+    assert s.analyst_api_key == "ak2"
+
+
+def test_analyst_openai_does_not_inherit_primary_custom_endpoint():
+    s = _State(provider="custom", custom_endpoint="https://primary.example/v1")
+    bind_analyst_credentials(s, api_key="ak", provider="openai", endpoint="", model=None)
+    assert s.analyst_api_key_endpoint == ""
+
+
+def test_analyst_inherit_resets_every_analyst_field():
+    s = _State(provider="anthropic")
+    bind_analyst_credentials(s, api_key="ak", provider="custom", endpoint="https://llm.example/v1", model="m")
+    clear_analyst_credentials(s)
+    for field in ("analyst_model", "analyst_provider", "analyst_endpoint", "analyst_api_key",
+                  "analyst_api_key_provider", "analyst_api_key_endpoint"):
+        assert getattr(s, field) == "", field

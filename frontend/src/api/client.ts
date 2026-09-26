@@ -44,7 +44,7 @@ export const api = {
   connect: (url: string, auth?: AuthConfig, model?: string, provider?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number, protocol?: string) =>
     request<ConnectResult>("/connect", {
       method: "POST",
-      body: JSON.stringify({ url, auth, model: model || undefined, provider: provider || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint || undefined, custom_context_window: customContextWindow || undefined, protocol: protocol && protocol !== "auto" ? protocol : undefined }),
+      body: JSON.stringify({ url, auth, model: model || undefined, provider: provider || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint, custom_context_window: customContextWindow || undefined, protocol: protocol && protocol !== "auto" ? protocol : undefined }),
     }),
 
   disconnect: () =>
@@ -108,8 +108,15 @@ export const api = {
 
   // === Results ===
   getRecommendations: () =>
-    request<unknown>("/results/recommendations"),
+    request<{ recommendations: any[]; quickWins: any[]; analysisStale?: boolean }>("/results/recommendations"),
+
+  // Baseline side of the comparison over the given backend eval indices
+  getBaseline: (included: number[]) =>
+    request<Record<string, number>>(`/results/baseline?included=${included.join(",")}`),
+
+  deleteEval: (backendIndex: number) =>
+    request<unknown>(`/optimize/eval/${backendIndex}`, { method: "DELETE" }),
 
   // === Optimization Runs ===
-  getRun: (runId: string) => request<any>(`/results/runs/${runId}`),
+  getRun: (runId: string) => request<any>(`/results/runs/${encodeURIComponent(runId)}`),
 };

@@ -12,20 +12,21 @@ interface ExportPanelProps {
 
 function getDownloads(runId?: string | null): DownloadButton[] {
   if (runId) {
+    const run = `/api/results/runs/${encodeURIComponent(runId)}`;
     return [
       {
         label: "Download Plan",
-        endpoint: `/api/results/runs/${runId}/plan`,
+        endpoint: `${run}/plan`,
         filename: "optimization-plan.md",
       },
       {
         label: "Download Report",
-        endpoint: "/api/results/report/html",
+        endpoint: `${run}/report/html`,
         filename: "optimization-report.html",
       },
       {
         label: "Download Proxy",
-        endpoint: `/api/results/runs/${runId}/proxy`,
+        endpoint: `${run}/proxy`,
         filename: "proxy_server.py",
       },
     ];

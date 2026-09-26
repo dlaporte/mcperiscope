@@ -114,6 +114,16 @@ def analyst_destination(
     return session.provider, endpoint or session.custom_endpoint
 
 
+def clear_analyst_credentials(session) -> None:
+    """Reset the analyst to "same as agent": every analyst_* field blank."""
+    session.analyst_model = ""
+    session.analyst_provider = ""
+    session.analyst_endpoint = ""
+    session.analyst_api_key = ""
+    session.analyst_api_key_provider = ""
+    session.analyst_api_key_endpoint = ""
+
+
 def bind_analyst_credentials(
     session,
     *,

@@ -267,7 +267,7 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
 }
 
 const AUTH_METHOD_LABELS: Record<string, string> = {
-  none: "None",
+  none: "Auto (OAuth if the server requires it)",
   bearer: "Bearer Token",
   header: "Custom Header",
   oauth: "OAuth 2.1",
@@ -735,7 +735,7 @@ export function SettingsTab() {
               <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Analyst LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
-                  Compares baseline vs optimized answers and generates proxy server code
+                  Compares baseline vs optimized answers, rewrites tool descriptions and condenses resources
                 </span>
               </label>
               <select

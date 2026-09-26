@@ -28,6 +28,11 @@ def _extract_fields(text: str) -> list[str]:
     return []
 
 
+def _live_eval_indices() -> list[int]:
+    """Indices of the evals not deleted (tombstoned) by DELETE /optimize/eval."""
+    return [i for i, e in enumerate(session.eval_results) if not e.get("deleted")]
+
+
 def _menu_tokens(tools: list) -> int:
     """Estimated tokens the tool definitions (the "menu") add to every LLM call."""
     return sum(tool_token_budget(t).total_tokens for t in tools)
@@ -66,7 +71,7 @@ def _baseline_population(eval_results: list[dict], included: set[int]) -> tuple[
     Covers only the included evals, matching what the proxy re-runs.
     Returns (trace events of those evals, number of included evals, min 1).
     """
-    evals = [e for i, e in enumerate(eval_results) if i in included]
+    evals = [e for i, e in enumerate(eval_results) if i in included and not e.get("deleted")]
     traces = [t for e in evals for t in e.get("traceEvents", [])]
     return traces, max(len(evals), 1)
 
@@ -93,6 +98,15 @@ def _baseline_figures(included: set[int], listing_tokens: int) -> dict:
         "avg_latency": round(sum(t.get("tool_duration_s", 0) for t in traces) / num_prompts * 1000, 1),
         "error_rate": round(errors / calls, 4) if calls else 0.0,
     }
+
+
+def _analysis_stale() -> bool:
+    """True when there is no analysis or the live evals changed since it ran.
+
+    Eval indices are append-only and deletions are tombstones, so the set of
+    live indices identifies exactly which evals (and traces) were analyzed.
+    """
+    return not session.analysis or session.analysis.get("eval_indices") != _live_eval_indices()
 
 
 def _make_trace_event(
@@ -125,13 +139,15 @@ def _make_trace_event(
 
 
 def _run_and_store_analysis() -> None:
-    """Run trace analysis and store it, with stable rec IDs, on the session."""
+    """Run trace analysis and store it, with stable rec IDs, on the session.
+
+    The analysis records the live evals it covered (see _analysis_stale).
+    """
     from backend.mcp_optimizer.analyze import run_analysis
     from backend.proxy_builder import mark_plan_only
 
-    # session.ratings is positional and padded with None for unrated evals.
-    ratings = [r for r in session.ratings if r is not None]
-    session.analysis = run_analysis(session.tools, session.traces, ratings)
+    session.analysis = run_analysis(session.tools, session.traces)
+    session.analysis["eval_indices"] = _live_eval_indices()
     session.recommendations = session.analysis.get("recommendations", [])
     for i, rec in enumerate(session.recommendations):
         rec["id"] = f"rec_{i}"

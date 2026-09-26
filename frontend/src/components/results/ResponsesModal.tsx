@@ -2,15 +2,15 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface Props {
-  proxyAnswers: Array<{ prompt: string; answer: string }>;
-  evalResults: Array<{ prompt: string; answer: string }>;
+  proxyAnswers: Array<{ index: number; prompt: string; answer: string }>;
+  evalResults: Array<{ prompt: string; answer: string; backendIndex?: number }>;
   onClose: () => void;
 }
 
 export function ResponsesModal({ proxyAnswers, evalResults, onClose }: Props) {
-  // Build a merged list keyed by prompt
+  // Pair each proxy answer with the baseline eval it re-ran (prompts may repeat)
   const prompts = proxyAnswers.map((pa) => {
-    const baseline = evalResults.find((er) => er.prompt === pa.prompt);
+    const baseline = evalResults.find((er) => er.backendIndex === pa.index);
     return {
       prompt: pa.prompt,
       baselineAnswer: baseline?.answer || "",

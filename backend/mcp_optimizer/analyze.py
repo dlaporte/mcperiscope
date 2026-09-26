@@ -325,7 +325,7 @@ def analyze_lookup_tools(tools: list[Tool]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Trace analysis — from evaluation traces + ratings
+# Trace analysis — from evaluation traces
 # ---------------------------------------------------------------------------
 
 
@@ -613,65 +613,6 @@ def _contains_subsequence(sequence: list[str], subseq: list[str]) -> bool:
     """Check if subseq appears as a contiguous subsequence in sequence."""
     n = len(subseq)
     return any(sequence[i:i + n] == subseq for i in range(len(sequence) - n + 1))
-
-
-def analyze_correctness_correlation(
-    traces: list[dict], ratings: list[dict]
-) -> list[dict[str, Any]]:
-    """Which tools appear more in wrong-answer vs correct-answer traces."""
-    groups = group_traces_by_prompt(traces)
-
-    # Map prompt_index to correctness
-    correctness_map: dict[int, str] = {}
-    for rating in ratings:
-        correctness_map[rating["prompt_index"]] = rating.get("correctness", "unknown")
-
-    # Count tool usage in correct vs incorrect groups
-    tool_correct: Counter[str] = Counter()
-    tool_incorrect: Counter[str] = Counter()
-    total_correct = 0
-    total_incorrect = 0
-
-    for idx, group in groups.items():
-        correctness = correctness_map.get(idx, "unknown")
-        if correctness == "correct":
-            total_correct += 1
-            for trace in group:
-                tool_correct[trace["tool_name"]] += 1
-        elif correctness == "wrong":  # RatingRequest: correct | partial | wrong | skipped
-            total_incorrect += 1
-            for trace in group:
-                tool_incorrect[trace["tool_name"]] += 1
-
-    all_tools = set(tool_correct.keys()) | set(tool_incorrect.keys())
-    results: list[dict[str, Any]] = []
-
-    for tool_name in all_tools:
-        correct_count = tool_correct.get(tool_name, 0)
-        incorrect_count = tool_incorrect.get(tool_name, 0)
-        total_uses = correct_count + incorrect_count
-
-        # Rate: how much more frequently does this tool appear in incorrect traces?
-        correct_rate = correct_count / total_correct if total_correct > 0 else 0
-        incorrect_rate = incorrect_count / total_incorrect if total_incorrect > 0 else 0
-
-        if incorrect_rate > correct_rate and incorrect_count > 0:
-            error_bias = round(incorrect_rate - correct_rate, 3)
-        else:
-            error_bias = 0.0
-
-        results.append({
-            "tool_name": tool_name,
-            "uses_in_correct": correct_count,
-            "uses_in_incorrect": incorrect_count,
-            "total_uses": total_uses,
-            "correct_rate": round(correct_rate, 3),
-            "incorrect_rate": round(incorrect_rate, 3),
-            "error_bias": error_bias,
-        })
-
-    results.sort(key=lambda r: -r["error_bias"])
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -1022,14 +963,12 @@ def _deduplicate_recommendations(recs: list[dict[str, Any]]) -> list[dict[str, A
 def run_analysis(
     tools: list[Tool],
     traces: list[dict],
-    ratings: list[dict],
 ) -> dict:
     """Run full deep analysis on tool definitions and evaluation traces.
 
     Args:
         tools: MCP tool definitions.
         traces: Evaluation trace events (may be empty).
-        ratings: Correctness ratings per prompt (may be empty).
 
     Returns:
         Dict with ``static_analysis``, ``trace_analysis``, and
@@ -1052,10 +991,6 @@ def run_analysis(
         trace_result["parameter_hops"] = find_parameter_hops(traces)
         trace_result["error_cost"] = compute_error_cost(traces)
         trace_result["sequence_patterns"] = find_sequence_patterns(traces)
-        if ratings:
-            trace_result["correctness_correlation"] = analyze_correctness_correlation(
-                traces, ratings
-            )
 
     # --- Recommendations ---
     recommendations = generate_recommendations(static, trace_result, tools)

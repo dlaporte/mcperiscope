@@ -18,15 +18,21 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from pydantic import BaseModel, Field
-from backend.models import MAX_TOOL_ROUNDS, EvaluateRequest, RatingRequest
+from backend.models import MAX_TOOL_ROUNDS, CustomContextWindow, EvaluateRequest
 from backend.state import OptimizationRun, session
 from backend import mcp_manager
-from backend.credentials import analyst_destination, bind_analyst_credentials, bind_primary_credentials
+from backend.credentials import (
+    analyst_destination,
+    bind_analyst_credentials,
+    bind_primary_credentials,
+    clear_analyst_credentials,
+)
 from backend.llm_client import LLMClient
 from backend.mcp_optimizer.inventory import estimate_tokens
 from backend.routes._common import (
     _baseline_figures,
     _baseline_population,
+    _live_eval_indices,
     _make_trace_event,
     _menu_tokens,
     _resource_tokens,
@@ -324,6 +330,8 @@ async def evaluate(req: EvaluateRequest):
         custom_endpoint=req.custom_endpoint,
         model=req.model,
     )
+    if req.custom_context_window:
+        session.custom_context_window = req.custom_context_window
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
     if not session.tools:
@@ -352,7 +360,9 @@ async def evaluate(req: EvaluateRequest):
         # Inject loaded resources as context at the start
         messages = _resource_preamble(session.loaded_resources.values())
 
-        for prev in session.eval_results:
+        # Deleted evals are left out, as if they never ran.
+        live_evals = [session.eval_results[i] for i in _live_eval_indices()]
+        for prev in live_evals:
             raw = prev.get("raw_messages")
             if raw:
                 # Replay the full conversation including tool calls/results
@@ -367,7 +377,7 @@ async def evaluate(req: EvaluateRequest):
         # Context tracking: use API-reported base + estimated delta from new content
         # Initialize base from prior eval's peak if available, otherwise estimate from messages
         context_base = 0
-        for prev_ev in session.eval_results:  # This eval isn't appended until it finishes
+        for prev_ev in live_evals:  # This eval isn't appended until it finishes
             peak = (prev_ev.get("usage") or {}).get("peak_context_tokens", 0)
             if peak:
                 context_base = peak
@@ -477,46 +487,26 @@ async def get_context(index: int):
     """Get the context window data for a specific evaluation."""
     if index < 0 or index >= len(session.eval_results):
         raise HTTPException(status_code=404, detail="Evaluation not found")
+    if session.eval_results[index].get("deleted"):
+        raise HTTPException(status_code=410, detail="Evaluation was deleted")
     ctx = session.eval_results[index].get("contextWindow")
     if not ctx:
         raise HTTPException(status_code=404, detail="No context window data")
     return ctx
 
 
-@router.post("/optimize/rate")
-async def rate(req: RatingRequest):
-    if req.prompt_index < 0 or req.prompt_index >= len(session.eval_results):
-        raise HTTPException(status_code=400, detail="Invalid prompt index")
+@router.delete("/optimize/eval/{index}")
+async def delete_eval(index: int):
+    """Delete an evaluation by tombstoning it, so later indices stay stable.
 
-    session.eval_results[req.prompt_index]["rating"] = {
-        "correctness": req.correctness,
-        "notes": req.notes,
-    }
-
-    rating_entry = {
-        "prompt_index": req.prompt_index,
-        "prompt": session.eval_results[req.prompt_index]["prompt"],
-        "correctness": req.correctness,
-        "notes": req.notes,
-    }
-    while len(session.ratings) <= req.prompt_index:
-        session.ratings.append(None)
-    session.ratings[req.prompt_index] = rating_entry
-
-    rated = [r for r in session.ratings if r is not None]
-    correct = sum(1 for r in rated if r["correctness"] == "correct")
-    partial = sum(1 for r in rated if r["correctness"] == "partial")
-    wrong = sum(1 for r in rated if r["correctness"] == "wrong")
-    total_scored = correct + partial + wrong
-    accuracy = (correct + 0.5 * partial) / total_scored if total_scored > 0 else 0
-
-    return {
-        "accuracy": round(accuracy, 3),
-        "correct": correct,
-        "partial": partial,
-        "wrong": wrong,
-        "total": len(rated),
-    }
+    A deleted eval is left out of history replay, analysis, the baseline and
+    reports; its traces are dropped from session.traces. Idempotent.
+    """
+    if index < 0 or index >= len(session.eval_results):
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    session.eval_results[index]["deleted"] = True
+    session.traces = [t for t in session.traces if t.get("prompt_index") != index]
+    return {"index": index, "deleted": True}
 
 
 RESOURCE_REC_TYPES = {"resource_context_usage"}
@@ -568,6 +558,10 @@ class OptimizeRunRequest(BaseModel):
     analyst_provider: str | None = None
     analyst_api_key: str | None = None
     analyst_endpoint: str | None = None
+    # True = analyst is "same as agent": clears every stored analyst_* field
+    # (the analyst_* fields above are then ignored).
+    analyst_inherit: bool = False
+    custom_context_window: int | None = CustomContextWindow
     disabled_tools: list[str] | None = None
     disabled_resources: list[str] | None = None
     disabled_prompts: list[str] | None = None
@@ -595,13 +589,18 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         custom_endpoint=req.custom_endpoint if req else None,
         model=req.model if req else None,
     )
-    bind_analyst_credentials(
-        session,
-        api_key=req.analyst_api_key if req else None,
-        provider=req.analyst_provider if req else None,
-        endpoint=req.analyst_endpoint if req else None,
-        model=req.analyst_model if req else None,
-    )
+    if req and req.analyst_inherit:
+        clear_analyst_credentials(session)
+    else:
+        bind_analyst_credentials(
+            session,
+            api_key=req.analyst_api_key if req else None,
+            provider=req.analyst_provider if req else None,
+            endpoint=req.analyst_endpoint if req else None,
+            model=req.analyst_model if req else None,
+        )
+    if req and req.custom_context_window:
+        session.custom_context_window = req.custom_context_window
     if not session.api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
 
@@ -609,7 +608,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     session.kill_proxy()
 
     # Filter to only included evaluations
-    included = set(req.included_indices) if req and req.included_indices is not None else set(range(len(session.eval_results)))
+    live = set(_live_eval_indices())
+    included = set(req.included_indices) & live if req and req.included_indices is not None else live
     included_evals = [e for i, e in enumerate(session.eval_results) if i in included]
     if not included_evals:
         raise HTTPException(status_code=400, detail="No evaluations included")
@@ -953,7 +953,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     skip_reason = _failed_answer_reason(baseline_entry, proxy_entry)
                     if skip_reason:
                         # Not counted toward accuracy: there is nothing to compare.
-                        analyst_results.append({"prompt": prompt, "verdict": "error", "explanation": skip_reason, "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
+                        analyst_results.append({"index": proxy_entry.get("index"), "prompt": prompt, "verdict": "error", "explanation": skip_reason, "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
                         continue
 
                     yield _sse("progress", {
@@ -996,6 +996,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
                     proxy_total += 1
                     analyst_results.append({
+                        "index": proxy_entry.get("index"),
                         "prompt": prompt,
                         "verdict": verdict,
                         "explanation": explanation,
@@ -1062,6 +1063,11 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 delta[key] = {"value": diff, "pct": pct}
 
         comparison = {"baseline": baseline, "proxy": proxy, "delta": delta, "analyst_results": analyst_results}
+        if (delta.get("accuracy") or {}).get("value", 0) < 0:
+            comparison["accuracy_warning"] = (
+                f"Proxy answers diverged from baseline on {analyst_total - analyst_correct} "
+                f"of {analyst_total} prompts"
+            )
         if proxy_skip_reason:
             comparison["proxy_skip_reason"] = proxy_skip_reason
 
