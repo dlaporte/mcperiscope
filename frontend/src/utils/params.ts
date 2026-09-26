@@ -11,3 +11,14 @@ export function formatParamContext(entry: ParamEntry, { omitValue = false } = {}
   }
   return parts.join(", ");
 }
+
+/** Flatten multi-value param store to simple key→value using first entry per key */
+export function flattenParamStore(store: Record<string, ParamEntry[]>): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  for (const [key, entries] of Object.entries(store)) {
+    if (entries.length > 0) {
+      flat[key] = entries[0].value;
+    }
+  }
+  return flat;
+}

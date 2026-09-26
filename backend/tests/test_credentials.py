@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from backend.credentials import bind_primary_credentials
+from backend.credentials import bind_analyst_credentials, bind_primary_credentials
 
 
 class _State:
@@ -18,6 +18,12 @@ class _State:
         self.custom_endpoint = ""
         self.api_key_provider = ""
         self.api_key_endpoint = ""
+        self.analyst_model = ""
+        self.analyst_provider = ""
+        self.analyst_endpoint = ""
+        self.analyst_api_key = ""
+        self.analyst_api_key_provider = ""
+        self.analyst_api_key_endpoint = ""
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -141,3 +147,42 @@ def test_first_time_no_state_no_raise():
     assert s.api_key == ""
     assert s.provider == "openai"
     assert s.custom_endpoint == "https://x/v1"
+
+
+# --- analyst binding ---
+
+def test_analyst_bind_records_resolved_destination():
+    s = _State(provider="custom", custom_endpoint="https://primary.example/v1")
+    bind_analyst_credentials(s, api_key="ak", provider="openai", endpoint=None, model="gpt-x")
+    assert s.analyst_api_key == "ak"
+    assert s.analyst_model == "gpt-x"
+    # An explicit provider doesn't inherit the primary's custom endpoint.
+    assert (s.analyst_api_key_provider, s.analyst_api_key_endpoint) == ("openai", "")
+
+
+def test_analyst_bind_inherit_records_primary_destination():
+    s = _State(provider="custom", custom_endpoint="https://primary.example/v1")
+    bind_analyst_credentials(s, api_key="ak", provider="", endpoint="", model=None)
+    assert (s.analyst_api_key_provider, s.analyst_api_key_endpoint) == (
+        "custom", "https://primary.example/v1",
+    )
+
+
+def test_analyst_idempotent_call_preserves_key():
+    s = _State(provider="anthropic")
+    bind_analyst_credentials(s, api_key="ak", provider="openai", endpoint=None, model=None)
+    bind_analyst_credentials(s, api_key=None, provider=None, endpoint=None, model=None)
+    assert s.analyst_api_key == "ak"
+
+
+def test_analyst_destination_change_without_key_rejected_and_wipes():
+    s = _State(provider="anthropic")
+    bind_analyst_credentials(s, api_key="ak", provider="openai", endpoint=None, model=None)
+    with pytest.raises(HTTPException) as excinfo:
+        bind_analyst_credentials(
+            s, api_key=None, provider="custom", endpoint="https://evil.example/v1", model=None
+        )
+    assert excinfo.value.status_code == 400
+    assert s.analyst_api_key == ""
+    assert s.analyst_api_key_provider == ""
+    assert s.analyst_api_key_endpoint == ""

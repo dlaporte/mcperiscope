@@ -109,6 +109,7 @@ interface AppState {
   connecting: boolean;
   serverInfo: unknown;
   error: string | null;
+  connectedConfigId: string | null; // MCP config of the current (or in-progress) connection
 
   // Auth
   oauthPending: boolean;
@@ -211,7 +212,6 @@ interface AppState {
   readResource: (uri: string) => Promise<void>;
   getPrompt: (name: string, args: Record<string, string>) => Promise<void>;
   harvestParams: (values: Record<string, unknown>) => void;
-  harvestResultParams: (result: any) => void;
   clearParamStore: () => void;
   addParamAlias: (fieldName: string, storeKey: string) => void;
   removeParamAlias: (fieldName: string) => void;
@@ -229,6 +229,24 @@ export const LS_PREFIX = "mcperiscope:";
 
 // sessionStorage key: OAuthCallback stashes the callback URL here for ConnectTab to finish
 export const PENDING_OAUTH_KEY = LS_PREFIX + "pending-oauth-callback";
+
+// sessionStorage key: the MCP config being connected, so it survives the OAuth redirect
+const CONNECTED_CONFIG_KEY = LS_PREFIX + "connected-config";
+
+function loadConnectedConfigId(): string | null {
+  try {
+    return sessionStorage.getItem(CONNECTED_CONFIG_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveConnectedConfigId(id: string | null) {
+  try {
+    if (id) sessionStorage.setItem(CONNECTED_CONFIG_KEY, id);
+    else sessionStorage.removeItem(CONNECTED_CONFIG_KEY);
+  } catch { /* ignore */ }
+}
 
 // Pre-LLMConfig flat model settings, read only by migrateToLLMConfigs()
 const LEGACY_LLM_KEYS = ["model", "apiKey", "customEndpoint", "customContextWindow"];
@@ -320,6 +338,74 @@ function addParamEntry(
   }
 }
 
+// Add every scalar field found in a JSON tool/resource/prompt result to the param store
+function harvestResultInto(store: Record<string, ParamEntry[]>, result: any, source: string): void {
+  // Extract text blocks from MCP result shapes
+  const textBlocks: string[] = [];
+  const contents = result.content ?? result.contents;
+  if (Array.isArray(contents)) {
+    for (const block of contents) {
+      if (block.type === "text" && typeof block.text === "string") {
+        textBlocks.push(block.text);
+      } else if (typeof block.text === "string") {
+        textBlocks.push(block.text);
+      }
+    }
+  }
+  if (result.messages && Array.isArray(result.messages)) {
+    for (const msg of result.messages) {
+      if (msg.content && typeof msg.content === "object" && msg.content.type === "text") {
+        textBlocks.push(msg.content.text);
+      }
+    }
+  }
+
+  function harvestObject(obj: Record<string, unknown>) {
+    const context: Record<string, unknown> = {};
+    // Build context from all scalar fields
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        context[k] = v;
+      }
+    }
+    // Add each scalar as a param entry with full context
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        addParamEntry(store, k, { value: v, context, source });
+      }
+    }
+  }
+
+  for (const text of textBlocks) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        // Array of objects — harvest from each item
+        for (const item of parsed) {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            harvestObject(item as Record<string, unknown>);
+          }
+        }
+      } else if (parsed && typeof parsed === "object") {
+        // Single object — harvest directly
+        harvestObject(parsed as Record<string, unknown>);
+        // Also check nested arrays (e.g., { scouts: [...], summary: {...} })
+        for (const v of Object.values(parsed)) {
+          if (Array.isArray(v)) {
+            for (const item of v) {
+              if (item && typeof item === "object" && !Array.isArray(item)) {
+                harvestObject(item as Record<string, unknown>);
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // not JSON, skip
+    }
+  }
+}
+
 function buildAuthConfig(config: MCPServerConfig): AuthConfig | undefined {
   switch (config.authMethod) {
     case "none":
@@ -382,6 +468,46 @@ export function includedBackendIndices(state: Pick<AppState, "evalIncluded" | "e
     if (backendIndex !== undefined) indices.push(backendIndex);
   }
   return indices.sort((a, b) => a - b);
+}
+
+type SetState = (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void;
+type GetState = () => AppState;
+
+// Bumped by every Explore request and selection change, so a slow response can't
+// land under a different item than the one it was requested for.
+let exploreRequestId = 0;
+
+// Bumped on disconnect so events from a previous session's streams are ignored;
+// the controllers let disconnect abort those streams outright.
+let sessionGeneration = 0;
+const streamControllers = new Set<AbortController>();
+
+// Show an Explore result (unless it's stale) and harvest its fields into the param store
+function applyExploreResult(
+  set: SetState,
+  get: GetState,
+  requestId: number,
+  result: any,
+  source: string,
+  resultMeta: AppState["resultMeta"],
+) {
+  if (requestId !== exploreRequestId) return;
+  const parameterStore = structuredClone(get().parameterStore);
+  harvestResultInto(parameterStore, result, source);
+  saveParamStore(parameterStore);
+  set({ result, resultLoading: false, resultMeta, parameterStore });
+}
+
+// Start a stream owned by the current session; disconnect() aborts it
+function beginStream() {
+  const controller = new AbortController();
+  streamControllers.add(controller);
+  const generation = sessionGeneration;
+  return {
+    signal: controller.signal,
+    isCurrent: () => generation === sessionGeneration,
+    end: () => { streamControllers.delete(controller); },
+  };
 }
 
 async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
@@ -451,8 +577,8 @@ async function readSSE(
 
 async function consumeConnectSSE(
   response: Response,
-  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void,
-  get: () => AppState,
+  set: SetState,
+  get: GetState,
 ) {
   await readSSE(response, async (event, data) => {
     if (event === "progress") {
@@ -570,7 +696,8 @@ export const useStore = create<AppState>((set, get) => ({
     const tool = get().tools.find((t: any) => t.name === toolName);
     if (tool) {
       // Select the tool and switch to Explore
-      set({ selection: { type: "tool", item: tool }, activeTab: "explore", result: null });
+      exploreRequestId++;
+      set({ selection: { type: "tool", item: tool }, activeTab: "explore", result: null, resultLoading: false, resultMeta: null });
       // If args provided, seed them into the parameter store
       if (args) {
         const store = structuredClone(get().parameterStore);
@@ -588,6 +715,7 @@ export const useStore = create<AppState>((set, get) => ({
   connecting: false,
   serverInfo: null,
   error: null,
+  connectedConfigId: loadConnectedConfigId(),
   oauthPending: false,
   connectProgress: null,
   llmConfigs: _migrated.configs,
@@ -751,6 +879,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   runOptimizeWithSelection: async () => {
     set({ optimizeRunning: true, optimizeProgress: "Starting optimization...", planMarkdown: "" });
+    const stream = beginStream();
     try {
       const state = get();
       const analyst = llmRequestFields(state.getAnalystConfig());
@@ -770,6 +899,7 @@ export const useStore = create<AppState>((set, get) => ({
           disabled_resources: [...state.disabledResources],
           disabled_prompts: [...state.disabledPrompts],
         }),
+        signal: stream.signal,
       });
 
       if (!response.ok) {
@@ -783,6 +913,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       await readSSE(response, async (event, data) => {
+        if (!stream.isCurrent()) return;
         if (event === "progress") {
           set({ optimizeProgress: data.message });
         } else if (event === "done") {
@@ -811,6 +942,7 @@ export const useStore = create<AppState>((set, get) => ({
               };
             } catch { /* ignore */ }
           }
+          if (!stream.isCurrent()) return;
 
           const updatedRuns = newRun
             ? [...get().optimizationRuns.filter((r) => r.id !== newRun!.id), newRun]
@@ -829,12 +961,15 @@ export const useStore = create<AppState>((set, get) => ({
         }
       });
 
-      if (get().optimizeRunning) {
+      if (stream.isCurrent() && get().optimizeRunning) {
         set({ optimizeRunning: false, optimizeProgress: null });
       }
     } catch (err: unknown) {
+      if (!stream.isCurrent()) return;
       const message = err instanceof Error ? err.message : String(err);
       set({ optimizeRunning: false, optimizeProgress: null, error: message });
+    } finally {
+      stream.end();
     }
   },
 
@@ -944,7 +1079,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   connect: async (config: MCPServerConfig) => {
-    set({ connecting: true, error: null, oauthPending: false, connectProgress: null });
+    saveConnectedConfigId(config.id);
+    set({ connecting: true, error: null, oauthPending: false, connectProgress: null, connectedConfigId: config.id });
     try {
       const state = get();
       const authConfig = buildAuthConfig(config);
@@ -970,7 +1106,8 @@ export const useStore = create<AppState>((set, get) => ({
       await fetchCapabilities(set);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ connecting: false, error: message, connectProgress: null });
+      saveConnectedConfigId(null);
+      set({ connecting: false, error: message, connectProgress: null, connectedConfigId: null });
     }
   },
 
@@ -1007,6 +1144,10 @@ export const useStore = create<AppState>((set, get) => ({
           await fetchCapabilities(set);
         }
       }
+      if (!get().connected) {
+        saveConnectedConfigId(null);
+        set({ connectedConfigId: null });
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       // Check if backend actually connected despite the error
@@ -1024,20 +1165,28 @@ export const useStore = create<AppState>((set, get) => ({
           return;
         }
       } catch { /* ignore */ }
-      set({ connecting: false, oauthPending: false, error: message, connectProgress: null });
+      saveConnectedConfigId(null);
+      set({ connecting: false, oauthPending: false, error: message, connectProgress: null, connectedConfigId: null });
     }
   },
 
   disconnect: async () => {
+    // Invalidate in-flight work first so nothing lands in the reset state below
+    sessionGeneration++;
+    exploreRequestId++;
+    for (const controller of streamControllers) controller.abort();
+    streamControllers.clear();
     try {
       await api.disconnect();
     } catch {
       // ignore
     }
     saveParamStore({});
+    saveConnectedConfigId(null);
     set({
       connected: false,
       serverInfo: null,
+      connectedConfigId: null,
       oauthPending: false,
       tools: [],
       resources: [],
@@ -1045,6 +1194,7 @@ export const useStore = create<AppState>((set, get) => ({
       inventory: null,
       selection: null,
       result: null,
+      resultLoading: false,
       parameterStore: {},
       resultMeta: null,
       loadedResources: [],
@@ -1079,10 +1229,17 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  select: (type, item) => set({ selection: { type, item }, result: null }),
-  clearSelection: () => set({ selection: null, result: null }),
+  select: (type, item) => {
+    exploreRequestId++;
+    set({ selection: { type, item }, result: null, resultLoading: false, resultMeta: null });
+  },
+  clearSelection: () => {
+    exploreRequestId++;
+    set({ selection: null, result: null, resultLoading: false, resultMeta: null });
+  },
 
   callTool: async (name, args) => {
+    const requestId = ++exploreRequestId;
     set({ resultLoading: true, result: null, resultMeta: null });
     const start = performance.now();
     try {
@@ -1096,32 +1253,35 @@ export const useStore = create<AppState>((set, get) => ({
           if (block?.text) tokens += estimateTokens(block.text);
         }
       }
-      set({ result, resultLoading: false, resultMeta: { durationMs, tokens } });
+      applyExploreResult(set, get, requestId, result, name, { durationMs, tokens });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ result: { error: message }, resultLoading: false, resultMeta: null });
+      applyExploreResult(set, get, requestId, { error: message }, name, null);
     }
   },
 
   readResource: async (uri) => {
-    set({ resultLoading: true, result: null });
+    const requestId = ++exploreRequestId;
+    set({ resultLoading: true, result: null, resultMeta: null });
+    const source = get().resources.find((r: any) => r.uri === uri)?.name || uri;
     try {
       const result = await api.readResource(uri);
-      set({ result, resultLoading: false });
+      applyExploreResult(set, get, requestId, result, source, null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ result: { error: message }, resultLoading: false });
+      applyExploreResult(set, get, requestId, { error: message }, source, null);
     }
   },
 
   getPrompt: async (name, args) => {
-    set({ resultLoading: true, result: null });
+    const requestId = ++exploreRequestId;
+    set({ resultLoading: true, result: null, resultMeta: null });
     try {
       const result = await api.getPrompt(name, args);
-      set({ result, resultLoading: false });
+      applyExploreResult(set, get, requestId, result, name, null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ result: { error: message }, resultLoading: false });
+      applyExploreResult(set, get, requestId, { error: message }, name, null);
     }
   },
 
@@ -1130,79 +1290,6 @@ export const useStore = create<AppState>((set, get) => ({
     for (const [k, v] of Object.entries(values)) {
       if (v !== "" && v !== undefined && v !== null && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")) {
         addParamEntry(store, k, { value: v, context: values, source: "form input" });
-      }
-    }
-    saveParamStore(store);
-    set({ parameterStore: store });
-  },
-
-  harvestResultParams: (result) => {
-    if (!result) return;
-    const store = structuredClone(get().parameterStore);
-    const source = get().selection?.item?.name ?? "unknown";
-
-    // Extract text blocks from MCP result shapes
-    const textBlocks: string[] = [];
-    const contents = result.content ?? result.contents;
-    if (Array.isArray(contents)) {
-      for (const block of contents) {
-        if (block.type === "text" && typeof block.text === "string") {
-          textBlocks.push(block.text);
-        } else if (typeof block.text === "string") {
-          textBlocks.push(block.text);
-        }
-      }
-    }
-    if (result.messages && Array.isArray(result.messages)) {
-      for (const msg of result.messages) {
-        if (msg.content && typeof msg.content === "object" && msg.content.type === "text") {
-          textBlocks.push(msg.content.text);
-        }
-      }
-    }
-
-    function harvestObject(obj: Record<string, unknown>) {
-      const context: Record<string, unknown> = {};
-      // Build context from all scalar fields
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-          context[k] = v;
-        }
-      }
-      // Add each scalar as a param entry with full context
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-          addParamEntry(store, k, { value: v, context, source });
-        }
-      }
-    }
-
-    for (const text of textBlocks) {
-      try {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) {
-          // Array of objects — harvest from each item
-          for (const item of parsed) {
-            if (item && typeof item === "object" && !Array.isArray(item)) {
-              harvestObject(item as Record<string, unknown>);
-            }
-          }
-        } else if (parsed && typeof parsed === "object") {
-          // Single object — harvest directly
-          harvestObject(parsed as Record<string, unknown>);
-          // Also check nested arrays (e.g., { scouts: [...], summary: {...} })
-          for (const v of Object.values(parsed)) {
-            if (Array.isArray(v)) {
-              for (const item of v) {
-                if (item && typeof item === "object" && !Array.isArray(item)) {
-                  harvestObject(item as Record<string, unknown>);
-                }
-              }
-            }
-          }
-        }
-      } catch {
-        // not JSON, skip
       }
     }
     saveParamStore(store);
@@ -1264,6 +1351,7 @@ export const useStore = create<AppState>((set, get) => ({
       selectedEvalIndex: placeholderIndex,
     }));
 
+    const stream = beginStream();
     try {
       const state = get();
       const response = await fetch("/api/optimize/evaluate", {
@@ -1275,6 +1363,7 @@ export const useStore = create<AppState>((set, get) => ({
           max_tool_rounds: state.maxToolRounds || undefined,
           max_tokens: state.maxTokensPerResponse || undefined,
         }),
+        signal: stream.signal,
       });
 
       if (!response.ok) {
@@ -1283,6 +1372,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       await readSSE(response, (event, data) => {
+        if (!stream.isCurrent()) return;
         // Update live context tokens
         if (event === "context_update" && data.context_tokens != null) {
           // API-reported value is authoritative — allow corrections downward
@@ -1359,6 +1449,7 @@ export const useStore = create<AppState>((set, get) => ({
       });
 
       // Ensure loading is cleared — also auto-include if we got an answer
+      if (!stream.isCurrent()) return;
       set((state) => {
         const ev = state.evalResults[placeholderIndex];
         if (ev?.answer && !ev.answer.startsWith("Error:")) {
@@ -1369,6 +1460,7 @@ export const useStore = create<AppState>((set, get) => ({
         return { evalLoading: false };
       });
     } catch (err: unknown) {
+      if (!stream.isCurrent()) return;
       const message = err instanceof Error ? err.message : String(err);
       set((state) => {
         const evalResults = [...state.evalResults];
@@ -1378,6 +1470,8 @@ export const useStore = create<AppState>((set, get) => ({
         };
         return { evalResults, evalLoading: false };
       });
+    } finally {
+      stream.end();
     }
   },
 

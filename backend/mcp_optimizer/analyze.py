@@ -507,8 +507,11 @@ def find_parameter_hops(traces: list[dict]) -> list[dict[str, Any]]:
 
 
 def compute_error_cost(traces: list[dict]) -> dict[str, Any]:
-    """Total tokens wasted on error paths."""
-    error_traces = [t for t in traces if t.get("error_category") is not None]
+    """Total tokens wasted on error paths during evals (manual calls excluded)."""
+    error_traces = [
+        t for t in traces
+        if t.get("error_category") is not None and t.get("prompt_index") is not None
+    ]
     total_wasted = sum(t.get("tool_response_tokens_est", 0) for t in error_traces)
 
     by_category: dict[str, dict[str, Any]] = {}

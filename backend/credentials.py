@@ -96,6 +96,24 @@ def bind_primary_credentials(
         session.custom_endpoint = custom_endpoint
 
 
+def analyst_destination(
+    session,
+    provider: str | None = None,
+    endpoint: str | None = None,
+) -> tuple[str, str]:
+    """The (provider, endpoint) the analyst LLM resolves to.
+
+    `provider` / `endpoint` default to the session's analyst fields. A blank
+    analyst provider inherits the primary provider and, with it, the primary
+    endpoint; an explicit provider never inherits the primary's endpoint.
+    """
+    provider = session.analyst_provider if provider is None else provider
+    endpoint = session.analyst_endpoint if endpoint is None else endpoint
+    if provider:
+        return provider, endpoint
+    return session.provider, endpoint or session.custom_endpoint
+
+
 def bind_analyst_credentials(
     session,
     *,
@@ -104,7 +122,13 @@ def bind_analyst_credentials(
     endpoint: str | None,
     model: str | None,
 ) -> None:
-    """Same as bind_primary_credentials but for the analyst LLM."""
+    """Same as bind_primary_credentials but for the analyst LLM.
+
+    The key is bound to its *resolved* destination (see analyst_destination),
+    so a blank ("inherit") analyst provider can't later carry the key to
+    wherever the primary settings are re-pointed; the analyst client checks
+    the binding again at use time.
+    """
     api_key = _strip(api_key)
     provider = _strip(provider)
     endpoint = _strip(endpoint)
@@ -117,16 +141,15 @@ def bind_analyst_credentials(
         if endpoint is not None:
             session.analyst_endpoint = endpoint
         session.analyst_api_key = api_key
-        session.analyst_api_key_provider = session.analyst_provider
-        session.analyst_api_key_endpoint = session.analyst_endpoint
+        session.analyst_api_key_provider, session.analyst_api_key_endpoint = analyst_destination(session)
         return
 
-    target_provider = session.analyst_api_key_provider if provider is None else provider
-    target_endpoint = session.analyst_api_key_endpoint if endpoint is None else endpoint
+    target_provider = session.analyst_provider if provider is None else provider
+    target_endpoint = session.analyst_endpoint if endpoint is None else endpoint
 
-    if session.analyst_api_key and (
-        target_provider != session.analyst_api_key_provider
-        or target_endpoint != session.analyst_api_key_endpoint
+    if session.analyst_api_key and (provider is not None or endpoint is not None) and (
+        analyst_destination(session, target_provider, target_endpoint)
+        != (session.analyst_api_key_provider, session.analyst_api_key_endpoint)
     ):
         session.analyst_api_key = ""
         session.analyst_api_key_provider = ""

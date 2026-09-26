@@ -6,7 +6,12 @@ import anthropic
 import httpx
 import openai
 
-from backend.routes.optimize import _analyst_pairs, _llm_error_message
+from backend.routes.optimize import (
+    _analyst_pairs,
+    _failed_answer_reason,
+    _llm_error_message,
+    _proxy_resource_preamble,
+)
 
 
 def test_analyst_pairs_use_original_eval_index():
@@ -17,9 +22,35 @@ def test_analyst_pairs_use_original_eval_index():
         {"index": 2, "prompt": "p2", "answer": "x2"},
     ]
     assert _analyst_pairs(proxy_answers, evals) == [
-        ("p0", "a0", "x0"),
-        ("p2", "a2", "x2"),
+        ("p0", evals[0], proxy_answers[0]),
+        ("p2", evals[2], proxy_answers[1]),
     ]
+
+
+def test_failed_answers_are_skipped_not_judged():
+    ok = {"answer": "fine", "error": False, "stopped": False}
+    assert _failed_answer_reason(ok, ok) is None
+    # A baseline LLM error or round-limit stop is skipped, whatever its text says.
+    assert "Baseline" in _failed_answer_reason({"answer": "Error: Rate limit", "error": True}, ok)
+    assert "Baseline" in _failed_answer_reason({"answer": "[Stopped after 20 ...]", "stopped": True}, ok)
+    assert "Proxy" in _failed_answer_reason(ok, {"answer": "Error: boom", "error": True})
+    assert "Proxy" in _failed_answer_reason(ok, {"answer": ""})
+    # An answer that merely starts with "Error:" is still compared.
+    assert _failed_answer_reason(ok, {"answer": "Error: codes are listed below"}) is None
+
+
+def test_proxy_resource_preamble_uses_condensed_text():
+    loaded = {
+        "r://a": {"name": "A", "content": "full A", "tokens": 100},
+        "r://b": {"name": "B", "content": "full B", "tokens": 50},
+        "r://c": {"name": "C", "content": "full C", "tokens": 10},
+    }
+    condensed = {"r://a": {"condensed": "short A", "condensed_tokens": 20}}
+    msgs = _proxy_resource_preamble(loaded, condensed, {"r://c"})
+    text = msgs[0]["content"]
+    assert "short A" in text and "full A" not in text
+    assert "full B" in text
+    assert "full C" not in text
 
 
 def test_analyst_pairs_skip_out_of_range():
@@ -54,7 +85,7 @@ def _set_creds(monkeypatch, **fields):
         "model": "m", "provider": "anthropic", "custom_endpoint": "",
         "api_key": "primary", "api_key_provider": "anthropic", "api_key_endpoint": "",
         "analyst_model": "", "analyst_provider": "", "analyst_endpoint": "",
-        "analyst_api_key": "",
+        "analyst_api_key": "", "analyst_api_key_provider": "", "analyst_api_key_endpoint": "",
     }
     for k, v in {**defaults, **fields}.items():
         monkeypatch.setattr(session, k, v)
@@ -86,6 +117,87 @@ def test_analyst_llm_uses_analyst_key(monkeypatch):
     seen = []
     monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
     _set_creds(monkeypatch, analyst_api_key="ak", analyst_provider="custom",
-               analyst_endpoint="https://llm.example/v1")
+               analyst_endpoint="https://llm.example/v1",
+               analyst_api_key_provider="custom", analyst_api_key_endpoint="https://llm.example/v1")
     assert optimize._analyst_llm() is not None
     assert seen == [("ak", "m", "custom", "https://llm.example/v1")]
+
+
+def test_inherited_analyst_key_not_sent_to_repointed_primary(monkeypatch):
+    """An analyst key bound under "inherit" stays with the destination it was bound to."""
+    from backend.credentials import bind_analyst_credentials
+    from backend.routes import optimize
+    from backend.state import session
+
+    seen = []
+    monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
+    _set_creds(monkeypatch)
+    bind_analyst_credentials(session, api_key="ak", provider="", endpoint="", model=None)
+    assert (session.analyst_api_key_provider, session.analyst_api_key_endpoint) == ("anthropic", "")
+    assert optimize._analyst_llm() is not None
+    assert seen[-1][0] == "ak"
+
+    # The caller re-points the primary LLM at their own endpoint.
+    monkeypatch.setattr(session, "provider", "custom")
+    monkeypatch.setattr(session, "custom_endpoint", "https://evil.example/v1")
+    monkeypatch.setattr(session, "api_key", "")
+    seen.clear()
+    assert optimize._analyst_llm() is None
+    assert seen == []
+
+
+def test_explicit_analyst_provider_does_not_inherit_primary_endpoint(monkeypatch):
+    from backend.credentials import analyst_destination
+    from backend.state import session
+
+    _set_creds(monkeypatch, provider="custom", custom_endpoint="https://llm.example/v1")
+    assert analyst_destination(session) == ("custom", "https://llm.example/v1")
+    monkeypatch.setattr(session, "analyst_provider", "openai")
+    assert analyst_destination(session) == ("openai", "")
+
+
+def test_total_context_same_definition_both_sides(monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.routes._common import _baseline_figures, _menu_tokens, _resource_tokens, _total_context
+    from backend.state import session
+
+    tool = SimpleNamespace(name="t", description="d" * 40, inputSchema={"type": "object", "properties": {}})
+    trace = {"tool_response_tokens_est": 30, "tool_duration_s": 0.5, "error_category": None}
+    monkeypatch.setattr(session, "tools", [tool])
+    monkeypatch.setattr(session, "loaded_resources", {"r://a": {"tokens": 100}, "r://b": {"tokens": 40}})
+    monkeypatch.setattr(session, "eval_results", [
+        {"traceEvents": [trace, trace], "usage": {"peak_context_tokens": 99_999}},
+        {"traceEvents": [trace]},
+        {"traceEvents": [trace] * 5},  # not included
+    ])
+    b = _baseline_figures({0, 1}, listing_tokens=7)
+    menu = _menu_tokens([tool]) + 7
+    assert b["menu_tokens"] == menu
+    assert b["avg_tokens_per_prompt"] == 45.0
+    # API peak context is ignored; resources count at their original size.
+    assert b["total_context"] == menu + 140 + 45.0
+    # Proxy side: condensed resources count condensed, disabled ones not at all.
+    assert _resource_tokens(session.loaded_resources, {"r://a": {"condensed_tokens": 25}}, {"r://b"}) == 25
+    assert _total_context(10, 25, 5.5) == 40.5
+
+
+def test_manual_calls_excluded_from_error_cost_and_usage(monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.mcp_optimizer.analyze import compute_error_cost
+    from backend.routes.analysis import generate_quick_wins
+    from backend.state import session
+
+    traces = [
+        {"tool_name": "a", "prompt_index": 0, "error_category": None},
+        {"tool_name": "b", "prompt_index": None, "error_category": "boom", "tool_response_tokens_est": 9},
+    ]
+    assert compute_error_cost(traces)["total_error_calls"] == 0
+
+    tools = [SimpleNamespace(name=n, description="d", inputSchema={"type": "object", "properties": {"x": {}}})
+             for n in ("a", "b", "c")]
+    monkeypatch.setattr(session, "traces", traces)
+    wins = generate_quick_wins(tools, "claude-sonnet-4-6")
+    unused = next(w for w in wins if w["type"] == "remove_unused")
+    assert unused["tools"] == ["b", "c"]

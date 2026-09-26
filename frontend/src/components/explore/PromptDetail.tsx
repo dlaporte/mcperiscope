@@ -1,15 +1,14 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useStore } from "../../store";
+import { flattenParamStore } from "../../utils/params";
 import { SchemaForm } from "../shared/SchemaForm";
 import { JsonViewer } from "../shared/JsonViewer";
 
 export function PromptDetail() {
-  const { selection, getPrompt, result, resultLoading, parameterStore, harvestParams, harvestResultParams } = useStore();
+  const { selection, getPrompt, result, resultLoading, parameterStore, harvestParams } = useStore();
   const prompt = selection?.item;
 
-  useEffect(() => {
-    if (result) harvestResultParams(result);
-  }, [result, harvestResultParams]);
+  const flatParams = useMemo(() => flattenParamStore(parameterStore), [parameterStore]);
 
   // Build a schema from prompt arguments; memoized so SchemaForm's memos stay stable
   const schema = useMemo(() => {
@@ -28,9 +27,12 @@ export function PromptDetail() {
 
   if (!prompt) return null;
 
-  const handleSubmit = (args: Record<string, string>) => {
+  const handleSubmit = (args: Record<string, unknown>) => {
     harvestParams(args);
-    getPrompt(prompt.name, args as Record<string, string>);
+    // Prompt arguments are strings; autofilled values may be numbers or booleans
+    const stringArgs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(args)) stringArgs[k] = String(v);
+    getPrompt(prompt.name, stringArgs);
   };
 
   return (
@@ -50,7 +52,7 @@ export function PromptDetail() {
           onSubmit={handleSubmit}
           submitLabel="Get Prompt"
           loading={resultLoading}
-          initialValues={parameterStore}
+          initialValues={flatParams}
         />
       </div>
 

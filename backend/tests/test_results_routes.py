@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from backend import mcp_manager
 from backend.models import ToolCallRequest
 from backend.routes import results, tools
@@ -38,3 +40,15 @@ def test_manual_tool_error_is_recorded(monkeypatch):
     trace = session.traces[0]
     assert trace["error_category"] == "bad input"
     assert trace["prompt_index"] is None
+
+
+def test_analyze_rejects_manual_traces_only(monkeypatch):
+    from fastapi import HTTPException
+
+    from backend.routes import optimize
+
+    monkeypatch.setattr(mcp_manager, "is_connected", lambda: True)
+    monkeypatch.setattr(session, "traces", [{"tool_name": "t", "prompt_index": None}])
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(optimize.analyze_tools())
+    assert excinfo.value.status_code == 400

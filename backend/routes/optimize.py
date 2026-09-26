@@ -21,10 +21,19 @@ from pydantic import BaseModel, Field
 from backend.models import MAX_TOOL_ROUNDS, EvaluateRequest, RatingRequest
 from backend.state import OptimizationRun, session
 from backend import mcp_manager
-from backend.credentials import bind_analyst_credentials, bind_primary_credentials
+from backend.credentials import analyst_destination, bind_analyst_credentials, bind_primary_credentials
 from backend.llm_client import LLMClient
 from backend.mcp_optimizer.inventory import estimate_tokens
-from backend.routes._common import _make_trace_event, _menu_tokens, _run_and_store_analysis, _sse
+from backend.routes._common import (
+    _baseline_figures,
+    _baseline_population,
+    _make_trace_event,
+    _menu_tokens,
+    _resource_tokens,
+    _run_and_store_analysis,
+    _sse,
+    _total_context,
+)
 from backend.url_validation import validate_external_url
 
 logger = logging.getLogger(__name__)
@@ -83,34 +92,35 @@ def _llm_error_message(e: Exception) -> str:
     return f"Error: {e}"
 
 
-def _baseline_population(eval_results: list[dict], included: set[int]) -> tuple[list[dict], int]:
-    """Baseline traces and prompt count for the before/after comparison.
+def _analyst_pairs(proxy_answers: list[dict], eval_results: list[dict]) -> list[tuple[str, dict, dict]]:
+    """Pair each proxy answer with the baseline eval it re-ran.
 
-    Covers only the included evals, matching what the proxy re-runs.
-    Returns (trace events of those evals, number of included evals, min 1).
-    """
-    evals = [e for i, e in enumerate(eval_results) if i in included]
-    traces = [t for e in evals for t in e.get("traceEvents", [])]
-    return traces, max(len(evals), 1)
-
-
-def _analyst_pairs(proxy_answers: list[dict], eval_results: list[dict]) -> list[tuple[str, str, str]]:
-    """Pair each proxy answer with the baseline answer of the eval it re-ran.
-
-    Returns (prompt, baseline_answer, proxy_answer) tuples. Proxy answers carry
-    the original eval index because only the included evals are re-run.
+    Returns (prompt, baseline eval, proxy answer entry) tuples; both dicts
+    carry "answer" and the "error"/"stopped" flags. Proxy answers carry the
+    original eval index because only the included evals are re-run.
     """
     pairs = []
     for entry in proxy_answers:
         idx = entry.get("index")
         if idx is None or not 0 <= idx < len(eval_results):
             continue
-        pairs.append((
-            entry.get("prompt", ""),
-            eval_results[idx].get("answer", ""),
-            entry.get("answer", ""),
-        ))
+        pairs.append((entry.get("prompt", ""), eval_results[idx], entry))
     return pairs
+
+
+def _failed_answer_reason(baseline: dict, proxy: dict) -> str | None:
+    """Why an answer pair can't be compared, or None if it can.
+
+    Such pairs are skipped by the analyst rather than judged different.
+    """
+    for side, entry in (("Baseline", baseline), ("Proxy", proxy)):
+        if entry.get("error"):
+            return f"{side} run failed with an error"
+        if entry.get("stopped"):
+            return f"{side} run hit the tool call round limit"
+        if not entry.get("answer"):
+            return f"{side} run produced no answer"
+    return None
 
 
 def _tools_for_llm(tool_objs: Iterable) -> list[dict]:
@@ -139,26 +149,38 @@ def _resource_preamble(resources: Iterable[dict]) -> list[dict]:
     ]
 
 
+def _proxy_resource_preamble(
+    loaded: dict[str, dict], condensed: dict[str, dict], disabled: set[str],
+) -> list[dict]:
+    """Resource preamble for the proxy re-run: enabled resources, condensed where condensed."""
+    return _resource_preamble(
+        {**res, "content": condensed[uri]["condensed"]} if uri in condensed else res
+        for uri, res in loaded.items()
+        if uri not in disabled
+    )
+
+
 def _analyst_llm() -> LLMClient | None:
     """Build the analyst LLM client, or None if there is no key it may use.
 
-    Blank analyst fields inherit the primary LLM's. Without an analyst key the
-    primary key is reused, but only when the analyst destination is exactly
-    the (provider, endpoint) the primary key is bound to — the primary key is
-    never sent anywhere else.
+    Blank analyst fields inherit the primary LLM's (see analyst_destination).
+    A key is only used for the exact (provider, endpoint) it is bound to: the
+    analyst key when the destination still matches its binding, else the
+    primary key when the destination is the primary's — never anywhere else.
     """
     model = session.analyst_model or session.model
-    provider = session.analyst_provider or session.provider
-    endpoint = session.analyst_endpoint or session.custom_endpoint
-    if session.analyst_api_key:
+    destination = analyst_destination(session)
+    if session.analyst_api_key and destination == (
+        session.analyst_api_key_provider, session.analyst_api_key_endpoint,
+    ):
         key = session.analyst_api_key
-    elif session.api_key and (provider, endpoint) == (session.api_key_provider, session.api_key_endpoint):
+    elif session.api_key and destination == (session.api_key_provider, session.api_key_endpoint):
         key = session.api_key
     else:
         return None
     if not model:
         return None
-    return LLMClient(key, model, provider, endpoint)
+    return LLMClient(key, model, *destination)
 
 
 @dataclass
@@ -357,6 +379,7 @@ async def evaluate(req: EvaluateRequest):
                 context_base += estimate_tokens(c if isinstance(c, str) else json.dumps(c))
 
         run = _AgentRun(messages=messages)
+        errored = False
         try:
             async for event, data in _run_agent_loop(
                 run, client, tools, mcp_manager.call_tool,
@@ -370,6 +393,7 @@ async def evaluate(req: EvaluateRequest):
             logger.exception("Evaluation error")
             # Show a clean error message without the full traceback
             run.final_answer = _llm_error_message(e)
+            errored = True
         if run.hit_max_rounds:
             run.final_answer = f"[Stopped after {_max_rounds} tool call rounds — increase limit in Settings]"
         final_answer = run.final_answer
@@ -416,6 +440,9 @@ async def evaluate(req: EvaluateRequest):
             "usage": usage,
             "contextWindow": context_window,
             "raw_messages": this_eval_messages,
+            # Failed runs have no real answer; the analyst skips them.
+            "error": errored,
+            "stopped": run.hit_max_rounds,
         }
         # Tag traces with this eval's index (its position in eval_results) at
         # append time, so concurrent evals can't mislabel them.
@@ -434,6 +461,8 @@ async def evaluate(req: EvaluateRequest):
             "traceEvents": trace_events,
             "usage": usage,
             "index": len(session.eval_results) - 1,
+            "error": errored,
+            "stopped": run.hit_max_rounds,
         })
 
     return StreamingResponse(
@@ -515,7 +544,8 @@ async def analyze_tools():
     """Run analysis on tool usage traces to generate recommendations."""
     if not mcp_manager.is_connected():
         raise HTTPException(status_code=400, detail="Not connected")
-    if not session.traces:
+    # Manual Explore-tab calls (prompt_index None) aren't evaluation traces.
+    if not any(t.get("prompt_index") is not None for t in session.traces):
         raise HTTPException(status_code=400, detail="No evaluation traces. Run prompts on the Evaluate tab first.")
     _run_and_store_analysis()
     # Traces exist now, so quick wins like remove_unused can be generated.
@@ -584,6 +614,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
     if not included_evals:
         raise HTTPException(status_code=400, detail="No evaluations included")
     max_rounds = (req.max_tool_rounds if req else None) or 20
+    disabled_res_set = set(req.disabled_resources) if req and req.disabled_resources else set()
 
     async def event_stream():
         import asyncio
@@ -625,16 +656,30 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             })
             return
 
-        # --- Step 1b: Condense resources if resource recommendations are enabled ---
-        condensed_resources = {}  # uri -> condensed_text
-        resource_recs_enabled = any(
-            r.get("type") in RESOURCE_REC_TYPES for r in filtered_recs + filtered_qws
-        )
+        # Enabled recs this run could not apply, as {id, type, reason}
+        skipped_recs: list[dict] = []
 
-        if resource_recs_enabled:
-            yield _sse("progress", {"phase": "resources", "message": "Condensing resources..."})
+        def skip_recs(recs: list[dict], reason: str) -> str:
+            """Record recs as skipped; return an SSE warning naming them."""
+            skipped_recs.extend({"id": r.get("id"), "type": r.get("type"), "reason": reason} for r in recs)
+            return _sse("progress", {
+                "phase": "proxy", "level": "warning",
+                "message": f"Skipped {len(recs)} optimization(s): {reason}",
+            })
+
+        no_analyst_reason = "no API key usable for the analyst LLM"
+
+        # --- Step 1b: Condense resources if resource recommendations are enabled ---
+        condensed_resources = {}  # uri -> {name, original, condensed, original_tokens, condensed_tokens}
+        resource_recs = [r for r in filtered_recs + filtered_qws if r.get("type") in RESOURCE_REC_TYPES]
+
+        if resource_recs:
+            analyst = _analyst_llm()
+            if not analyst:
+                yield skip_recs(resource_recs, f"resource condensing needs the analyst LLM ({no_analyst_reason})")
+            else:
+                yield _sse("progress", {"phase": "resources", "message": "Condensing resources..."})
             try:
-                analyst = _analyst_llm()
                 items = await mcp_manager.list_resources() if analyst else []
 
                 for r in items:
@@ -698,14 +743,16 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             tools_to_rewrite = [t for t in session.tools if t.name in affected_names]
 
             if tools_to_rewrite:
-                try:
-                    analyst = _analyst_llm()
-                    if analyst:
+                analyst = _analyst_llm()
+                if not analyst:
+                    yield skip_recs(desc_rewrite_recs, f"description rewriting needs the analyst LLM ({no_analyst_reason})")
+                else:
+                    try:
                         yield _sse("progress", {"phase": "proxy", "message": f"Rewriting {len(tools_to_rewrite)} tool descriptions..."})
                         rewritten_descriptions = await batch_rewrite_descriptions(tools_to_rewrite, analyst)
-                except Exception as e:
-                    logger.warning("Description rewriting failed, using originals: %s", e)
-                    yield _sse("progress", {"phase": "proxy", "message": f"Description rewriting skipped: {e}"})
+                    except Exception as e:
+                        logger.warning("Description rewriting failed, using originals: %s", e)
+                        yield skip_recs(desc_rewrite_recs, f"description rewriting failed: {e}")
 
         # Step 2b: Assemble proxy code (deterministic, fast)
         yield _sse("progress", {"phase": "proxy", "message": "Assembling proxy..."})
@@ -832,11 +879,9 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     proxy_tools_list = _tools_for_llm(await proxy_mcp.list_tools())
                     included_evals = [(i, e) for i, e in enumerate(session.eval_results) if i in included]
 
-                    # Build resource context once (only enabled resources)
-                    disabled_res_set = set(req.disabled_resources) if req and req.disabled_resources else set()
-                    resource_preamble = _resource_preamble(
-                        res for uri, res in session.loaded_resources.items()
-                        if uri not in disabled_res_set
+                    # Build resource context once
+                    resource_preamble = _proxy_resource_preamble(
+                        session.loaded_resources, condensed_resources, disabled_res_set,
                     )
 
                     yield _sse("progress", {"phase": "evaluate", "message": f"Re-running {len(included_evals)} prompts through proxy..."})
@@ -857,15 +902,24 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             ):
                                 pass
                             if run.hit_max_rounds:
-                                proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: stopped after {max_rounds} tool call rounds"})
+                                proxy_answers.append({
+                                    "index": i, "prompt": prompt, "error": False, "stopped": True,
+                                    "answer": f"Error: stopped after {max_rounds} tool call rounds",
+                                })
                                 yield _sse("progress", {
                                     "phase": "evaluate",
                                     "message": f"Prompt {i+1} exceeded max tool call rounds ({max_rounds})",
                                 })
                             else:
-                                proxy_answers.append({"index": i, "prompt": prompt, "answer": run.final_answer})
+                                proxy_answers.append({
+                                    "index": i, "prompt": prompt, "error": False, "stopped": False,
+                                    "answer": run.final_answer,
+                                })
                         except Exception as e:
-                            proxy_answers.append({"index": i, "prompt": prompt, "answer": f"Error: {e}"})
+                            proxy_answers.append({
+                                "index": i, "prompt": prompt, "error": True, "stopped": False,
+                                "answer": f"Error: {e}",
+                            })
                             yield _sse("progress", {
                                 "phase": "evaluate",
                                 "message": f"Prompt {i+1} failed: {str(e)[:100]}"
@@ -891,11 +945,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if analyst:
             yield _sse("progress", {"phase": "analyst", "message": "Comparing baseline vs optimized answers..."})
             try:
-                for i, (prompt, baseline_answer, proxy_answer) in enumerate(
+                for i, (prompt, baseline_entry, proxy_entry) in enumerate(
                     _analyst_pairs(proxy_answers, session.eval_results)
                 ):
-                    if not baseline_answer or not proxy_answer or proxy_answer.startswith("Error:"):
-                        analyst_results.append({"prompt": prompt, "verdict": "error", "explanation": "Proxy failed to produce an answer", "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
+                    baseline_answer = baseline_entry.get("answer", "")
+                    proxy_answer = proxy_entry.get("answer", "")
+                    skip_reason = _failed_answer_reason(baseline_entry, proxy_entry)
+                    if skip_reason:
+                        # Not counted toward accuracy: there is nothing to compare.
+                        analyst_results.append({"prompt": prompt, "verdict": "error", "explanation": skip_reason, "baseline_answer": baseline_answer[:2000], "proxy_answer": proxy_answer[:2000]})
                         continue
 
                     yield _sse("progress", {
@@ -956,55 +1014,38 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
 
         # Build comparison from measured data. Both sides cover the same
-        # prompts: the included evals (manual Explore-tab calls aren't part of any).
-        baseline_traces, num_prompts = _baseline_population(session.eval_results, included)
-        baseline_tokens = sum(t.get("tool_response_tokens_est", 0) for t in baseline_traces)
-        proxy_tokens_total = sum(t.get("tool_response_tokens_est", 0) for t in proxy_traces)
-        baseline_calls = len(baseline_traces)
-        proxy_calls = len(proxy_traces)
-        baseline_errors = sum(1 for t in baseline_traces if t.get("error_category"))
-        proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
+        # prompts: the included evals (manual Explore-tab calls aren't part of
+        # any), and both use the _total_context definition.
+        from backend.routes.analysis import listing_tokens
+        listings = await listing_tokens()
+        baseline = _baseline_figures(included, listings)
+        _, num_prompts = _baseline_population(session.eval_results, included)
 
-        orig_menu = _menu_tokens(session.tools)
+        proxy_tokens_total = sum(t.get("tool_response_tokens_est", 0) for t in proxy_traces)
+        proxy_calls = len(proxy_traces)
+        proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
 
         # Accuracy from analyst results
         analyst_correct = sum(1 for r in analyst_results if r.get("verdict") == "equivalent")
         analyst_total = sum(1 for r in analyst_results if r.get("verdict") in ("equivalent", "partial", "different"))
-        accuracy = analyst_correct / max(analyst_total, 1) if analyst_total > 0 else None
+        accuracy = analyst_correct / analyst_total if analyst_total > 0 else None
 
-        # Avg latency per prompt
-        baseline_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in baseline_traces) / max(num_prompts, 1) * 1000, 1)
-        proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / max(num_prompts, 1) * 1000, 1) if proxy_traces else None
-
-        baseline_avg = round(baseline_tokens / num_prompts, 1)
-        # Use API-reported peak context from most recent eval (matches Evaluate tab)
-        baseline_peak = 0
-        for ev in session.eval_results:
-            peak = (ev.get("usage") or {}).get("peak_context_tokens", 0)
-            if peak:
-                baseline_peak = peak
-        # Fall back to estimate including loaded resources if API doesn't report tokens
-        loaded_resource_tokens = sum(r.get("tokens", 0) for r in session.loaded_resources.values())
-        baseline_total_context = baseline_peak if baseline_peak > 0 else round(orig_menu + baseline_avg + loaded_resource_tokens, 1)
-
-        baseline = {
-            "tool_count": len(session.tools),
-            "menu_tokens": orig_menu,
-            "avg_tokens_per_prompt": baseline_avg,
-            "avg_calls_per_prompt": round(baseline_calls / num_prompts, 1),
-            "total_context": baseline_total_context,
-            "accuracy": 1.0,
-            "avg_latency": baseline_avg_latency,
-            "error_rate": round(baseline_errors / baseline_calls, 4) if baseline_calls else 0.0,
-        }
-
+        proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / num_prompts * 1000, 1) if proxy_traces else None
         proxy_avg = round(proxy_tokens_total / num_prompts, 1) if proxy_traces else None
+        proxy_menu = proxy_menu_tokens + listings if proxy_menu_tokens > 0 else None
+        # The proxy re-run used the enabled resources, condensed where condensed.
+        proxy_resource_tokens = _resource_tokens(
+            session.loaded_resources, condensed_resources, disabled_res_set,
+        )
         proxy = {
             "tool_count": proxy_tool_count if proxy_tool_count > 0 else None,
-            "menu_tokens": proxy_menu_tokens if proxy_menu_tokens > 0 else None,
+            "menu_tokens": proxy_menu,
             "avg_tokens_per_prompt": proxy_avg,
             "avg_calls_per_prompt": round(proxy_calls / num_prompts, 1) if proxy_traces else None,
-            "total_context": round(proxy_menu_tokens + proxy_avg, 1) if proxy_menu_tokens and proxy_avg is not None else None,
+            "total_context": (
+                _total_context(proxy_menu, proxy_resource_tokens, proxy_avg)
+                if proxy_menu is not None and proxy_avg is not None else None
+            ),
             "accuracy": accuracy,
             "avg_latency": proxy_avg_latency,
             "error_rate": round(proxy_errors / proxy_calls, 4) if proxy_calls else None,
@@ -1040,6 +1081,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             proxy_answers=proxy_answers,
             analyst_results=analyst_results,
             condensed_resources=condensed_resources,
+            skipped_recs=skipped_recs,
         )
         session.optimization_runs.append(run)
 
@@ -1052,6 +1094,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             "comparison": session.comparison,
             "proxyToolCount": proxy_tool_count,
             "baselineToolCount": len(session.tools),
+            "skippedRecs": skipped_recs,
         })
 
     return StreamingResponse(

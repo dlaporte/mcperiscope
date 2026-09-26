@@ -52,18 +52,24 @@ export function ConnectTab() {
     connected, connecting, error, connect, disconnect, oauthPending,
     connectProgress,
     mcpConfigs, setActiveTab,
-    checkStatus,
+    checkStatus, connectedConfigId,
   } = useStore();
 
   const { completeOAuth, signOutMCP } = useStore();
   const [signingOut, setSigningOut] = useState(false);
 
   const [selectedConfigId, setSelectedConfigId] = useState<string>(() => {
-    return mcpConfigs.length > 0 ? mcpConfigs[0].id : "";
+    return connectedConfigId ?? (mcpConfigs.length > 0 ? mcpConfigs[0].id : "");
   });
 
-  // Fall back to the first config so the shown option and the connected config never diverge
-  const selectedConfig = mcpConfigs.find((c) => c.id === selectedConfigId) ?? mcpConfigs[0];
+  // While connected (or connecting), show and sign out of the server actually in use;
+  // otherwise the picked one, falling back to the first config
+  const connectedConfig = connected || connecting
+    ? mcpConfigs.find((c) => c.id === connectedConfigId)
+    : undefined;
+  const selectedConfig = connectedConfig
+    ?? mcpConfigs.find((c) => c.id === selectedConfigId)
+    ?? mcpConfigs[0];
 
   // Check backend status on mount, and resume pending OAuth if needed
   useEffect(() => {

@@ -46,6 +46,8 @@ class OptimizationRun:
     proxy_answers: list[dict] = field(default_factory=list)
     analyst_results: list[dict] = field(default_factory=list)
     condensed_resources: dict = field(default_factory=dict)  # uri -> {name, original, condensed, original_tokens, condensed_tokens}
+    # Enabled recs the run could not apply (e.g. no analyst LLM): {id, type, reason}
+    skipped_recs: list[dict] = field(default_factory=list)
 
 
 @dataclass

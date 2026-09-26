@@ -212,3 +212,22 @@ def test_passthrough_keeps_full_description():
 
     ns["upstream"] = _FakeUpstream()
     assert asyncio.run(get_desc()) == desc
+
+
+def test_removed_and_disabled_tools_absent_from_consolidations():
+    tools = [_tool(n) for n in ("get_a", "get_b", "get_c", "db_x", "db_y", "db_z")]
+    recs = [{"type": "consolidate", "source_tools": ["db_x", "db_y", "db_z"], "target_tool": {"name": "db"}}]
+    qws = [
+        {"type": "consolidate_lookups", "tools": ["get_a", "get_b", "get_c"]},
+        {"type": "remove_unused", "tools": ["get_b", "db_y"]},
+    ]
+    code, stats = build_proxy(
+        tools=tools, upstream_url="https://x/mcp", token_dir="/tmp",
+        recommendations=recs, quick_wins=qws, disabled_tools=["get_c", "db_z"],
+    )
+    ns: dict = {"__name__": "generated_proxy"}
+    exec(compile(code, "<proxy>", "exec"), ns)
+    assert ns["LOOKUP_TABLES"] == {"a": "get_a"}
+    assert '"db_y"' not in code and '"db_z"' not in code
+    assert '"db_x": "db_x"' in code
+    assert stats["removed"] == 4

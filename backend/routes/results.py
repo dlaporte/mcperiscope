@@ -127,6 +127,7 @@ async def get_run(run_id: str):
         "comparison": run.comparison, "analystResults": run.analyst_results,
         "proxyAnswers": run.proxy_answers,
         "condensedResources": run.condensed_resources,
+        "skippedRecs": run.skipped_recs,
     }
 
 

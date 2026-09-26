@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from backend.mcp_optimizer.inventory import estimate_tokens, tool_token_budget
@@ -30,6 +31,68 @@ def _extract_fields(text: str) -> list[str]:
 def _menu_tokens(tools: list) -> int:
     """Estimated tokens the tool definitions (the "menu") add to every LLM call."""
     return sum(tool_token_budget(t).total_tokens for t in tools)
+
+
+def _resource_tokens(
+    resources: dict[str, dict],
+    condensed: dict[str, dict] | None = None,
+    disabled: Iterable[str] = (),
+) -> int:
+    """Content tokens of loaded resources (uri -> {tokens, ...}).
+
+    Skips disabled URIs and counts the condensed text where one exists.
+    """
+    condensed = condensed or {}
+    disabled = set(disabled)
+    return sum(
+        condensed[uri]["condensed_tokens"] if uri in condensed else r.get("tokens", 0)
+        for uri, r in resources.items()
+        if uri not in disabled
+    )
+
+
+def _total_context(menu_tokens: float, resource_tokens: float, avg_tokens_per_prompt: float) -> float:
+    """Estimated context of one prompt; the one definition both sides use.
+
+    menu (tool defs + resource/prompt listings) + loaded resource content +
+    average tool-response tokens per prompt.
+    """
+    return round(menu_tokens + resource_tokens + avg_tokens_per_prompt, 1)
+
+
+def _baseline_population(eval_results: list[dict], included: set[int]) -> tuple[list[dict], int]:
+    """Baseline traces and prompt count for the before/after comparison.
+
+    Covers only the included evals, matching what the proxy re-runs.
+    Returns (trace events of those evals, number of included evals, min 1).
+    """
+    evals = [e for i, e in enumerate(eval_results) if i in included]
+    traces = [t for e in evals for t in e.get("traceEvents", [])]
+    return traces, max(len(evals), 1)
+
+
+def _baseline_figures(included: set[int], listing_tokens: int) -> dict:
+    """The baseline side of the comparison, over the included evals.
+
+    `listing_tokens` is the resource + prompt definition tokens, so
+    menu_tokens matches the inventory's totalBudgetTokens.
+    """
+    traces, num_prompts = _baseline_population(session.eval_results, included)
+    calls = len(traces)
+    errors = sum(1 for t in traces if t.get("error_category"))
+    menu = _menu_tokens(session.tools) + listing_tokens
+    avg_tokens = round(sum(t.get("tool_response_tokens_est", 0) for t in traces) / num_prompts, 1)
+    return {
+        "tool_count": len(session.tools),
+        "menu_tokens": menu,
+        "avg_tokens_per_prompt": avg_tokens,
+        "avg_calls_per_prompt": round(calls / num_prompts, 1),
+        # The baseline evals ran with every loaded resource, uncondensed.
+        "total_context": _total_context(menu, _resource_tokens(session.loaded_resources), avg_tokens),
+        "accuracy": 1.0,
+        "avg_latency": round(sum(t.get("tool_duration_s", 0) for t in traces) / num_prompts * 1000, 1),
+        "error_rate": round(errors / calls, 4) if calls else 0.0,
+    }
 
 
 def _make_trace_event(

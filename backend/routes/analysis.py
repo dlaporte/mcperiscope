@@ -56,8 +56,10 @@ def generate_quick_wins(
 
     # 2. Remove unused tools — tools never called across all evaluation prompts
     #    Action: omit these tools from the proxy entirely
-    if session.traces:
-        called_tools = {t.get("tool_name") for t in session.traces}
+    #    Manual Explore-tab calls (prompt_index None) don't count as usage.
+    eval_traces = [t for t in session.traces if t.get("prompt_index") is not None]
+    if eval_traces:
+        called_tools = {t.get("tool_name") for t in eval_traces}
         all_tool_names = {t.name for t in tools}
         unused = sorted(all_tool_names - called_tools)
         if unused and len(unused) < len(tools):  # Don't remove all tools
@@ -164,6 +166,34 @@ async def _scan_resources() -> tuple[int, list[dict]]:
     return resource_tokens, resource_details
 
 
+async def _scan_prompts() -> int:
+    """Return the prompt definition tokens."""
+    prompt_tokens = 0
+    try:
+        prompts = await mcp_manager.list_prompts()
+        items = prompts if isinstance(prompts, list) else getattr(prompts, "prompts", [])
+        for p in items:
+            name = getattr(p, "name", "") or ""
+            desc = getattr(p, "description", "") or ""
+            args = getattr(p, "arguments", []) or []
+            args_text = ", ".join(getattr(a, "name", "") for a in args)
+            prompt_tokens += estimate_tokens(f"{name}({args_text}): {desc}")
+    except Exception:
+        logger.debug("Failed to list prompts for inventory", exc_info=True)
+    return prompt_tokens
+
+
+async def listing_tokens() -> int:
+    """Resource + prompt definition tokens: the non-tool part of the menu.
+
+    Tool menu tokens plus this equals the inventory's totalBudgetTokens.
+    """
+    if not mcp_manager.is_connected():
+        return 0
+    resource_tokens, _ = await _scan_resources()
+    return resource_tokens + await _scan_prompts()
+
+
 async def refresh_quick_wins() -> None:
     """Regenerate quick wins from the current traces and resources (new IDs)."""
     resource_details: list[dict] = []
@@ -187,18 +217,7 @@ async def get_inventory():
 
     if mcp_manager.is_connected():
         resource_tokens, resource_details = await _scan_resources()
-
-        try:
-            prompts = await mcp_manager.list_prompts()
-            items = prompts if isinstance(prompts, list) else getattr(prompts, "prompts", [])
-            for p in items:
-                name = getattr(p, "name", "") or ""
-                desc = getattr(p, "description", "") or ""
-                args = getattr(p, "arguments", []) or []
-                args_text = ", ".join(getattr(a, "name", "") for a in args)
-                prompt_tokens += estimate_tokens(f"{name}({args_text}): {desc}")
-        except Exception:
-            logger.debug("Failed to list prompts for inventory", exc_info=True)
+        prompt_tokens = await _scan_prompts()
 
     total_budget = tool_budget + resource_tokens + prompt_tokens
 

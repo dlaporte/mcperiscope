@@ -1,20 +1,9 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useStore } from "../../store";
-import type { ParamEntry } from "../../store";
+import { flattenParamStore } from "../../utils/params";
 import { SchemaForm } from "../shared/SchemaForm";
 import { JsonViewer } from "../shared/JsonViewer";
 import { ToolStats } from "./ToolStats";
-
-/** Flatten multi-value param store to simple key→value using first entry per key */
-function flattenParamStore(store: Record<string, ParamEntry[]>): Record<string, unknown> {
-  const flat: Record<string, unknown> = {};
-  for (const [key, entries] of Object.entries(store)) {
-    if (entries.length > 0) {
-      flat[key] = entries[0].value;
-    }
-  }
-  return flat;
-}
 
 /** Patterns that suggest a field is trimmable (internal/audit data an LLM doesn't need).
  *  Deliberately excludes identifiers (GUIDs, UUIDs, IDs) since those are often
@@ -77,14 +66,10 @@ function findTrimmableFields(data: unknown): string[] {
 }
 
 export function ToolDetail() {
-  const { selection, callTool, result, resultLoading, resultMeta, parameterStore, harvestParams, harvestResultParams } = useStore();
+  const { selection, callTool, result, resultLoading, resultMeta, parameterStore, harvestParams } = useStore();
   const tool = selection?.item;
 
   const flatParams = useMemo(() => flattenParamStore(parameterStore), [parameterStore]);
-
-  useEffect(() => {
-    if (result) harvestResultParams(result);
-  }, [result, harvestResultParams]);
 
   const trimmableFields = useMemo(() => (result ? findTrimmableFields(result) : []), [result]);
 

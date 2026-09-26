@@ -205,9 +205,15 @@ def _gen_header(
 def _gen_lookup_consolidation(
     rec: dict,
     used_idents: set[str] | None = None,
+    source_tools: list[str] | None = None,
 ) -> list[str]:
-    """Generate a consolidated lookup() tool for no-param reference tools."""
-    source_tools = rec.get("source_tools", []) or rec.get("tools", [])
+    """Generate a consolidated lookup() tool for no-param reference tools.
+
+    `source_tools` overrides the rec's own list; build_proxy passes only the
+    tools still assigned to this rec, so removed/disabled ones stay uncallable.
+    """
+    if source_tools is None:
+        source_tools = rec.get("source_tools", []) or rec.get("tools", [])
     target = rec.get("target_tool") or {}
 
     # Build the lookup map: short_name -> upstream_tool_name
@@ -257,9 +263,14 @@ def _gen_prefix_consolidation(
     rec: dict,
     tools: list,
     used_idents: set[str] | None = None,
+    source_tools: list[str] | None = None,
 ) -> list[str]:
-    """Generate a consolidated dispatch tool for prefix-grouped tools."""
-    source_tools = rec.get("source_tools", []) or rec.get("tools", [])
+    """Generate a consolidated dispatch tool for prefix-grouped tools.
+
+    `source_tools` overrides the rec's own list (see _gen_lookup_consolidation).
+    """
+    if source_tools is None:
+        source_tools = rec.get("source_tools", []) or rec.get("tools", [])
     target = rec.get("target_tool") or {}
     target_name = safe_ident(
         target.get("name", "consolidated_tool"),
@@ -573,30 +584,25 @@ def build_proxy(
         "argparse", "json", "asynccontextmanager", "FastMCP", "UpstreamClient",
     }
 
-    # Track which consolidation recs we've already generated
-    generated_consolidation_ids: set[int] = set()
-
-    # Generate lookup consolidations
+    # Group tools by the consolidation rec that finally claimed them. Only
+    # these become dispatch targets: a tool a later rec or disabled_tools
+    # marked removed must not stay reachable through a consolidated tool.
+    # Keyed by object id since recs may not have a stable "id" key.
+    consolidations: dict[int, tuple[str, dict, list[str]]] = {}
     for tool_name, info in classification.items():
-        if info["status"] != "consolidated_lookup":
-            continue
-        rec = info["rec"]
-        rec_id = id(rec)  # Use object id since recs may not have a stable "id" key
-        if rec_id in generated_consolidation_ids:
-            continue
-        generated_consolidation_ids.add(rec_id)
-        lines.extend(_gen_lookup_consolidation(rec, used_idents))
+        if info["status"] in ("consolidated_lookup", "consolidated_prefix"):
+            entry = consolidations.setdefault(id(info["rec"]), (info["status"], info["rec"], []))
+            entry[2].append(tool_name)
 
-    # Generate prefix consolidations
-    for tool_name, info in classification.items():
-        if info["status"] != "consolidated_prefix":
-            continue
-        rec = info["rec"]
-        rec_id = id(rec)
-        if rec_id in generated_consolidation_ids:
-            continue
-        generated_consolidation_ids.add(rec_id)
-        lines.extend(_gen_prefix_consolidation(rec, tools, used_idents))
+    # Generate lookup consolidations, then prefix consolidations
+    for kind in ("consolidated_lookup", "consolidated_prefix"):
+        for status, rec, members in consolidations.values():
+            if status != kind:
+                continue
+            if kind == "consolidated_lookup":
+                lines.extend(_gen_lookup_consolidation(rec, used_idents, members))
+            else:
+                lines.extend(_gen_prefix_consolidation(rec, tools, used_idents, members))
 
     # Generate condensed resources
     if condensed_resources:
@@ -637,7 +643,7 @@ def build_proxy(
 
     return code, {
         # Each generated consolidation is one proxy tool
-        "total": passthrough_count + len(generated_consolidation_ids),
+        "total": passthrough_count + len(consolidations),
         "upstream": len(tools),
         "removed": removed_count,
         "consolidated": consolidated_count,

@@ -1,14 +1,9 @@
-import { useEffect } from "react";
 import { useStore } from "../../store";
 import { JsonViewer } from "../shared/JsonViewer";
 
 export function ResourceDetail() {
-  const { selection, readResource, result, resultLoading, harvestResultParams } = useStore();
+  const { selection, readResource, result, resultLoading } = useStore();
   const resource = selection?.item;
-
-  useEffect(() => {
-    if (result) harvestResultParams(result);
-  }, [result, harvestResultParams]);
 
   if (!resource) return null;
 
