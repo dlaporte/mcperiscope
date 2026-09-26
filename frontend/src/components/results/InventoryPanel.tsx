@@ -42,17 +42,11 @@ function InventoryItem({
   onToggle: () => void;
 }) {
   return (
-    <div
-      className="flex items-center gap-2 py-0.5 px-1 rounded cursor-pointer transition-colors"
-      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-      onClick={onToggle}
-    >
+    <label className="flex items-center gap-2 py-0.5 px-1 rounded cursor-pointer transition-colors hover:bg-[var(--sub-panel-light)]">
       <input
         type="checkbox"
         checked={checked}
         onChange={onToggle}
-        onClick={(e) => e.stopPropagation()}
         className="w-3 h-3 rounded cursor-pointer accent-amber-600 shrink-0"
       />
       <span
@@ -61,7 +55,7 @@ function InventoryItem({
       >
         {label}
       </span>
-    </div>
+    </label>
   );
 }
 
@@ -107,6 +101,7 @@ export function InventoryPanel() {
         <input
           type="text"
           placeholder="Filter..."
+          aria-label="Filter inventory"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           className="w-full px-2 py-1 rounded text-xs"

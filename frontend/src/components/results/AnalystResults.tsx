@@ -56,10 +56,8 @@ export function AnalystResults({ results }: Props) {
               style={{ borderBottom: "1px solid rgba(74,78,80,0.5)" }}
             >
               <button
-                className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors"
+                className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-[var(--sub-panel-light)]"
                 onClick={() => setExpandedIndex(isExpanded ? null : i)}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--sub-panel-light)")}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
               >
                 <span
                   className="text-xs font-semibold uppercase px-2 py-0.5 rounded shrink-0"

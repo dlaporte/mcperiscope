@@ -19,10 +19,8 @@ function InventorySection() {
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full text-left px-3 py-2 flex items-center justify-between"
+        className="w-full text-left px-3 py-2 flex items-center justify-between hover:bg-[var(--sub-panel-light)]"
         style={{ borderBottom: '1px solid var(--sub-rivet)' }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
         <h3 className="text-sm font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
           Inventory
@@ -44,7 +42,7 @@ function OptimizeButton() {
   const quickWins = useStore((s) => s.quickWins);
   const optimizeRunning = useStore((s) => s.optimizeRunning);
   const optimizeProgress = useStore((s) => s.optimizeProgress);
-  const error = useStore((s) => s.error);
+  const error = useStore((s) => s.optimizeError);
   const runOptimizeWithSelection = useStore((s) => s.runOptimizeWithSelection);
   const includedEvalCount = useStore((s) => includedBackendIndices(s).length);
 
@@ -88,10 +86,8 @@ function CollapsibleSection({ title, defaultOpen = true, children }: { title: st
     <div className="panel-riveted rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full text-left px-4 py-3 flex items-center justify-between"
+        className="w-full text-left px-4 py-3 flex items-center justify-between hover:bg-[var(--sub-panel-light)]"
         style={{ borderBottom: open ? '1px solid var(--sub-rivet)' : 'none' }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
         <h3 className="text-lg font-semibold font-stencil" style={{ color: 'var(--sub-text)' }}>
           {title}
@@ -236,10 +232,7 @@ export function ResultsTab() {
             <div className="panel-riveted rounded-lg p-4 space-y-2">
               <button
                 onClick={() => setShowResponses(true)}
-                className="flex items-center gap-2 text-sm font-medium transition-colors"
-                style={{ color: 'var(--sub-brass)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+                className="flex items-center gap-2 text-sm font-medium transition-colors text-[var(--sub-brass)] hover:text-[var(--sub-brass-glow)]"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -250,10 +243,7 @@ export function ResultsTab() {
               {condensedResources && Object.keys(condensedResources).length > 0 && (
                 <button
                   onClick={() => setShowResources(true)}
-                  className="flex items-center gap-2 text-sm font-medium transition-colors"
-                  style={{ color: 'var(--sub-brass)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+                  className="flex items-center gap-2 text-sm font-medium transition-colors text-[var(--sub-brass)] hover:text-[var(--sub-brass-glow)]"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

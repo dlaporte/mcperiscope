@@ -5,7 +5,12 @@ import { SchemaForm } from "../shared/SchemaForm";
 import { JsonViewer } from "../shared/JsonViewer";
 
 export function PromptDetail() {
-  const { selection, getPrompt, result, resultLoading, parameterStore, harvestParams } = useStore();
+  const selection = useStore((s) => s.selection);
+  const getPrompt = useStore((s) => s.getPrompt);
+  const result = useStore((s) => s.result);
+  const resultLoading = useStore((s) => s.resultLoading);
+  const parameterStore = useStore((s) => s.parameterStore);
+  const harvestParams = useStore((s) => s.harvestParams);
   const prompt = selection?.item;
 
   const flatParams = useMemo(() => flattenParamStore(parameterStore), [parameterStore]);

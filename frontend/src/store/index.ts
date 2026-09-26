@@ -112,7 +112,7 @@ interface AppState {
   connected: boolean;
   connecting: boolean;
   serverInfo: unknown;
-  error: string | null;
+  connectError: string | null;  // Connect tab: connect, OAuth and sign-out failures
   connectedConfigId: string | null; // MCP config of the current (or in-progress) connection
 
   // Auth
@@ -172,6 +172,15 @@ interface AppState {
   liveContextTokens: number;
   optimizeRunning: boolean;
   optimizeProgress: string | null;
+  optimizeError: string | null;
+  evalError: string | null;     // Evaluate tab: eval deletion failures
+
+  // Batch evaluation (PromptInput); survives tab switches
+  promptDraft: string;
+  setPromptDraft: (text: string) => void;
+  batchProgress: { current: number; total: number } | null;
+  runBatch: (prompts: string[]) => Promise<void>;
+  cancelBatch: () => void;
 
   // Results
   recommendations: any[];
@@ -508,6 +517,9 @@ let exploreRequestId = 0;
 let sessionGeneration = 0;
 const streamControllers = new Set<AbortController>();
 
+// Set by cancelBatch(); runBatch() checks it between prompts
+let batchCancelled = false;
+
 // Settles once every in-flight eval deletion has finished
 let evalRemovals: Promise<void> = Promise.resolve();
 
@@ -541,6 +553,7 @@ function beginStream() {
 
 // Delete an eval from the backend session, then locally
 async function removeEvalEntry(set: SetState, get: GetState, index: number) {
+  set({ evalError: null });
   const backendIndex = get().evalResults[index]?.backendIndex;
   if (backendIndex !== undefined) {
     // Drop it from the backend session too, so it stops feeding analysis and runs
@@ -549,7 +562,7 @@ async function removeEvalEntry(set: SetState, get: GetState, index: number) {
       await api.deleteEval(backendIndex);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      if (generation === sessionGeneration) set({ error: `Couldn't delete evaluation: ${message}` });
+      if (generation === sessionGeneration) set({ evalError: `Couldn't delete evaluation: ${message}` });
       return;
     }
     if (generation !== sessionGeneration) return;
@@ -608,7 +621,7 @@ async function fetchCapabilities(set: (partial: Partial<AppState>) => void) {
 
 // Parse a `text/event-stream` response. Event and data lines may arrive in
 // different network chunks, so the pending event name lives outside the read loop.
-async function readSSE(
+export async function readSSE(
   response: Response,
   onEvent: (event: string, data: any) => void | Promise<void>,
 ) {
@@ -679,7 +692,7 @@ async function consumeConnectSSE(
       set({
         connecting: false,
         oauthPending: false,
-        error: data.message,
+        connectError: data.message,
         connectProgress: null,
       });
     }
@@ -794,7 +807,7 @@ export const useStore = create<AppState>((set, get) => ({
   connected: false,
   connecting: false,
   serverInfo: null,
-  error: null,
+  connectError: null,
   connectedConfigId: loadConnectedConfigId(),
   oauthPending: false,
   connectProgress: null,
@@ -831,6 +844,26 @@ export const useStore = create<AppState>((set, get) => ({
   liveContextTokens: 0,
   optimizeRunning: false,
   optimizeProgress: null,
+  optimizeError: null,
+  evalError: null,
+  promptDraft: "",
+  setPromptDraft: (text) => set({ promptDraft: text }),
+  batchProgress: null,
+  runBatch: async (prompts) => {
+    const generation = sessionGeneration;
+    batchCancelled = false;
+    try {
+      for (let i = 0; i < prompts.length; i++) {
+        if (batchCancelled || generation !== sessionGeneration) break;
+        set({ batchProgress: { current: i + 1, total: prompts.length } });
+        await get().evaluate(prompts[i]);
+      }
+    } finally {
+      if (generation === sessionGeneration) set({ batchProgress: null });
+    }
+  },
+  // Stops the batch after the running prompt finishes
+  cancelBatch: () => { batchCancelled = true; },
   recommendations: [],
   quickWins: [],
   analyzing: false,
@@ -957,7 +990,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   runOptimizeWithSelection: async () => {
-    set({ optimizeRunning: true, optimizeProgress: "Starting optimization...", planMarkdown: "" });
+    set({ optimizeRunning: true, optimizeProgress: "Starting optimization...", optimizeError: null, planMarkdown: "" });
     const stream = beginStream();
     try {
       const state = get();
@@ -1025,7 +1058,7 @@ export const useStore = create<AppState>((set, get) => ({
           // Show this run's own plan, the same one its downloads use
           if (newRun) get().selectRun(newRun.id);
         } else if (event === "error") {
-          set({ optimizeRunning: false, optimizeProgress: null, error: data.message });
+          set({ optimizeRunning: false, optimizeProgress: null, optimizeError: data.message });
         }
       });
 
@@ -1035,7 +1068,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err: unknown) {
       if (!stream.isCurrent()) return;
       const message = err instanceof Error ? err.message : String(err);
-      set({ optimizeRunning: false, optimizeProgress: null, error: message });
+      set({ optimizeRunning: false, optimizeProgress: null, optimizeError: message });
     } finally {
       stream.end();
     }
@@ -1138,7 +1171,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   connect: async (config: MCPServerConfig) => {
     saveConnectedConfigId(config.id);
-    set({ connecting: true, error: null, oauthPending: false, connectProgress: null, connectedConfigId: config.id });
+    set({ connecting: true, connectError: null, oauthPending: false, connectProgress: null, connectedConfigId: config.id });
     try {
       const state = get();
       const authConfig = buildAuthConfig(config);
@@ -1160,12 +1193,12 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       saveConnectedConfigId(null);
-      set({ connecting: false, error: message, connectProgress: null, connectedConfigId: null });
+      set({ connecting: false, connectError: message, connectProgress: null, connectedConfigId: null });
     }
   },
 
   completeOAuth: async (callbackUrl: string) => {
-    set({ connecting: true, error: null, connectProgress: "Starting authentication..." });
+    set({ connecting: true, connectError: null, connectProgress: "Starting authentication..." });
     try {
       const response = await postSSE("/auth/callback", {
         callback_url: callbackUrl,
@@ -1185,7 +1218,7 @@ export const useStore = create<AppState>((set, get) => ({
         if (await adoptBackendConnection(set)) return;
       } catch { /* ignore */ }
       saveConnectedConfigId(null);
-      set({ connecting: false, oauthPending: false, error: message, connectProgress: null, connectedConfigId: null });
+      set({ connecting: false, oauthPending: false, connectError: message, connectProgress: null, connectedConfigId: null });
     }
   },
 
@@ -1224,6 +1257,9 @@ export const useStore = create<AppState>((set, get) => ({
       evalLoading: false,
       optimizeRunning: false,
       optimizeProgress: null,
+      optimizeError: null,
+      evalError: null,
+      batchProgress: null,
       recommendations: [],
       quickWins: [],
       analyzing: false,
@@ -1238,6 +1274,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   signOutMCP: async (url: string) => {
+    set({ connectError: null });
     if (get().connected) {
       await get().disconnect();
     }
@@ -1245,7 +1282,7 @@ export const useStore = create<AppState>((set, get) => ({
       await api.signOut(url);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      set({ error: `Sign-out failed: ${message}` });
+      set({ connectError: `Sign-out failed: ${message}` });
     }
   },
 

@@ -2,10 +2,15 @@ import { useState } from "react";
 import { useStore } from "../../store";
 
 export function PromptInput() {
-  const [prompt, setPrompt] = useState("");
+  // The draft and batch progress live in the store so they survive tab switches
+  const prompt = useStore((s) => s.promptDraft);
+  const setPrompt = useStore((s) => s.setPromptDraft);
+  const batchProgress = useStore((s) => s.batchProgress);
+  const startBatch = useStore((s) => s.runBatch);
+  const cancelBatch = useStore((s) => s.cancelBatch);
   const [batch, setBatch] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [batchConfirm, setBatchConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const connected = useStore((s) => s.connected);
   const evalLoading = useStore((s) => s.evalLoading);
   const evaluate = useStore((s) => s.evaluate);
@@ -16,16 +21,14 @@ export function PromptInput() {
     const prompts = prompt.split("\n").map((l) => l.trim()).filter(Boolean);
     if (prompts.length === 0) return;
     setBatch(true);
-    setBatchProgress({ current: 0, total: prompts.length });
-    try {
-      for (let i = 0; i < prompts.length; i++) {
-        setBatchProgress({ current: i + 1, total: prompts.length });
-        await evaluate(prompts[i]);
-      }
-    } finally {
-      setBatchProgress(null);
-    }
+    setCancelling(false);
     setPrompt("");
+    await startBatch(prompts);
+  };
+
+  const handleCancelBatch = () => {
+    setCancelling(true);
+    cancelBatch();
   };
 
   const handleSubmit = async () => {
@@ -71,7 +74,7 @@ export function PromptInput() {
   return (
     <div className="p-4" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
       <div className="flex items-center justify-between mb-2">
-        <label className="text-sm font-medium" style={{ color: 'var(--sub-text)' }}>
+        <label htmlFor="eval-prompt" className="text-sm font-medium" style={{ color: 'var(--sub-text)' }}>
           {batch ? "Batch Prompt" : "Prompt"}
         </label>
         <button
@@ -84,6 +87,7 @@ export function PromptInput() {
         </button>
       </div>
       <textarea
+        id="eval-prompt"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -121,7 +125,7 @@ export function PromptInput() {
       )}
 
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs" style={{ color: 'var(--sub-text-dim)' }}>
+        <span className="text-xs flex items-center gap-2" style={{ color: 'var(--sub-text-dim)' }}>
           {batchProgress
             ? `Running prompt ${batchProgress.current}/${batchProgress.total}...`
             : evalLoading
@@ -129,6 +133,18 @@ export function PromptInput() {
               : batch
                 ? `${lineCount} prompt${lineCount !== 1 ? "s" : ""}`
                 : "Cmd+Enter to evaluate"}
+          {batchProgress && (
+            <button
+              type="button"
+              onClick={handleCancelBatch}
+              disabled={cancelling}
+              className="px-2 py-0.5 rounded border disabled:opacity-50"
+              style={{ borderColor: 'var(--sub-rivet)', color: 'var(--sub-text)' }}
+              title="Stop after the running prompt finishes"
+            >
+              {cancelling ? "Stopping..." : "Cancel"}
+            </button>
+          )}
         </span>
         <button
           onClick={handleSubmit}

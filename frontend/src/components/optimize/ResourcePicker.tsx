@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { useStore, selectLoadedResourceTokens } from "../../store";
-import { estimateResourceTokens } from "../../utils/tokens";
 
 type SortMode = "name" | "tokens";
 
@@ -17,13 +16,19 @@ export function ResourcePicker() {
   const loadedCount = loadedResources.length;
 
   const sortedResources = useMemo(() => {
+    // Content tokens are only known once a resource is loaded
     const loadedTokens = new Map(loadedResources.map((lr) => [lr.uri, lr.tokens]));
-    const withTokens = resources.map((r: any) => ({
+    const withTokens: { resource: any; tokens: number | null }[] = resources.map((r: any) => ({
       resource: r,
-      tokens: loadedTokens.get(r.uri) ?? estimateResourceTokens(r),
+      tokens: loadedTokens.get(r.uri) ?? null,
     }));
     if (sortMode === "tokens") {
-      return [...withTokens].sort((a, b) => b.tokens - a.tokens);
+      // Loaded by size, then unloaded by name
+      return [...withTokens].sort((a, b) =>
+        a.tokens !== null && b.tokens !== null ? b.tokens - a.tokens
+          : a.tokens !== null ? -1
+            : b.tokens !== null ? 1
+              : (a.resource.name || "").localeCompare(b.resource.name || ""));
     }
     return [...withTokens].sort((a, b) => (a.resource.name || "").localeCompare(b.resource.name || ""));
   }, [resources, loadedResources, sortMode]);
@@ -51,27 +56,33 @@ export function ResourcePicker() {
 
   return (
     <div className="px-4 py-2" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-sm font-medium w-full"
-        style={{ color: 'var(--sub-text)' }}
-      >
-        <span>{open ? "\u25BE" : "\u25B8"}</span>
-        <span className="flex items-center gap-1.5">
+      {/* The toggle covers the whole header; the sort toggle sits above it as a sibling button */}
+      <div className="relative flex items-center gap-2 text-sm font-medium w-full" style={{ color: 'var(--sub-text)' }}>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label="Resources"
+          className="absolute inset-0 w-full"
+        />
+        <span className="pointer-events-none" aria-hidden="true">{open ? "\u25BE" : "\u25B8"}</span>
+        <span className="flex items-center gap-1.5 pointer-events-none">
           Resources
           {open && (
-            <span
-              className="text-[10px] font-mono px-1 py-0.5 rounded cursor-pointer"
+            <button
+              type="button"
+              className="relative text-[10px] font-mono px-1 py-0.5 rounded pointer-events-auto"
               style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text-dim)' }}
-              onClick={(e) => { e.stopPropagation(); setSortMode(sortMode === "name" ? "tokens" : "name"); }}
+              onClick={() => setSortMode(sortMode === "name" ? "tokens" : "name")}
               title={`Sort by ${sortMode === "name" ? "tokens" : "name"}`}
+              aria-label={`Resources: sort by ${sortMode === "name" ? "tokens" : "name"}`}
             >
               {sortMode === "tokens" ? "\u25BE tok" : "A\u2193Z"}
-            </span>
+            </button>
           )}
         </span>
         <span
-          className="text-[10px] font-mono px-1.5 py-0.5 rounded-full ml-auto"
+          className="text-[10px] font-mono px-1.5 py-0.5 rounded-full ml-auto pointer-events-none"
           style={
             loadedCount > 0
               ? { backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }
@@ -80,7 +91,7 @@ export function ResourcePicker() {
         >
           {loadedCount}/{resources.length}{totalTokens > 0 ? ` (~${totalTokens.toLocaleString()} tok)` : ""}
         </span>
-      </button>
+      </div>
 
       {open && (
         <div className="mt-1.5">
@@ -95,16 +106,14 @@ export function ResourcePicker() {
             </button>
           </div>
           <div className="space-y-0.5">
-            {sortedResources.map(({ resource: r, tokens }: any) => {
+            {sortedResources.map(({ resource: r, tokens }) => {
               const uri = r.uri as string;
               const isLoaded = loadedUris.has(uri);
               return (
                 <label
                   key={uri}
-                  className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-xs"
+                  className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-xs hover:bg-[var(--sub-panel-light)]"
                   style={{ color: 'var(--sub-text)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
                   <input
                     type="checkbox"
@@ -115,9 +124,10 @@ export function ResourcePicker() {
                   <span className="truncate flex-1">{r.name || uri}</span>
                   <span
                     className="text-[10px] font-mono shrink-0"
-                    style={{ color: isLoaded ? 'var(--sub-text-dim)' : 'var(--sub-hull)' }}
+                    style={{ color: 'var(--sub-text-dim)' }}
+                    title={tokens === null ? "Load to count its tokens" : undefined}
                   >
-                    {tokens.toLocaleString()}
+                    {tokens === null ? "\u2014" : tokens.toLocaleString()}
                   </span>
                 </label>
               );

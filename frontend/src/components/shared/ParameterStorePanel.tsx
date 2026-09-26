@@ -17,7 +17,10 @@ function ParamValueBadge({ entry }: { entry: ParamEntry }) {
 }
 
 export function ParameterStorePanel() {
-  const { parameterStore, clearParamStore, parameterAliases, removeParamAlias } = useStore();
+  const parameterStore = useStore((s) => s.parameterStore);
+  const clearParamStore = useStore((s) => s.clearParamStore);
+  const parameterAliases = useStore((s) => s.parameterAliases);
+  const removeParamAlias = useStore((s) => s.removeParamAlias);
   const [open, setOpen] = useState(false);
 
   const entries = Object.entries(parameterStore).filter(([, v]) => v.length > 0);
@@ -41,13 +44,8 @@ export function ParameterStorePanel() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed right-0 top-1/2 -translate-y-1/2 z-30 border border-r-0 rounded-l-lg px-2 py-3 transition-colors group"
-          style={{
-            backgroundColor: 'var(--sub-panel)',
-            borderColor: 'var(--sub-rivet)',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel)')}
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-30 border border-r-0 rounded-l-lg px-2 py-3 transition-colors group bg-[var(--sub-panel)] hover:bg-[var(--sub-panel-light)]"
+          style={{ borderColor: 'var(--sub-rivet)' }}
           title="Parameter Store"
         >
           <div className="flex flex-col items-center gap-1">
@@ -73,6 +71,10 @@ export function ParameterStorePanel() {
           open ? "translate-x-0" : "translate-x-full"
         }`}
         style={{ backgroundColor: 'var(--sub-hull)', borderLeft: '1px solid var(--sub-rivet)' }}
+        // Off-screen while closed; keep it out of the tab order and accessibility tree
+        inert={!open}
+        role="dialog"
+        aria-label="Parameter Store"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--sub-rivet)' }}>
@@ -91,10 +93,8 @@ export function ParameterStorePanel() {
             </button>
             <button
               onClick={() => setOpen(false)}
-              className="transition-colors text-lg leading-none"
-              style={{ color: 'var(--sub-text-dim)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-text)')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-text-dim)')}
+              className="transition-colors text-lg leading-none text-[var(--sub-text-dim)] hover:text-[var(--sub-text)]"
+              aria-label="Close parameter store"
             >
               &times;
             </button>
@@ -160,11 +160,9 @@ export function ParameterStorePanel() {
                     </div>
                     <button
                       onClick={() => removeParamAlias(fieldName)}
-                      className="transition-colors text-xs ml-2 shrink-0"
-                      style={{ color: 'var(--sub-text-dim)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-red)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-text-dim)')}
+                      className="transition-colors text-xs ml-2 shrink-0 text-[var(--sub-text-dim)] hover:text-[var(--sub-red)]"
                       title="Remove mapping"
+                      aria-label={`Remove mapping for ${fieldName}`}
                     >
                       &times;
                     </button>

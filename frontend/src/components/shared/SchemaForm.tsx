@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useId } from "react";
 import { useStore } from "../../store";
 import type { ParamEntry } from "../../store";
 import { formatParamContext } from "../../utils/params";
@@ -43,10 +43,7 @@ function ValuePicker({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="text-[10px] ml-1.5 tabular-nums"
-        style={{ color: 'var(--sub-brass)' }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+        className="text-[10px] ml-1.5 tabular-nums text-[var(--sub-brass)] hover:text-[var(--sub-brass-glow)]"
         title="Pick from stored values"
       >
         {sortedEntries.length} values
@@ -69,13 +66,8 @@ function ValuePicker({
               <button
                 key={i}
                 type="button"
-                className="w-full text-left px-3 py-2 transition-colors last:border-b-0"
-                style={{
-                  backgroundColor: isSelected ? 'rgba(196,154,42,0.15)' : 'transparent',
-                  borderBottom: '1px solid rgba(74,78,80,0.5)',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = isSelected ? 'rgba(196,154,42,0.15)' : 'transparent')}
+                className={`w-full text-left px-3 py-2 transition-colors last:border-b-0 hover:bg-[var(--sub-panel-light)] ${isSelected ? "bg-[rgba(196,154,42,0.15)]" : ""}`}
+                style={{ borderBottom: '1px solid rgba(74,78,80,0.5)' }}
                 onClick={() => {
                   onSelect(entry.value);
                   setOpen(false);
@@ -126,10 +118,7 @@ function LinkDropdown({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="transition-colors ml-1.5"
-        style={{ color: 'var(--sub-text-dim)' }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-text-dim)')}
+        className="transition-colors ml-1.5 text-[var(--sub-text-dim)] hover:text-[var(--sub-brass)]"
         title={`Map a stored parameter to "${fieldName}"`}
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -153,9 +142,7 @@ function LinkDropdown({
             <button
               key={storeKey}
               type="button"
-              className="w-full text-left px-3 py-2 transition-colors flex items-center gap-2"
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              className="w-full text-left px-3 py-2 transition-colors flex items-center gap-2 hover:bg-[var(--sub-panel-light)]"
               onClick={() => {
                 onSelect(storeKey, value);
                 setOpen(false);
@@ -185,7 +172,11 @@ function toSnakeCase(s: string): string {
 export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValues }: Props) {
   const properties = schema.properties || EMPTY_PROPERTIES;
   const required = new Set(schema.required || []);
-  const { parameterStore, parameterAliases, removedAliases, addParamAlias } = useStore();
+  const parameterStore = useStore((s) => s.parameterStore);
+  const parameterAliases = useStore((s) => s.parameterAliases);
+  const removedAliases = useStore((s) => s.removedAliases);
+  const addParamAlias = useStore((s) => s.addParamAlias);
+  const uid = useId();
 
   // Resolve the store key for each field -- pick the key with the most entries
   function resolveStoreKey(fieldKey: string): string | null {
@@ -336,20 +327,25 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
         const hasAlias = key in parameterAliases;
         const storeKey = resolveStoreKey(key);
         const multiEntries = storeKey ? (parameterStore[storeKey] ?? []) : [];
+        const fieldId = `${uid}-${key}`;
+        const descId = prop.description ? `${fieldId}-desc` : undefined;
 
         return (
           <div key={key}>
-            <label className="flex items-center flex-wrap text-sm font-medium mb-1" style={{ color: 'var(--sub-text)' }}>
-              {key}
-              {required.has(key) && <span className="ml-1" style={{ color: 'var(--sub-red)' }}>*</span>}
-              {isAutoFilled(key) && (
-                <span
-                  className="ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
-                  style={{ backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }}
-                >
-                  auto{hasAlias ? ` (${parameterAliases[key]})` : ""}
-                </span>
-              )}
+            {/* The label covers only the name; the pickers beside it are separate controls */}
+            <div className="flex items-center flex-wrap text-sm font-medium mb-1" style={{ color: 'var(--sub-text)' }}>
+              <label htmlFor={fieldId} className="flex items-center">
+                {key}
+                {required.has(key) && <span className="ml-1" style={{ color: 'var(--sub-red)' }}>*</span>}
+                {isAutoFilled(key) && (
+                  <span
+                    className="ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: 'rgba(196,154,42,0.2)', color: 'var(--sub-brass)' }}
+                  >
+                    auto{hasAlias ? ` (${parameterAliases[key]})` : ""}
+                  </span>
+                )}
+              </label>
               {multiEntries.length > 1 && (
                 <ValuePicker
                   entries={multiEntries}
@@ -365,13 +361,15 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
                 />
               )}
               {prop.description && (
-                <span className="font-normal ml-2" style={{ color: 'var(--sub-text-dim)' }}>
+                <span id={descId} className="font-normal ml-2" style={{ color: 'var(--sub-text-dim)' }}>
                   {prop.description}
                 </span>
               )}
-            </label>
+            </div>
             {prop.type === "boolean" ? (
               <select
+                id={fieldId}
+                aria-describedby={descId}
                 value={String(values[key] ?? "")}
                 onChange={(e) => handleChange(key, e.target.value)}
                 className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
@@ -383,6 +381,8 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
               </select>
             ) : prop.enum ? (
               <select
+                id={fieldId}
+                aria-describedby={descId}
                 value={String(values[key] ?? "")}
                 onChange={(e) => handleChange(key, e.target.value)}
                 className="w-full input-sub border rounded-lg px-3 py-2 text-sm"
@@ -397,6 +397,8 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
               </select>
             ) : (
               <input
+                id={fieldId}
+                aria-describedby={descId}
                 type={
                   prop.type === "number" || prop.type === "integer"
                     ? "number"

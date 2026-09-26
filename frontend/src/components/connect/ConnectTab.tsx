@@ -10,7 +10,7 @@ function LLMDisplay() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="text-sm" style={{ color: 'var(--sub-text-dim)' }}>LLM Configuration</label>
+        <span className="text-sm" style={{ color: 'var(--sub-text-dim)' }}>LLM Configuration</span>
         <button
           type="button"
           onClick={() => setActiveTab("settings")}
@@ -49,14 +49,19 @@ function LLMDisplay() {
 }
 
 export function ConnectTab() {
-  const {
-    connected, connecting, error, connect, disconnect, oauthPending,
-    connectProgress,
-    mcpConfigs, setActiveTab,
-    checkStatus, connectedConfigId,
-  } = useStore();
-
-  const { completeOAuth, signOutMCP } = useStore();
+  const connected = useStore((s) => s.connected);
+  const connecting = useStore((s) => s.connecting);
+  const error = useStore((s) => s.connectError);
+  const oauthPending = useStore((s) => s.oauthPending);
+  const connectProgress = useStore((s) => s.connectProgress);
+  const mcpConfigs = useStore((s) => s.mcpConfigs);
+  const connectedConfigId = useStore((s) => s.connectedConfigId);
+  const connect = useStore((s) => s.connect);
+  const disconnect = useStore((s) => s.disconnect);
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  const checkStatus = useStore((s) => s.checkStatus);
+  const completeOAuth = useStore((s) => s.completeOAuth);
+  const signOutMCP = useStore((s) => s.signOutMCP);
   const [signingOut, setSigningOut] = useState(false);
 
   const [selectedConfigId, setSelectedConfigId] = useState<string>(() => {
@@ -117,7 +122,7 @@ export function ConnectTab() {
             {/* Server Selection */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm" style={{ color: 'var(--sub-text-dim)' }}>MCP Server</label>
+                <label htmlFor="connect-server" className="block text-sm" style={{ color: 'var(--sub-text-dim)' }}>MCP Server</label>
                 <button
                   type="button"
                   onClick={() => setActiveTab("settings")}
@@ -129,6 +134,7 @@ export function ConnectTab() {
               </div>
               {mcpConfigs.length > 0 ? (
                 <select
+                  id="connect-server"
                   value={selectedConfig?.id ?? ""}
                   onChange={(e) => setSelectedConfigId(e.target.value)}
                   disabled={connected || connecting}

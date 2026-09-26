@@ -128,16 +128,7 @@ export function JsonViewer({ data }: Props) {
           <button
             type="button"
             onClick={() => setFormatted(!formatted)}
-            className="text-xs px-2 py-1 rounded border transition-colors"
-            style={{ borderColor: 'var(--sub-rivet)', color: 'var(--sub-text)' }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--sub-text-bright)';
-              e.currentTarget.style.borderColor = 'var(--sub-brass-dim)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--sub-text)';
-              e.currentTarget.style.borderColor = 'var(--sub-rivet)';
-            }}
+            className="text-xs px-2 py-1 rounded border transition-colors border-[var(--sub-rivet)] text-[var(--sub-text)] hover:border-[var(--sub-brass-dim)] hover:text-[var(--sub-text-bright)]"
           >
             {formatted ? "Show JSON" : "Show Formatted"}
           </button>

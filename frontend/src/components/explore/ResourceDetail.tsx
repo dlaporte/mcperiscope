@@ -2,7 +2,10 @@ import { useStore } from "../../store";
 import { JsonViewer } from "../shared/JsonViewer";
 
 export function ResourceDetail() {
-  const { selection, readResource, result, resultLoading } = useStore();
+  const selection = useStore((s) => s.selection);
+  const readResource = useStore((s) => s.readResource);
+  const result = useStore((s) => s.result);
+  const resultLoading = useStore((s) => s.resultLoading);
   const resource = selection?.item;
 
   if (!resource) return null;

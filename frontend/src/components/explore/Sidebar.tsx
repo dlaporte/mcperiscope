@@ -22,43 +22,55 @@ function Section({
   const [open, setOpen] = useState(true);
   return (
     <div>
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold"
+      {/* The toggle covers the whole header; the sort toggle sits above it as a sibling button */}
+      <div
+        className="relative flex items-center justify-between px-3 py-2 text-sm font-semibold hover:bg-[var(--sub-panel-light)]"
         style={{ color: 'var(--sub-text)' }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
-        <span className="flex items-center gap-1.5">
-          {open ? "\u25BE" : "\u25B8"} {title}
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label={title}
+          className="absolute inset-0 w-full"
+        />
+        <span className="flex items-center gap-1.5 pointer-events-none">
+          <span aria-hidden="true">{open ? "\u25BE" : "\u25B8"}</span> {title}
           {sortable && open && (
-            <span
-              className="text-[10px] font-mono px-1 py-0.5 rounded cursor-pointer"
+            <button
+              type="button"
+              className="relative text-[10px] font-mono px-1 py-0.5 rounded pointer-events-auto"
               style={{ backgroundColor: 'var(--sub-hull)', color: 'var(--sub-text-dim)' }}
-              onClick={(e) => { e.stopPropagation(); onToggleSort?.(); }}
+              onClick={onToggleSort}
               title={`Sort by ${sortMode === "name" ? "tokens" : "name"}`}
+              aria-label={`${title}: sort by ${sortMode === "name" ? "tokens" : "name"}`}
             >
               {sortMode === "tokens" ? "\u25BE tok" : "A\u2193Z"}
-            </span>
+            </button>
           )}
         </span>
         {tokens != null && tokens > 0 && (
           <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded-full"
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded-full pointer-events-none"
             style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text-dim)' }}
           >
             {tokens.toLocaleString()}
           </span>
         )}
-      </button>
+      </div>
       {open && <div>{children}</div>}
     </div>
   );
 }
 
 export function Sidebar() {
-  const { connected, tools, resources, prompts, selection, select, inventory } =
-    useStore();
+  const connected = useStore((s) => s.connected);
+  const tools = useStore((s) => s.tools);
+  const resources = useStore((s) => s.resources);
+  const prompts = useStore((s) => s.prompts);
+  const selection = useStore((s) => s.selection);
+  const select = useStore((s) => s.select);
+  const inventory = useStore((s) => s.inventory);
   const [filter, setFilter] = useState("");
   const [toolSort, setToolSort] = useState<SortMode>("name");
   const [resourceSort, setResourceSort] = useState<SortMode>("name");
@@ -175,6 +187,7 @@ export function Sidebar() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter..."
+            aria-label="Filter tools, resources and prompts"
             className="w-full input-sub border rounded px-3 py-1.5 text-xs  pr-7"
           />
           {filter && (
@@ -182,6 +195,7 @@ export function Sidebar() {
               onClick={() => setFilter("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
               style={{ color: 'var(--sub-text-dim)' }}
+              aria-label="Clear filter"
             >
               ✕
             </button>
@@ -215,20 +229,12 @@ export function Sidebar() {
             <button
               key={item.name}
               onClick={() => select("tool", item)}
-              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
+              className={`w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1 ${isSelected("tool", item.name) ? "" : "hover:bg-[var(--sub-panel-light)]"}`}
               style={
                 isSelected("tool", item.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
                   : { color: 'var(--sub-text)' }
               }
-              onMouseEnter={(e) => {
-                if (!isSelected("tool", item.name))
-                  e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected("tool", item.name))
-                  e.currentTarget.style.backgroundColor = 'transparent';
-              }}
             >
               <span className="truncate">{item.name}</span>
               <span
@@ -261,20 +267,12 @@ export function Sidebar() {
             <button
               key={resource.uri}
               onClick={() => select("resource", resource)}
-              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
+              className={`w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1 ${isResourceSelected(resource.uri) ? "" : "hover:bg-[var(--sub-panel-light)]"}`}
               style={
                 isResourceSelected(resource.uri)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
                   : { color: 'var(--sub-text)' }
               }
-              onMouseEnter={(e) => {
-                if (!isResourceSelected(resource.uri))
-                  e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
-              }}
-              onMouseLeave={(e) => {
-                if (!isResourceSelected(resource.uri))
-                  e.currentTarget.style.backgroundColor = 'transparent';
-              }}
             >
               <span className="truncate">{resource.name || resource.uri}</span>
               <span
@@ -307,20 +305,12 @@ export function Sidebar() {
             <button
               key={prompt.name}
               onClick={() => select("prompt", prompt)}
-              className="w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1"
+              className={`w-full text-left pl-6 pr-4 py-1 text-xs flex items-center justify-between gap-1 ${isSelected("prompt", prompt.name) ? "" : "hover:bg-[var(--sub-panel-light)]"}`}
               style={
                 isSelected("prompt", prompt.name)
                   ? { backgroundColor: 'var(--sub-brass)', color: 'white' }
                   : { color: 'var(--sub-text)' }
               }
-              onMouseEnter={(e) => {
-                if (!isSelected("prompt", prompt.name))
-                  e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)';
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected("prompt", prompt.name))
-                  e.currentTarget.style.backgroundColor = 'transparent';
-              }}
             >
               <span className="truncate">{prompt.name}</span>
               <span

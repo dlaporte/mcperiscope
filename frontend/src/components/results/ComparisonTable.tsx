@@ -141,11 +141,9 @@ export function ComparisonTable({ data, runSelector }: Props) {
             const delta = data.delta?.[row.key as string] as DeltaEntry | undefined;
             const pct = getDeltaPct(delta, baseline, proxy, row.isPercent);
             return (
-              <tr
+              <tr className="hover:bg-[var(--sub-panel-light)]"
                 key={row.key}
                 style={{ borderBottom: '1px solid rgba(74,78,80,0.5)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
                 <td className="px-4 py-2.5 font-medium" style={{ color: 'var(--sub-text)' }}>
                   {row.label}

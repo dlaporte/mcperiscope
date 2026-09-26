@@ -7,7 +7,8 @@ import { InventoryBar } from "./InventoryBar";
 import { ParameterStorePanel } from "../shared/ParameterStorePanel";
 
 function DetailPanel() {
-  const { selection, connected } = useStore();
+  const selection = useStore((s) => s.selection);
+  const connected = useStore((s) => s.connected);
 
   if (!connected) {
     return (

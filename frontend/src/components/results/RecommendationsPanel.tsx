@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useId } from "react";
 import { useStore } from "../../store";
 
 const IMPACT_STYLES: Record<string, React.CSSProperties> = {
@@ -41,24 +41,21 @@ function RecItem({ type, description, impact, planOnly, checked, onToggle }: Rec
   const [expanded, setExpanded] = useState(false);
   const typeLower = (type || "").toLowerCase();
   const badgeStyle = TYPE_STYLES[typeLower] || defaultBadgeStyle;
+  const id = useId();
 
   return (
-    <div
-      className="py-1.5 px-1 rounded transition-colors cursor-pointer"
-      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
-      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-      onClick={onToggle}
-    >
+    <div className="py-1.5 px-1 rounded transition-colors hover:bg-[var(--sub-panel-light)]">
       <div className="flex items-start gap-2">
         <input
+          id={id}
           type="checkbox"
           checked={checked}
           onChange={onToggle}
-          onClick={(e) => e.stopPropagation()}
           className="w-3 h-3 mt-0.5 rounded cursor-pointer accent-amber-600 shrink-0"
         />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
+          {/* The badges label the checkbox; the description is its own expand toggle */}
+          <label htmlFor={id} className="flex items-center gap-1.5 flex-wrap cursor-pointer">
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={badgeStyle}>
               {typeLower}
             </span>
@@ -79,14 +76,16 @@ function RecItem({ type, description, impact, planOnly, checked, onToggle }: Rec
                 plan-only
               </span>
             )}
-          </div>
-          <p
-            className="text-[11px] mt-0.5 leading-snug cursor-pointer"
+          </label>
+          <button
+            type="button"
+            className="block text-left text-[11px] mt-0.5 leading-snug"
             style={{ color: 'var(--sub-text)' }}
-            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            onClick={() => setExpanded(!expanded)}
+            aria-expanded={expanded}
           >
             {expanded ? description : truncate(description, 100)}
-          </p>
+          </button>
         </div>
       </div>
     </div>

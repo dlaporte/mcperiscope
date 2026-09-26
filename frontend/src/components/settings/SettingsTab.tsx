@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useStore, MCP_CONFIG_DEFAULTS, LS_PREFIX, generateId } from "../../store";
 import { DEFAULT_MODEL, KNOWN_MODELS, MODEL_CONTEXT } from "../../config/models";
 import type { LLMConfig, MCPServerConfig } from "../../store";
 import { api } from "../../api/client";
+import { NumberInput } from "../shared/NumberInput";
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
@@ -27,7 +28,9 @@ function isKnownModel(provider: string, modelId: string): boolean {
 }
 
 function LLMConfigCard({ config }: { config: LLMConfig }) {
-  const { updateLLMConfig, removeLLMConfig } = useStore();
+  const updateLLMConfig = useStore((s) => s.updateLLMConfig);
+  const removeLLMConfig = useStore((s) => s.removeLLMConfig);
+  const uid = useId();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -94,7 +97,7 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
         <span className="font-medium" style={{ color: "var(--sub-text)" }}>{config.name}</span>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setEditing(!editing)}
+            onClick={() => (editing ? handleCancel() : setEditing(true))}
             className="text-xs px-2 py-1 rounded transition-colors"
             style={{ color: "var(--sub-brass)", backgroundColor: "rgba(196,154,42,0.1)" }}
           >
@@ -133,8 +136,9 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
         <div className="mt-4 space-y-3 pt-3" style={{ borderTop: "1px solid var(--sub-rivet)" }}>
           {/* Name */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Name</label>
+            <label htmlFor={`${uid}-name`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Name</label>
             <input
+              id={`${uid}-name`}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -145,12 +149,13 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
 
           {/* Provider */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Provider</label>
-            <div className="flex gap-2">
+            <span id={`${uid}-provider`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Provider</span>
+            <div className="flex gap-2" role="group" aria-labelledby={`${uid}-provider`}>
               {(["anthropic", "openai", "custom"] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => handleProviderChange(p)}
+                  aria-pressed={provider === p}
                   className="px-3 py-1.5 text-sm rounded-lg border transition-colors"
                   style={
                     provider === p
@@ -166,9 +171,10 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
 
           {/* Model */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Model</label>
+            <label htmlFor={`${uid}-model`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Model</label>
             {provider === "custom" ? (
               <input
+                id={`${uid}-model`}
                 type="text"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
@@ -178,6 +184,7 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
             ) : (
               <>
                 <select
+                  id={`${uid}-model`}
                   value={customModel ? CUSTOM_MODEL : model}
                   onChange={(e) => handleModelSelect(e.target.value)}
                   className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -192,6 +199,7 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
                 {customModel && (
                   <input
                     type="text"
+                    aria-label="Custom model ID"
                     value={model}
                     onChange={(e) => setModel(e.target.value.trim())}
                     className="w-full input-sub border rounded-lg px-3 py-2 text-sm mt-2"
@@ -204,8 +212,9 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
 
           {/* API Key */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>API Key</label>
+            <label htmlFor={`${uid}-api-key`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>API Key</label>
             <input
+              id={`${uid}-api-key`}
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -217,8 +226,9 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
           {/* Endpoint (custom only) */}
           {provider === "custom" && (
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Endpoint URL</label>
+              <label htmlFor={`${uid}-endpoint-url`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Endpoint URL</label>
               <input
+                id={`${uid}-endpoint-url`}
                 type="text"
                 value={endpoint}
                 onChange={(e) => setEndpoint(e.target.value)}
@@ -231,12 +241,15 @@ function LLMConfigCard({ config }: { config: LLMConfig }) {
           {/* Context Window (custom provider or custom model ID) */}
           {(provider === "custom" || customModel) && (
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Context Window</label>
+              <label htmlFor={`${uid}-context-window`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Context Window</label>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
+                <NumberInput
+                  id={`${uid}-context-window`}
                   value={contextWindow}
-                  onChange={(e) => setContextWindow(parseInt(e.target.value, 10) || 128000)}
+                  onChange={setContextWindow}
+                  min={1}
+                  max={2_000_000}
+                  fallback={128000}
                   className="w-40 input-sub border rounded-lg px-3 py-2 text-sm"
                 />
                 <span className="text-xs" style={{ color: "var(--sub-text-dim)" }}>tokens</span>
@@ -275,7 +288,9 @@ const AUTH_METHOD_LABELS: Record<string, string> = {
 };
 
 function MCPConfigCard({ config }: { config: MCPServerConfig }) {
-  const { updateMCPConfig, removeMCPConfig } = useStore();
+  const updateMCPConfig = useStore((s) => s.updateMCPConfig);
+  const removeMCPConfig = useStore((s) => s.removeMCPConfig);
+  const uid = useId();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -327,7 +342,7 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
         <span className="font-medium" style={{ color: "var(--sub-text)" }}>{config.name}</span>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setEditing(!editing)}
+            onClick={() => (editing ? handleCancel() : setEditing(true))}
             className="text-xs px-2 py-1 rounded transition-colors"
             style={{ color: "var(--sub-brass)", backgroundColor: "rgba(196,154,42,0.1)" }}
           >
@@ -366,8 +381,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
         <div className="mt-4 space-y-3 pt-3" style={{ borderTop: "1px solid var(--sub-rivet)" }}>
           {/* Name */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Name</label>
+            <label htmlFor={`${uid}-name`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Name</label>
             <input
+              id={`${uid}-name`}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -378,8 +394,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
 
           {/* URL */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>URL</label>
+            <label htmlFor={`${uid}-url`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>URL</label>
             <input
+              id={`${uid}-url`}
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -390,8 +407,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
 
           {/* Protocol */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Protocol</label>
+            <label htmlFor={`${uid}-protocol`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Protocol</label>
             <select
+              id={`${uid}-protocol`}
               value={protocol}
               onChange={(e) => setProtocol(e.target.value as MCPServerConfig["protocol"])}
               className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -404,8 +422,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
 
           {/* Auth Method */}
           <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Auth Method</label>
+            <label htmlFor={`${uid}-auth-method`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Auth Method</label>
             <select
+              id={`${uid}-auth-method`}
               value={authMethod}
               onChange={(e) => setAuthMethod(e.target.value as MCPServerConfig["authMethod"])}
               className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -419,8 +438,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
           {/* Bearer Token */}
           {authMethod === "bearer" && (
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Token</label>
+              <label htmlFor={`${uid}-token`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Token</label>
               <input
+                id={`${uid}-token`}
                 type="password"
                 value={authToken}
                 onChange={(e) => setAuthToken(e.target.value)}
@@ -434,8 +454,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
           {authMethod === "header" && (
             <>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Header Name</label>
+                <label htmlFor={`${uid}-header-name`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Header Name</label>
                 <input
+                  id={`${uid}-header-name`}
                   type="text"
                   value={headerName}
                   onChange={(e) => setHeaderName(e.target.value)}
@@ -444,8 +465,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Header Value</label>
+                <label htmlFor={`${uid}-header-value`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Header Value</label>
                 <input
+                  id={`${uid}-header-value`}
                   type="password"
                   value={headerValue}
                   onChange={(e) => setHeaderValue(e.target.value)}
@@ -460,8 +482,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
           {authMethod === "oauth" && (
             <>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Scope (optional — overrides discovery)</label>
+                <label htmlFor={`${uid}-scope-oauth`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Scope (optional — overrides discovery)</label>
                 <input
+                  id={`${uid}-scope-oauth`}
                   type="text"
                   value={scope}
                   onChange={(e) => setScope(e.target.value)}
@@ -470,8 +493,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client ID (optional — pre-registered)</label>
+                <label htmlFor={`${uid}-client-id-oauth`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client ID (optional — pre-registered)</label>
                 <input
+                  id={`${uid}-client-id-oauth`}
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
@@ -480,8 +504,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Secret (optional)</label>
+                <label htmlFor={`${uid}-client-secret-oauth`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Secret (optional)</label>
                 <input
+                  id={`${uid}-client-secret-oauth`}
                   type="password"
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
@@ -491,8 +516,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
               </div>
               {clientSecret && (
                 <div>
-                  <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Auth</label>
+                  <label htmlFor={`${uid}-client-auth`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Auth</label>
                   <select
+                    id={`${uid}-client-auth`}
                     value={clientAuth}
                     onChange={(e) => setClientAuth(e.target.value as MCPServerConfig["clientAuth"])}
                     className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -503,8 +529,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 </div>
               )}
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Metadata URL (CIMD, optional)</label>
+                <label htmlFor={`${uid}-client-metadata-url`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Metadata URL (CIMD, optional)</label>
                 <input
+                  id={`${uid}-client-metadata-url`}
                   type="text"
                   value={clientMetadataUrl}
                   onChange={(e) => setClientMetadataUrl(e.target.value)}
@@ -522,8 +549,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
           {authMethod === "oauth_client_creds" && (
             <>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Token Endpoint</label>
+                <label htmlFor={`${uid}-token-endpoint`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Token Endpoint</label>
                 <input
+                  id={`${uid}-token-endpoint`}
                   type="text"
                   value={tokenEndpoint}
                   onChange={(e) => setTokenEndpoint(e.target.value)}
@@ -532,8 +560,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client ID</label>
+                <label htmlFor={`${uid}-client-id`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client ID</label>
                 <input
+                  id={`${uid}-client-id`}
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
@@ -542,8 +571,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Secret</label>
+                <label htmlFor={`${uid}-client-secret`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Secret</label>
                 <input
+                  id={`${uid}-client-secret`}
                   type="password"
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
@@ -552,8 +582,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Scope (optional)</label>
+                <label htmlFor={`${uid}-scope`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Scope (optional)</label>
                 <input
+                  id={`${uid}-scope`}
                   type="text"
                   value={scope}
                   onChange={(e) => setScope(e.target.value)}
@@ -562,8 +593,9 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Auth</label>
+                <label htmlFor={`${uid}-client-auth-creds`} className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>Client Auth</label>
                 <select
+                  id={`${uid}-client-auth-creds`}
                   value={clientAuth}
                   onChange={(e) => setClientAuth(e.target.value as MCPServerConfig["clientAuth"])}
                   className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -604,20 +636,18 @@ function MCPConfigCard({ config }: { config: MCPServerConfig }) {
 }
 
 export function SettingsTab() {
-  const {
-    llmConfigs,
-    primaryLLM,
-    analystLLM,
-    addLLMConfig,
-    setPrimaryLLM,
-    setAnalystLLM,
-    maxToolRounds,
-    maxTokensPerResponse,
-    setMaxToolRounds,
-    setMaxTokensPerResponse,
-    mcpConfigs,
-    addMCPConfig,
-  } = useStore();
+  const llmConfigs = useStore((s) => s.llmConfigs);
+  const primaryLLM = useStore((s) => s.primaryLLM);
+  const analystLLM = useStore((s) => s.analystLLM);
+  const addLLMConfig = useStore((s) => s.addLLMConfig);
+  const setPrimaryLLM = useStore((s) => s.setPrimaryLLM);
+  const setAnalystLLM = useStore((s) => s.setAnalystLLM);
+  const maxToolRounds = useStore((s) => s.maxToolRounds);
+  const maxTokensPerResponse = useStore((s) => s.maxTokensPerResponse);
+  const setMaxToolRounds = useStore((s) => s.setMaxToolRounds);
+  const setMaxTokensPerResponse = useStore((s) => s.setMaxTokensPerResponse);
+  const mcpConfigs = useStore((s) => s.mcpConfigs);
+  const addMCPConfig = useStore((s) => s.addMCPConfig);
 
   const handleAddLLM = () => {
     const config: LLMConfig = {
@@ -712,13 +742,14 @@ export function SettingsTab() {
           </h2>
           <div className="panel-riveted rounded-lg p-4 space-y-4">
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
+              <label htmlFor="settings-agent-llm" className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Agent LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
                   Executes evaluation prompts using MCP tools to answer questions
                 </span>
               </label>
               <select
+                id="settings-agent-llm"
                 value={primaryLLM}
                 onChange={(e) => setPrimaryLLM(e.target.value)}
                 className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -732,13 +763,14 @@ export function SettingsTab() {
               </select>
             </div>
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
+              <label htmlFor="settings-analyst-llm" className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Analyst LLM
                 <span className="ml-2 text-[10px]" style={{ color: "var(--sub-text-dim)" }}>
                   Compares baseline vs optimized answers, rewrites tool descriptions and condenses resources
                 </span>
               </label>
               <select
+                id="settings-analyst-llm"
                 value={analystLLM}
                 onChange={(e) => setAnalystLLM(e.target.value)}
                 className="w-full input-sub border rounded-lg px-2 py-2 text-sm"
@@ -761,16 +793,17 @@ export function SettingsTab() {
           </h2>
           <div className="panel-riveted rounded-lg p-4 space-y-4">
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
+              <label htmlFor="settings-max-tool-call-rounds" className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Max tool call rounds
               </label>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
+                <NumberInput
+                  id="settings-max-tool-call-rounds"
                   value={maxToolRounds}
-                  onChange={(e) => setMaxToolRounds(parseInt(e.target.value, 10) || 20)}
+                  onChange={setMaxToolRounds}
                   min={1}
-                  max={100}
+                  max={50}
+                  fallback={20}
                   className="w-24 input-sub border rounded-lg px-3 py-2 text-sm"
                 />
                 <span className="text-xs" style={{ color: "var(--sub-text-dim)" }}>
@@ -779,17 +812,18 @@ export function SettingsTab() {
               </div>
             </div>
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
+              <label htmlFor="settings-max-tokens-per-response" className="block text-xs mb-1" style={{ color: "var(--sub-text-dim)" }}>
                 Max tokens per response
               </label>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
+                <NumberInput
+                  id="settings-max-tokens-per-response"
                   value={maxTokensPerResponse}
-                  onChange={(e) => setMaxTokensPerResponse(parseInt(e.target.value, 10) || 4096)}
+                  onChange={setMaxTokensPerResponse}
                   min={256}
-                  max={32768}
+                  max={32000}
                   step={256}
+                  fallback={4096}
                   className="w-24 input-sub border rounded-lg px-3 py-2 text-sm"
                 />
                 <span className="text-xs" style={{ color: "var(--sub-text-dim)" }}>
@@ -807,7 +841,7 @@ export function SettingsTab() {
 }
 
 function ClearCredentialsSection() {
-  const { mcpConfigs } = useStore();
+  const mcpConfigs = useStore((s) => s.mcpConfigs);
   const [confirming, setConfirming] = useState(false);
   const handleClear = async () => {
     // Also delete the backend's stored OAuth tokens for each OAuth server —

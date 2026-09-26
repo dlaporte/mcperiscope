@@ -66,7 +66,13 @@ function findTrimmableFields(data: unknown): string[] {
 }
 
 export function ToolDetail() {
-  const { selection, callTool, result, resultLoading, resultMeta, parameterStore, harvestParams } = useStore();
+  const selection = useStore((s) => s.selection);
+  const callTool = useStore((s) => s.callTool);
+  const result = useStore((s) => s.result);
+  const resultLoading = useStore((s) => s.resultLoading);
+  const resultMeta = useStore((s) => s.resultMeta);
+  const parameterStore = useStore((s) => s.parameterStore);
+  const harvestParams = useStore((s) => s.harvestParams);
   const tool = selection?.item;
 
   const flatParams = useMemo(() => flattenParamStore(parameterStore), [parameterStore]);

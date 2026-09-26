@@ -18,25 +18,20 @@ interface Props {
 }
 
 export function ToolStats({ toolName }: Props) {
-  const [stats, setStats] = useState<ToolAnalysis | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Last fetch result, tagged with the tool it was for (loading until it matches)
+  const [fetched, setFetched] = useState<{ toolName: string; stats: ToolAnalysis | null; error: string | null } | null>(null);
+  const loading = fetched?.toolName !== toolName;
+  const stats = loading ? null : fetched?.stats ?? null;
+  const error = loading ? null : fetched?.error ?? null;
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setStats(null);
-
     api.getToolAnalysis(toolName)
       .then((data: ToolAnalysis) => {
-        if (!cancelled) setStats(data);
+        if (!cancelled) setFetched({ toolName, stats: data, error: null });
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setFetched({ toolName, stats: null, error: err.message });
       });
 
     return () => {

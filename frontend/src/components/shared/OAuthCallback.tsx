@@ -1,29 +1,25 @@
 import { useEffect, useState } from "react";
 import { PENDING_OAUTH_KEY } from "../../store";
 
+function callbackError(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const errorParam = params.get("error");
+  if (errorParam) return `OAuth error: ${errorParam}`;
+  if (!params.get("code")) return "No authorization code received";
+  return null;
+}
+
 export function OAuthCallback() {
-  const [localError, setLocalError] = useState<string | null>(null);
+  // The callback URL is fixed for this page, so its error can be read once up front
+  const [localError] = useState(callbackError);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
-    const errorParam = params.get("error");
-
-    if (errorParam) {
-      setLocalError(`OAuth error: ${errorParam}`);
-      return;
-    }
-
-    if (!code) {
-      setLocalError("No authorization code received");
-      return;
-    }
-
+    if (localError) return;
     // Stash the full callback URL and redirect to Connect tab.
     // The Connect tab will pick it up and run completeOAuth with progress.
     sessionStorage.setItem(PENDING_OAUTH_KEY, window.location.href);
     window.location.replace("/");
-  }, []);
+  }, [localError]);
 
   if (localError) {
     return (
@@ -32,10 +28,7 @@ export function OAuthCallback() {
           <p className="alarm-text text-lg mb-4">{localError}</p>
           <a
             href="/"
-            className="underline"
-            style={{ color: 'var(--sub-brass)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sub-brass-glow)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sub-brass)')}
+            className="underline text-[var(--sub-brass)] hover:text-[var(--sub-brass-glow)]"
           >
             Return to MCPeriscope
           </a>
