@@ -10,18 +10,7 @@ from types import SimpleNamespace
 from fastmcp import Client
 
 from backend.proxy_builder import _classify_tools, _gen_lookup_consolidation, build_proxy
-
-
-def _tool(name: str, properties: dict | None = None, required: list[str] | None = None) -> SimpleNamespace:
-    return SimpleNamespace(
-        name=name,
-        description="d",
-        inputSchema={
-            "type": "object",
-            "properties": properties or {},
-            "required": required or [],
-        },
-    )
+from backend.tests.conftest import make_tool as _tool
 
 
 def _build(tools, recommendations=(), quick_wins=()) -> str:

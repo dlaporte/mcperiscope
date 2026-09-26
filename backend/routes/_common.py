@@ -6,8 +6,30 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
+from fastapi import HTTPException
+
+from backend import mcp_manager
 from backend.mcp_optimizer.inventory import estimate_tokens, tool_token_budget
 from backend.state import session
+
+# Quick-win types shown only while resources are loaded
+RESOURCE_REC_TYPES = {"resource_context_usage"}
+
+
+def _require_connected() -> None:
+    """400 unless an MCP server is connected (the one guard every route uses)."""
+    if not mcp_manager.is_connected():
+        raise HTTPException(status_code=400, detail="Not connected")
+
+
+def _get_visible_quick_wins() -> list[dict]:
+    """Return quick wins filtered for display, WITHOUT mutating session.quick_wins."""
+    has_loaded_resources = bool(session.loaded_resources)
+    return [
+        qw for qw in session.quick_wins
+        # Skip resource recommendations if no resources are loaded
+        if not (qw.get("type", "") in RESOURCE_REC_TYPES and not has_loaded_resources)
+    ]
 
 
 def _sse(event: str, data: dict) -> str:

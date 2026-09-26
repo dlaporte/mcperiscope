@@ -69,11 +69,3 @@ async def auth_signout(req: SignOutRequest):
         return await mcp_manager.signout(req.url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sign-out failed: {e}")
-
-
-@router.get("/auth/status")
-async def auth_status():
-    return {
-        "connected": mcp_manager.is_connected(),
-        "oauthPending": mcp_manager.is_oauth_pending(),
-    }

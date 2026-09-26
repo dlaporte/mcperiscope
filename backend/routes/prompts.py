@@ -4,14 +4,14 @@ from fastapi import APIRouter, HTTPException
 
 from backend.models import PromptGetRequest
 from backend import mcp_manager
+from backend.routes._common import _require_connected
 
 router = APIRouter()
 
 
 @router.get("/prompts")
 async def list_prompts():
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     try:
         items = await mcp_manager.list_prompts()
         prompts = []
@@ -31,8 +31,7 @@ async def list_prompts():
 
 @router.post("/prompts/get")
 async def get_prompt(req: PromptGetRequest):
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     try:
         result = await mcp_manager.get_prompt(req.name, req.arguments)
         messages = []

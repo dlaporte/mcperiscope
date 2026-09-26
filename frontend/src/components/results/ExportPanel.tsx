@@ -1,79 +1,54 @@
 import { useState } from "react";
+import { requestText } from "../../api/client";
 
 interface DownloadButton {
   label: string;
-  endpoint: string;
+  endpoint: string;  // path under /api
   filename: string;
+  type: string;      // MIME type of the saved file
 }
 
 interface ExportPanelProps {
-  runId?: string | null;
+  runId: string;
 }
 
-function getDownloads(runId?: string | null): DownloadButton[] {
-  if (runId) {
-    const run = `/api/results/runs/${encodeURIComponent(runId)}`;
-    return [
-      {
-        label: "Download Plan",
-        endpoint: `${run}/plan`,
-        filename: "optimization-plan.md",
-      },
-      {
-        label: "Download Report",
-        endpoint: `${run}/report/html`,
-        filename: "optimization-report.html",
-      },
-      {
-        label: "Download Proxy",
-        endpoint: `${run}/proxy`,
-        filename: "proxy_server.py",
-      },
-    ];
-  }
+function getDownloads(runId: string): DownloadButton[] {
+  const run = `/results/runs/${encodeURIComponent(runId)}`;
   return [
     {
       label: "Download Plan",
-      endpoint: "/api/results/plan",
+      endpoint: `${run}/plan`,
       filename: "optimization-plan.md",
+      type: "text/markdown",
     },
     {
       label: "Download Report",
-      endpoint: "/api/results/report/html",
+      endpoint: `${run}/report/html`,
       filename: "optimization-report.html",
+      type: "text/html",
     },
     {
       label: "Download Proxy",
-      endpoint: "/api/results/proxy",
+      endpoint: `${run}/proxy`,
       filename: "proxy_server.py",
+      type: "text/x-python",
     },
   ];
 }
 
-async function triggerDownload(endpoint: string, filename: string) {
-  const res = await fetch(endpoint);
-  if (!res.ok) {
-    const text = await res.text();
-    let detail = text;
-    try {
-      detail = JSON.parse(text).detail || text;
-    } catch {
-      // use raw text
-    }
-    throw new Error(detail);
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+async function triggerDownload(dl: DownloadButton) {
+  const text = await requestText(dl.endpoint);
+  const url = URL.createObjectURL(new Blob([text], { type: dl.type }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = dl.filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
-export function ExportPanel({ runId }: ExportPanelProps = {}) {
+export function ExportPanel({ runId }: ExportPanelProps) {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const DOWNLOADS = getDownloads(runId);
@@ -82,7 +57,7 @@ export function ExportPanel({ runId }: ExportPanelProps = {}) {
     setDownloading(dl.endpoint);
     setError(null);
     try {
-      await triggerDownload(dl.endpoint, dl.filename);
+      await triggerDownload(dl);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);

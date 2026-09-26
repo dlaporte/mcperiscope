@@ -23,15 +23,17 @@ MCPeriscope analyzes tool usage patterns from your evaluation prompts and genera
 **Behavior recommendations** (from trace analysis):
 - **Consolidate** — merge tools that share a common prefix into a single dispatch tool
 - **Rewrite descriptions** — improve tool descriptions for better LLM selection
-- **Trim responses** — reduce verbose tool response data
-- **Batch** — add batch parameters to reduce round-trips
-- **Add defaults** — add default values to reduce required parameters
+- **Trim responses** — shrink an oversized input schema *(plan only)*
+- **Batch** — add batch parameters to reduce round-trips *(plan only)*
+- **Add defaults** — add default values to reduce required parameters *(plan only)*
 
 **Inventory recommendations** (from static analysis):
 - **Trim descriptions** — rewrite verbose tool descriptions more concisely
 - **Remove unused tools** — omit tools never called during evaluation
 - **Consolidate lookups** — merge no-parameter tools into a single `lookup(table)` tool
 - **Condense resources** — use the analyst LLM to shorten markdown resource content
+
+Recommendations marked *plan only* change the MCP server's own code, so the proxy can't apply them. They appear in the remediation plan but don't affect the before/after comparison. The proxy applies exactly the types in `proxy_builder.PROXY_IMPLEMENTED_REC_TYPES`. Condensing resources and rewriting descriptions need an analyst LLM with a usable key; without one, those recommendations are skipped and the run says so.
 
 Select which recommendations to apply, click Optimize, and MCPeriscope assembles a purpose-built MCP proxy server (using [FastMCP](https://github.com/jlowin/fastmcp)) from modular code templates. Proxy generation is near-instant and deterministic — the LLM is only used for description rewriting (one batched call) and resource condensing. The proxy is then started and your evaluation prompts are re-run through it to show a before/after comparison of context usage, tool counts, accuracy, and latency.
 
@@ -42,7 +44,7 @@ Run multiple optimization passes with different recommendation combinations and 
 - **Backend**: Python / FastAPI with SSE streaming for real-time progress
 - **Frontend**: React / TypeScript / Vite / Tailwind CSS / Zustand
 - **LLM Support**: Anthropic (Claude), OpenAI, and any OpenAI-compatible endpoint
-- **MCP Connectivity**: OAuth 2.0, bearer token, and custom header authentication
+- **MCP Connectivity**: OAuth 2.1 (authorization code or client credentials), bearer token, and custom header authentication over Streamable HTTP or legacy SSE
 - **Proxy Generation**: Modular code templates with compile-time validation
 
 ## Getting started
@@ -69,10 +71,25 @@ The backend mints a bearer token at startup and writes it to `~/.mcperiscope/tok
 
 1. Open http://localhost:5173
 2. Go to **Settings** and configure your LLMs — each with its own provider, model, API key, and endpoint
-3. Add your MCP server configurations with URL and authentication method
+   - Pick a known model, or choose **Custom model ID…** to type any model name. For custom endpoints and custom model IDs, set the context window yourself.
+3. Add your MCP server configurations: a URL, a transport, and an authentication method
 4. Assign LLMs to roles:
    - **Agent** — executes evaluation prompts using MCP tools to answer questions
-   - **Analyst** — compares baseline vs optimized answers and rewrites tool descriptions
+   - **Analyst** — handles all the optimization LLM work: it compares baseline and optimized answers (the accuracy figure), rewrites tool descriptions, and condenses resources. The default, **-- Same as Agent --**, reuses the agent's provider, endpoint, and key.
+
+#### MCP server authentication
+
+| Method | Use it when |
+|--------|-------------|
+| **Auto (OAuth if the server requires it)** | Default. Connects without credentials and starts the OAuth flow only if the server asks for it. |
+| **Bearer Token** | The server takes a static `Authorization: Bearer …` token. |
+| **Custom Header** | The server takes an API key in a header you name (e.g. `X-API-Key`). |
+| **OAuth 2.1** | Authorization-code flow with PKCE. Leave the client ID blank for dynamic client registration. Otherwise give a pre-registered client ID (plus an optional secret sent via `post` or `basic`), or a Client ID Metadata Document (CIMD) URL. An optional scope can be set. |
+| **OAuth 2.1 Client Credentials** | Machine-to-machine: MCPeriscope fetches tokens from your token endpoint with a client ID and secret. |
+
+The transport is **Auto** (inferred from the URL), **Streamable HTTP**, or **Legacy SSE**. OAuth tokens are stored under `~/.mcperiscope/tokens`. **Sign out** on the Connect tab deletes a server's stored tokens and, where the server supports it, revokes them upstream.
+
+Over the API only, `{"type": "none"}` connects with no authentication and never starts OAuth. Omitting `auth` gives the UI's **Auto** behavior.
 
 ### Workflow
 
@@ -99,7 +116,8 @@ The backend mints a bearer token at startup and writes it to `~/.mcperiscope/tok
 - MCP and LLM URLs must be `http`/`https`. Link-local, multicast, and reserved IPs are rejected; loopback and private/LAN addresses are allowed (this is a local developer tool).
 - Generated proxy code passes all MCP-supplied identifiers (tool names, parameter names, resource URIs) through a sanitizer so a malicious upstream server cannot inject Python statements.
 - OAuth completion requires the full callback URL (with `state`) — pasting a bare code is no longer accepted.
-- Stored API keys are bound to the `(provider, custom_endpoint)` tuple they were submitted with. Switching destinations without resubmitting the key returns HTTP 400 and clears the stored key.
+- Stored API keys are bound to the `(provider, custom_endpoint)` tuple they were submitted with. Switching destinations without resubmitting the key returns HTTP 400 and clears the stored key. Switching to a stock provider clears the custom endpoint, so the new key never goes to the old host.
+- The analyst key is sent only to the provider and endpoint it was bound to. An analyst that sets its own provider never inherits the agent's custom endpoint. Without an analyst key, the agent's key is reused only when the analyst resolves to exactly the agent's destination.
 
 ## License
 

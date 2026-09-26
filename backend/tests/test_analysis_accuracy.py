@@ -7,7 +7,7 @@ from backend.mcp_optimizer.analyze import (
     find_sequence_patterns,
     group_traces_by_prompt,
 )
-from backend.mcp_optimizer.report import generate_plan_md, generate_report_html, generate_report_md
+from backend.mcp_optimizer.report import generate_plan_md, generate_report_html
 from backend.proxy_builder import mark_plan_only
 from backend.routes.optimize import _baseline_population
 
@@ -104,23 +104,12 @@ def _report_data(**overrides) -> dict:
     return data
 
 
-def test_report_md_comparison_and_notes():
-    md = generate_report_md(_report_data())
-    assert "## 5. Before / After Comparison" in md
-    assert "| Tool Count | 10 | 6 | -4 |" in md
-    assert "| Accuracy | 100.00% | 50.00% | -50.00% |" in md
-    assert "| Total Context | 5,000 | 4,000 | N/A |" in md
-    assert "### Prompt 1: DIFFERENT" in md
-    assert "**Tool calls:** `search`" in md
-    assert "**Analyst:** missed a field" in md
-    assert "**Accuracy:** 50% of proxy answers" in md
-
-
 def test_report_html_comparison_timeline_and_notes():
     out = generate_report_html(_report_data())
     assert "comparison-table" in out and "--baseline" not in out
     assert "missed a field" in out and "DIFFERENT" in out
     assert ">50%<" in out  # Accuracy card from the comparison
+    assert "<td>Tool Count</td><td class='num'>10</td><td class='num'>6</td>" in out
     assert 'title="search"' in out  # timeline for prompt 1 from its prompt_index group
 
 
@@ -132,5 +121,22 @@ def test_report_html_without_comparison():
 
 
 def test_report_skips_deleted_evals():
-    md = generate_report_md(_report_data(prompts=[None, "kept"], traces=[_t("gone", 0), _t("kept_tool", 1)]))
-    assert "gone" not in md and "### Prompt 2" in md and "`kept_tool`" in md
+    out = generate_report_html(_report_data(prompts=[None, "kept"], traces=[_t("gone", 0), _t("kept_tool", 1)]))
+    assert 'title="gone"' not in out and "Prompt 2: kept" in out and 'title="kept_tool"' in out
+
+
+def test_oversized_description_gets_one_rec_not_two():
+    from backend.mcp_optimizer.analyze import run_analysis
+    from backend.mcp_optimizer.inventory import OVERSIZED_TOOL_TOKENS
+    from backend.routes.analysis import generate_quick_wins
+    from backend.tests.conftest import make_tool
+
+    wordy = make_tool("wordy", description="x" * 4 * (OVERSIZED_TOOL_TOKENS + 200))
+    big_schema = make_tool("big_schema", {f"p{i}": {"type": "string", "description": "y" * 40} for i in range(40)})
+    tools = [wordy, big_schema]
+
+    trim_desc = [w for w in generate_quick_wins(tools, "claude-sonnet-4-6") if w["type"] == "trim_descriptions"]
+    assert set(trim_desc[0]["tools"]) == {"wordy", "big_schema"}
+    trim_resp = [r for r in run_analysis(tools, [])["recommendations"] if r["type"] == "trim_response"]
+    # A description rewrite covers "wordy"; only the oversized schema gets the plan-only rec.
+    assert [r["source_tools"] for r in trim_resp] == [["big_schema"]]

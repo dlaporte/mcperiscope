@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { api } from "../../api/client";
 
 function formatMessageContent(content: string): string {
   // Try to pretty-print JSON sections
@@ -68,11 +69,7 @@ export function ContextModal({ evalIndex, totalTokens, onClose }: Props) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/optimize/context/${evalIndex}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to load");
-        return res.json();
-      })
+    api.getEvalContext(evalIndex)
       .then((data: ContextData) => { if (!cancelled) setContext(data); })
       .catch((e) => { if (!cancelled) setError(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });

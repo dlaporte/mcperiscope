@@ -29,12 +29,16 @@ from backend.credentials import (
 )
 from backend.llm_client import LLMClient
 from backend.mcp_optimizer.inventory import estimate_tokens
+from backend.mcp_optimizer.token_store import TOKEN_DIR
 from backend.routes._common import (
+    RESOURCE_REC_TYPES,
     _baseline_figures,
+    _get_visible_quick_wins,
     _baseline_population,
     _live_eval_indices,
     _make_trace_event,
     _menu_tokens,
+    _require_connected,
     _resource_tokens,
     _run_and_store_analysis,
     _sse,
@@ -45,6 +49,9 @@ from backend.url_validation import validate_external_url
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Resource text shorter than this isn't worth an analyst condensing call
+CONDENSE_MIN_CHARS = 500
 
 
 def _sanitized_auth(auth) -> dict | None:
@@ -127,6 +134,12 @@ def _failed_answer_reason(baseline: dict, proxy: dict) -> str | None:
         if not entry.get("answer"):
             return f"{side} run produced no answer"
     return None
+
+
+def _accuracy_counts(analyst_results: list[dict]) -> tuple[int, int]:
+    """(equivalent, compared) analyst verdicts; skipped "error" pairs don't count."""
+    compared = [r for r in analyst_results if r.get("verdict") in ("equivalent", "partial", "different")]
+    return sum(1 for r in compared if r["verdict"] == "equivalent"), len(compared)
 
 
 def _tools_for_llm(tool_objs: Iterable) -> list[dict]:
@@ -319,8 +332,7 @@ async def _run_agent_loop(
 @router.post("/optimize/evaluate")
 async def evaluate(req: EvaluateRequest):
     """Run an evaluation prompt with SSE streaming of tool calls."""
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     if req.custom_endpoint:
         validate_external_url(req.custom_endpoint, label="LLM endpoint")
     bind_primary_credentials(
@@ -509,31 +521,10 @@ async def delete_eval(index: int):
     return {"index": index, "deleted": True}
 
 
-RESOURCE_REC_TYPES = {"resource_context_usage"}
-
-
-def _get_visible_quick_wins() -> list[dict]:
-    """Return quick wins filtered for display, WITHOUT mutating session.quick_wins."""
-    has_loaded_resources = bool(session.loaded_resources)
-
-    filtered = []
-    for qw in session.quick_wins:
-        qw_type = qw.get("type", "")
-
-        # Skip resource recommendations if no resources are loaded
-        if qw_type in RESOURCE_REC_TYPES and not has_loaded_resources:
-            continue
-
-        filtered.append(qw)
-
-    return filtered
-
-
 @router.post("/optimize/analyze")
 async def analyze_tools():
     """Run analysis on tool usage traces to generate recommendations."""
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     # Manual Explore-tab calls (prompt_index None) aren't evaluation traces.
     if not any(t.get("prompt_index") is not None for t in session.traces):
         raise HTTPException(status_code=400, detail="No evaluation traces. Run prompts on the Evaluate tab first.")
@@ -572,10 +563,10 @@ class OptimizeRunRequest(BaseModel):
 async def run_optimize(req: OptimizeRunRequest | None = None):
     """Full optimization pipeline with SSE progress streaming.
 
-    Steps: analyze → generate proxy → start proxy → re-run prompts → compare → results
+    Steps: analyze (+ condense resources) → generate proxy → start proxy →
+    re-run prompts → compare answers → compute comparison
     """
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
 
     if req and req.custom_endpoint:
         validate_external_url(req.custom_endpoint, label="LLM endpoint")
@@ -692,7 +683,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                     try:
                         text = mcp_manager.extract_resource_text(await mcp_manager.read_resource(uri))
 
-                        if len(text) < 500:
+                        if len(text) < CONDENSE_MIN_CHARS:
                             continue  # Too short to bother condensing
 
                         yield _sse("progress", {"phase": "resources", "message": f"Condensing {name}..."})
@@ -715,8 +706,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                             "name": name,
                             "original": text,
                             "condensed": response.text,
-                            "original_tokens": len(text) // 4,
-                            "condensed_tokens": len(response.text) // 4,
+                            "original_tokens": estimate_tokens(text),
+                            "condensed_tokens": estimate_tokens(response.text),
                         }
                     except Exception:
                         logger.warning("Failed to condense resource %s", name, exc_info=True)
@@ -727,7 +718,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         from backend.proxy_builder import build_proxy, batch_rewrite_descriptions
 
         proxy_code = None
-        token_dir = str(Path.home() / '.mcperiscope' / 'tokens')
+        token_dir = str(TOKEN_DIR)
 
         # Step 2a: Batch rewrite descriptions if needed (ONE LLM call)
         rewritten_descriptions: dict[str, str] = {}
@@ -776,7 +767,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             proxy_dir.mkdir(parents=True, exist_ok=True)
             (proxy_dir / "server.py").write_text(proxy_code)
 
-            session.proxy_code = proxy_code
             yield _sse("progress", {
                 "phase": "proxy",
                 "message": (
@@ -862,12 +852,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if not proxy_port:
             proxy_skip_reason = "No proxy available"
             yield _sse("progress", {"phase": "evaluate", "message": f"Skipping proxy evaluation ({proxy_skip_reason})"})
-        elif not session.api_key:
-            proxy_skip_reason = "No API key"
-            yield _sse("progress", {"phase": "evaluate", "message": f"Skipping proxy evaluation ({proxy_skip_reason})"})
-        elif not session.eval_results:
-            proxy_skip_reason = "No evaluation prompts"
-            yield _sse("progress", {"phase": "evaluate", "message": f"Skipping proxy evaluation ({proxy_skip_reason})"})
         else:
             try:
                 llm = LLMClient(session.api_key, session.model, session.provider, session.custom_endpoint)
@@ -930,10 +914,8 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                 logger.exception("Proxy evaluation failed")
                 yield _sse("progress", {"phase": "evaluate", "message": f"Proxy evaluation failed: {e}"})
 
-        # --- Step 6: LLM-as-analyst — compare baseline vs proxy answers ---
+        # --- Step 5: LLM-as-analyst — compare baseline vs proxy answers ---
         analyst_results = []
-        proxy_correct = 0
-        proxy_total = 0
         analyst = None
         if proxy_answers:
             try:
@@ -988,13 +970,11 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
 
                     if "EQUIVALENT" in first_line or "IDENTICAL" in first_line:
                         verdict = "equivalent"
-                        proxy_correct += 1
                     elif "PARTIAL" in first_line:
                         verdict = "partial"
                     else:
                         verdict = "different"
 
-                    proxy_total += 1
                     analyst_results.append({
                         "index": proxy_entry.get("index"),
                         "prompt": prompt,
@@ -1004,14 +984,15 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
                         "proxy_answer": proxy_answer[:2000],
                     })
 
+                correct, compared = _accuracy_counts(analyst_results)
                 yield _sse("progress", {
                     "phase": "analyst",
-                    "message": f"Answer comparison: {proxy_correct}/{proxy_total} equivalent"
+                    "message": f"Answer comparison: {correct}/{compared} equivalent"
                 })
             except Exception as e:
                 yield _sse("progress", {"phase": "analyst", "message": f"Answer comparison failed: {str(e)[:100]}"})
 
-        # --- Step 7: Compute comparison ---
+        # --- Step 6: Compute comparison ---
         yield _sse("progress", {"phase": "compare", "message": "Computing before/after comparison..."})
 
         # Build comparison from measured data. Both sides cover the same
@@ -1027,8 +1008,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         proxy_errors = sum(1 for t in proxy_traces if t.get("error_category"))
 
         # Accuracy from analyst results
-        analyst_correct = sum(1 for r in analyst_results if r.get("verdict") == "equivalent")
-        analyst_total = sum(1 for r in analyst_results if r.get("verdict") in ("equivalent", "partial", "different"))
+        analyst_correct, analyst_total = _accuracy_counts(analyst_results)
         accuracy = analyst_correct / analyst_total if analyst_total > 0 else None
 
         proxy_avg_latency = round(sum(t.get("tool_duration_s", 0) for t in proxy_traces) / num_prompts * 1000, 1) if proxy_traces else None
@@ -1071,8 +1051,6 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
         if proxy_skip_reason:
             comparison["proxy_skip_reason"] = proxy_skip_reason
 
-        session.comparison = comparison
-
         # Create OptimizationRun
         session.run_counter += 1
         run_id = f"run_{session.run_counter}"
@@ -1097,7 +1075,7 @@ async def run_optimize(req: OptimizeRunRequest | None = None):
             "status": "complete",
             "runId": run_id,
             "recommendationCount": len(filtered_recs),
-            "comparison": session.comparison,
+            "comparison": comparison,
             "proxyToolCount": proxy_tool_count,
             "baselineToolCount": len(session.tools),
             "skippedRecs": skipped_recs,
@@ -1136,8 +1114,6 @@ def _start_proxy() -> tuple[int, subprocess.Popen, Path]:
 
     # Set cwd to project root so backend.mcp_optimizer imports work
     project_root = Path(__file__).resolve().parent.parent.parent
-    # Open stderr file — don't use `with` since the subprocess needs the fd to stay open
-    err_fh = open(stderr_file, "w")
 
     # Minimal env: only what Python needs to start up and resolve our package.
     safe_env = {
@@ -1153,17 +1129,18 @@ def _start_proxy() -> tuple[int, subprocess.Popen, Path]:
         if k in os.environ:
             safe_env[k] = os.environ[k]
 
-    process = subprocess.Popen(
-        [sys.executable, str(proxy_file), "--port", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=err_fh,
-        cwd=str(project_root),
-        env=safe_env,
-        start_new_session=True,
-        close_fds=True,
-    )
-    # Close parent's copy — child has its own fd
-    err_fh.close()
+    # The child inherits its own copy of the fd, so the parent's closes on exit
+    # from the `with` — also when Popen raises.
+    with open(stderr_file, "w") as err_fh:
+        process = subprocess.Popen(
+            [sys.executable, str(proxy_file), "--port", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=err_fh,
+            cwd=str(project_root),
+            env=safe_env,
+            start_new_session=True,
+            close_fds=True,
+        )
 
     return port, process, stderr_file
 

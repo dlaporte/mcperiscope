@@ -78,52 +78,56 @@ def test_llm_error_message_no_substring_matching():
     assert msg == "Error: failed to generate response"
 
 
-def _set_creds(monkeypatch, **fields):
+def _set_creds(**fields):
+    """Primary key bound to anthropic, analyst inheriting; `fields` override.
+
+    Needs the clean_session fixture, which restores the session afterwards.
+    """
+    from backend.credentials import clear_analyst_credentials
     from backend.state import session
 
+    clear_analyst_credentials(session)
     defaults = {
         "model": "m", "provider": "anthropic", "custom_endpoint": "",
         "api_key": "primary", "api_key_provider": "anthropic", "api_key_endpoint": "",
-        "analyst_model": "", "analyst_provider": "", "analyst_endpoint": "",
-        "analyst_api_key": "", "analyst_api_key_provider": "", "analyst_api_key_endpoint": "",
     }
     for k, v in {**defaults, **fields}.items():
-        monkeypatch.setattr(session, k, v)
+        setattr(session, k, v)
 
 
-def test_analyst_llm_reuses_primary_key_for_same_destination(monkeypatch):
+def test_analyst_llm_reuses_primary_key_for_same_destination(monkeypatch, clean_session):
     from backend.routes import optimize
 
     seen = []
     monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
-    _set_creds(monkeypatch, analyst_model="analyst-m")
+    _set_creds(analyst_model="analyst-m")
     assert optimize._analyst_llm() is not None
     assert seen == [("primary", "analyst-m", "anthropic", "")]
 
 
-def test_analyst_llm_never_sends_primary_key_elsewhere(monkeypatch):
+def test_analyst_llm_never_sends_primary_key_elsewhere(monkeypatch, clean_session):
     from backend.routes import optimize
 
     monkeypatch.setattr(optimize, "LLMClient", lambda *a: object())
-    _set_creds(monkeypatch, analyst_provider="custom", analyst_endpoint="https://evil.example/v1")
+    _set_creds(analyst_provider="custom", analyst_endpoint="https://evil.example/v1")
     assert optimize._analyst_llm() is None
-    _set_creds(monkeypatch, analyst_provider="openai")
+    _set_creds(analyst_provider="openai")
     assert optimize._analyst_llm() is None
 
 
-def test_analyst_llm_uses_analyst_key(monkeypatch):
+def test_analyst_llm_uses_analyst_key(monkeypatch, clean_session):
     from backend.routes import optimize
 
     seen = []
     monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
-    _set_creds(monkeypatch, analyst_api_key="ak", analyst_provider="custom",
+    _set_creds(analyst_api_key="ak", analyst_provider="custom",
                analyst_endpoint="https://llm.example/v1",
                analyst_api_key_provider="custom", analyst_api_key_endpoint="https://llm.example/v1")
     assert optimize._analyst_llm() is not None
     assert seen == [("ak", "m", "custom", "https://llm.example/v1")]
 
 
-def test_inherited_analyst_key_not_sent_to_repointed_primary(monkeypatch):
+def test_inherited_analyst_key_not_sent_to_repointed_primary(monkeypatch, clean_session):
     """An analyst key bound under "inherit" stays with the destination it was bound to."""
     from backend.credentials import bind_analyst_credentials
     from backend.routes import optimize
@@ -131,32 +135,32 @@ def test_inherited_analyst_key_not_sent_to_repointed_primary(monkeypatch):
 
     seen = []
     monkeypatch.setattr(optimize, "LLMClient", lambda *a: seen.append(a) or object())
-    _set_creds(monkeypatch)
+    _set_creds()
     bind_analyst_credentials(session, api_key="ak", provider="", endpoint="", model=None)
     assert (session.analyst_api_key_provider, session.analyst_api_key_endpoint) == ("anthropic", "")
     assert optimize._analyst_llm() is not None
     assert seen[-1][0] == "ak"
 
     # The caller re-points the primary LLM at their own endpoint.
-    monkeypatch.setattr(session, "provider", "custom")
-    monkeypatch.setattr(session, "custom_endpoint", "https://evil.example/v1")
-    monkeypatch.setattr(session, "api_key", "")
+    setattr(session, "provider", "custom")
+    setattr(session, "custom_endpoint", "https://evil.example/v1")
+    setattr(session, "api_key", "")
     seen.clear()
     assert optimize._analyst_llm() is None
     assert seen == []
 
 
-def test_explicit_analyst_provider_does_not_inherit_primary_endpoint(monkeypatch):
+def test_explicit_analyst_provider_does_not_inherit_primary_endpoint(clean_session):
     from backend.credentials import analyst_destination
     from backend.state import session
 
-    _set_creds(monkeypatch, provider="custom", custom_endpoint="https://llm.example/v1")
+    _set_creds(provider="custom", custom_endpoint="https://llm.example/v1")
     assert analyst_destination(session) == ("custom", "https://llm.example/v1")
-    monkeypatch.setattr(session, "analyst_provider", "openai")
+    setattr(session, "analyst_provider", "openai")
     assert analyst_destination(session) == ("openai", "")
 
 
-def test_total_context_same_definition_both_sides(monkeypatch):
+def test_total_context_same_definition_both_sides(clean_session):
     from types import SimpleNamespace
 
     from backend.routes._common import _baseline_figures, _menu_tokens, _resource_tokens, _total_context
@@ -164,9 +168,9 @@ def test_total_context_same_definition_both_sides(monkeypatch):
 
     tool = SimpleNamespace(name="t", description="d" * 40, inputSchema={"type": "object", "properties": {}})
     trace = {"tool_response_tokens_est": 30, "tool_duration_s": 0.5, "error_category": None}
-    monkeypatch.setattr(session, "tools", [tool])
-    monkeypatch.setattr(session, "loaded_resources", {"r://a": {"tokens": 100}, "r://b": {"tokens": 40}})
-    monkeypatch.setattr(session, "eval_results", [
+    setattr(session, "tools", [tool])
+    setattr(session, "loaded_resources", {"r://a": {"tokens": 100}, "r://b": {"tokens": 40}})
+    setattr(session, "eval_results", [
         {"traceEvents": [trace, trace], "usage": {"peak_context_tokens": 99_999}},
         {"traceEvents": [trace]},
         {"traceEvents": [trace] * 5},  # not included
@@ -182,7 +186,7 @@ def test_total_context_same_definition_both_sides(monkeypatch):
     assert _total_context(10, 25, 5.5) == 40.5
 
 
-def test_manual_calls_excluded_from_error_cost_and_usage(monkeypatch):
+def test_manual_calls_excluded_from_error_cost_and_usage(clean_session):
     from types import SimpleNamespace
 
     from backend.mcp_optimizer.analyze import compute_error_cost
@@ -197,7 +201,7 @@ def test_manual_calls_excluded_from_error_cost_and_usage(monkeypatch):
 
     tools = [SimpleNamespace(name=n, description="d", inputSchema={"type": "object", "properties": {"x": {}}})
              for n in ("a", "b", "c")]
-    monkeypatch.setattr(session, "traces", traces)
+    setattr(session, "traces", traces)
     wins = generate_quick_wins(tools, "claude-sonnet-4-6")
     unused = next(w for w in wins if w["type"] == "remove_unused")
     assert unused["tools"] == ["b", "c"]

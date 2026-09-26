@@ -1,23 +1,46 @@
 const BASE = "/api";
 
+// Error message of a failed response: FastAPI's `detail`, else the status
+async function errorDetail(res: Response): Promise<string> {
+  try {
+    const { detail } = await res.json();
+    if (detail) return typeof detail === "string" ? detail : JSON.stringify(detail);
+  } catch { /* not JSON */ }
+  return `Request failed: ${res.status} ${res.statusText}`.trim();
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  let data: any;
+  if (!res.ok) throw new Error(await errorDetail(res));
   try {
-    data = await res.json();
+    return await res.json();
   } catch {
-    if (!res.ok) {
-      throw new Error(`Request failed: ${res.status} ${res.statusText}`);
-    }
     throw new Error("Invalid response from server");
   }
-  if (!res.ok) {
-    throw new Error(data.error || data.detail || `Request failed: ${res.status}`);
+}
+
+// GET a text endpoint (markdown plan, HTML report, proxy source)
+export async function requestText(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.text();
+}
+
+// POST JSON to a `text/event-stream` endpoint; the caller reads the stream
+export async function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok && !res.headers.get("content-type")?.includes("text/event-stream")) {
+    throw new Error(await errorDetail(res));
   }
-  return data;
+  return res;
 }
 
 export interface AuthConfig {
@@ -33,18 +56,29 @@ export interface AuthConfig {
   token_endpoint?: string;
 }
 
-export interface ConnectResult {
+interface ConnectResult {
   status: "connected" | "oauth_redirect";
   serverInfo?: unknown;
   authorizationUrl?: string;
 }
 
+interface ConnectRequest {
+  url: string;
+  auth?: AuthConfig;
+  protocol?: "auto" | "http" | "sse";
+  model?: string;
+  provider?: string;
+  api_key?: string;
+  custom_endpoint?: string;
+  custom_context_window?: number;
+}
+
 export const api = {
   // === Connection ===
-  connect: (url: string, auth?: AuthConfig, model?: string, provider?: string, apiKey?: string, customEndpoint?: string, customContextWindow?: number, protocol?: string) =>
+  connect: (req: ConnectRequest) =>
     request<ConnectResult>("/connect", {
       method: "POST",
-      body: JSON.stringify({ url, auth, model: model || undefined, provider: provider || undefined, api_key: apiKey || undefined, custom_endpoint: customEndpoint, custom_context_window: customContextWindow || undefined, protocol: protocol && protocol !== "auto" ? protocol : undefined }),
+      body: JSON.stringify({ ...req, protocol: req.protocol !== "auto" ? req.protocol : undefined }),
     }),
 
   disconnect: () =>
@@ -100,7 +134,13 @@ export const api = {
   getInventory: () =>
     request<unknown>("/analysis/inventory"),
 
+  getToolAnalysis: (toolName: string) =>
+    request<any>(`/analysis/tool/${encodeURIComponent(toolName)}`),
+
   // === Optimize ===
+  getEvalContext: (backendIndex: number) =>
+    request<any>(`/optimize/context/${backendIndex}`),
+
   analyzeTools: () =>
     request<{ recommendations: any[]; quickWins: any[] }>("/optimize/analyze", {
       method: "POST",

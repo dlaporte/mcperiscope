@@ -7,4 +7,6 @@ __pycache__/
 .env
 .claude/
 .pytest_cache/
-
+.ruff_cache/
+.playwright-mcp/
+docs/superpowers/

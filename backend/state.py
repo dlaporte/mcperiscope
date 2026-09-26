@@ -76,8 +76,6 @@ class Session:
     analyst_api_key_endpoint: str = ""
     loaded_resources: dict[str, dict] = field(default_factory=dict)  # uri → {name, content, tokens}
     eval_results: list[dict] = field(default_factory=list)
-    comparison: dict | None = None
-    proxy_code: str | None = None
     proxy_process: Popen | None = None
     quick_wins: list[dict] = field(default_factory=list)
     optimization_runs: list[OptimizationRun] = field(default_factory=list)
@@ -105,8 +103,6 @@ class Session:
         self.prompts = []
         self.loaded_resources = {}
         self.eval_results = []
-        self.comparison = None
-        self.proxy_code = None
         self.quick_wins = []
         self.optimization_runs = []
         self.run_counter = 0

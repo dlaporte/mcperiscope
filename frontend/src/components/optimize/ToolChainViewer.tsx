@@ -2,6 +2,7 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useStore } from "../../store";
+import type { EvalResult } from "../../store";
 import { estimateTokens } from "../../utils/tokens";
 
 function ToolLink({ name, args }: { name: string; args?: Record<string, unknown> }) {
@@ -18,13 +19,12 @@ function ToolLink({ name, args }: { name: string; args?: Record<string, unknown>
   );
 }
 
-interface ToolChainStep {
-  step: number;
-  tool: string;
-  input: Record<string, unknown>;
-  output: string;
-  duration: number;
-  error: string | null;
+type ToolChainStep = EvalResult["toolChain"][number];
+
+// Estimated tokens of a step's input and output
+function stepTokens(step: ToolChainStep): number {
+  const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
+  return estimateTokens(inputStr) + estimateTokens(step.output ?? "");
 }
 
 function formatData(data: unknown): string {
@@ -130,12 +130,7 @@ function StepCard({ step, isLast }: { step: ToolChainStep; isLast: boolean }) {
                 className="text-xs px-2 py-0.5 rounded-full"
                 style={{ backgroundColor: 'var(--sub-panel-light)', color: 'var(--sub-text)' }}
               >
-                {(() => {
-                  const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
-                  const outputStr = step.output ?? "";
-                  const tokens = estimateTokens(inputStr) + estimateTokens(outputStr);
-                  return `${tokens.toLocaleString()} tok`;
-                })()}
+                {stepTokens(step).toLocaleString()} tok
               </span>
             </div>
           )}
@@ -167,7 +162,7 @@ export function ToolChainViewer() {
   }
 
   const evalResult = evalResults[selectedEvalIndex];
-  const toolChain: ToolChainStep[] = evalResult.toolChain;
+  const toolChain = evalResult.toolChain;
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
@@ -230,10 +225,7 @@ export function ToolChainViewer() {
               >
                 {(() => {
                   let total = estimateTokens(evalResult.prompt ?? "");
-                  for (const step of toolChain) {
-                    const inputStr = typeof step.input === "string" ? step.input : JSON.stringify(step.input ?? {});
-                    total += estimateTokens(inputStr) + estimateTokens(step.output ?? "");
-                  }
+                  for (const step of toolChain) total += stepTokens(step);
                   total += estimateTokens(evalResult.answer ?? "");
                   return `~${total.toLocaleString()} tok`;
                 })()}

@@ -17,11 +17,12 @@ from typing import Any
 from mcp.types import Tool
 
 from backend.mcp_optimizer.inventory import (
-    SIMILAR_NAME_MAX_DISTANCE,
+    OVERSIZED_TOOL_TOKENS,
     _CAMEL_BOUNDARY,
     _extract_prefix,
     estimate_tokens,
-    levenshtein,
+    find_name_clusters,
+    similar_name_distance,
     tool_token_budget,
 )
 
@@ -44,27 +45,16 @@ def analyze_token_budget(tools: list[Tool]) -> list[dict[str, Any]]:
 
 def analyze_name_clarity(tools: list[Tool]) -> dict[str, Any]:
     """Prefix clusters, similar-name Levenshtein pairs, and ambiguous naming flags."""
-    # Prefix clusters
-    prefix_groups: dict[str, list[str]] = {}
-    for tool in tools:
-        prefix = _extract_prefix(tool.name)
-        prefix_groups.setdefault(prefix, []).append(tool.name)
-
     clusters = [
-        {"prefix": prefix, "tools": sorted(names), "count": len(names)}
-        for prefix, names in prefix_groups.items()
-        if len(names) >= 2
+        {"prefix": c.prefix, "tools": c.tools, "count": len(c.tools)}
+        for c in find_name_clusters(tools)
     ]
-    clusters.sort(key=lambda c: (-c["count"], c["prefix"]))
 
     # Levenshtein pairs within the similarity threshold
     similar_pairs: list[dict[str, Any]] = []
-    names = [t.name for t in tools]
-    for a, b in combinations(names, 2):
-        if abs(len(a) - len(b)) > SIMILAR_NAME_MAX_DISTANCE:
-            continue
-        dist = levenshtein(a, b)
-        if 0 < dist <= SIMILAR_NAME_MAX_DISTANCE:
+    for a, b in combinations([t.name for t in tools], 2):
+        dist = similar_name_distance(a, b)
+        if dist is not None:
             similar_pairs.append({"tool_a": a, "tool_b": b, "distance": dist})
     similar_pairs.sort(key=lambda p: (p["distance"], p["tool_a"]))
 
@@ -619,9 +609,6 @@ def _contains_subsequence(sequence: list[str], subseq: list[str]) -> bool:
 # Recommendation generation
 # ---------------------------------------------------------------------------
 
-# Menu tokens a tool should fit in; larger tools get a trim_response rec.
-_TRIM_TARGET_TOKENS = 400
-
 
 def generate_recommendations(
     static: dict[str, Any],
@@ -630,15 +617,9 @@ def generate_recommendations(
 ) -> list[dict[str, Any]]:
     """Combine all analysis results into a prioritised list of recommendations."""
     recommendations: list[dict[str, Any]] = []
-    rec_id = 0
 
     tool_map = {t.name: t for t in tools}
     budget_by_name = {b["name"]: b for b in static.get("token_budget", [])}
-
-    def _next_id() -> str:
-        nonlocal rec_id
-        rec_id += 1
-        return f"rec_{rec_id:03d}"
 
     # --- From name clarity: prefix clusters with 4+ tools ---
     for cluster in static.get("name_clarity", {}).get("prefix_clusters", []):
@@ -649,7 +630,6 @@ def generate_recommendations(
                 for n in source_tools[1:]
             )
             recommendations.append({
-                "id": _next_id(),
                 "type": "consolidate",
                 "impact": _impact_level(savings),
                 "source_tools": source_tools,
@@ -674,7 +654,6 @@ def generate_recommendations(
     for desc_info in static.get("descriptions", []):
         if desc_info["overall_score"] < 4.0 and desc_info.get("issues"):
             recommendations.append({
-                "id": _next_id(),
                 "type": "rewrite_description",
                 "impact": "MEDIUM",
                 "source_tools": [desc_info["name"]],
@@ -703,7 +682,6 @@ def generate_recommendations(
             for n in source_tools[1:]  # keep 1 tool's worth
         )
         recommendations.append({
-            "id": _next_id(),
             "type": "consolidate",
             "impact": _impact_level(savings),
             "source_tools": source_tools,
@@ -728,15 +706,17 @@ def generate_recommendations(
             ),
         })
 
-    # --- From token budget: oversized tools (top 5 only) ---
+    # --- From token budget: oversized schemas (top 5 only) ---
+    # Oversized tools as a whole get the trim_descriptions quick win, which
+    # rewrites descriptions; this plan-only rec covers what that can't fix:
+    # a schema that alone exceeds the oversized threshold.
     oversized = [
         b for b in static.get("token_budget", [])
-        if b["total_tokens"] > _TRIM_TARGET_TOKENS
+        if b["schema_tokens"] > OVERSIZED_TOOL_TOKENS
     ]
     for budget in oversized[:5]:
-            trim_savings = max(0, budget["total_tokens"] - _TRIM_TARGET_TOKENS)
+            trim_savings = budget["schema_tokens"] - OVERSIZED_TOOL_TOKENS
             recommendations.append({
-                "id": _next_id(),
                 "type": "trim_response",
                 "impact": "MEDIUM",
                 "source_tools": [budget["name"]],
@@ -749,7 +729,7 @@ def generate_recommendations(
                     f"description: {budget['description_tokens']})"
                 ),
                 "description": (
-                    f"Reduce schema/description size for '{budget['name']}' "
+                    f"Reduce the input schema size of '{budget['name']}' "
                     f"to save ~{trim_savings} tokens"
                 ),
             })
@@ -765,7 +745,6 @@ def generate_recommendations(
                 for n in source_tools[1:]
             )
             recommendations.append({
-                "id": _next_id(),
                 "type": "consolidate",
                 "impact": _impact_level(savings),
                 "source_tools": source_tools,
@@ -794,7 +773,6 @@ def generate_recommendations(
                 tool_map[hop["source_tool"]].inputSchema
             )) if hop["source_tool"] in tool_map and tool_map[hop["source_tool"]].inputSchema else 0
             recommendations.append({
-                "id": _next_id(),
                 "type": "batch",
                 "impact": _impact_level(savings),
                 "source_tools": source_tools,
@@ -816,7 +794,6 @@ def generate_recommendations(
     for redundancy in trace_analysis.get("redundant_calls", []):
         if redundancy["total_redundant_calls"] >= 2:
             recommendations.append({
-                "id": _next_id(),
                 "type": "add_defaults",
                 "impact": _impact_level(redundancy["total_wasted_tokens"]),
                 "source_tools": [redundancy["tool_name"]],
@@ -839,7 +816,6 @@ def generate_recommendations(
     for confusion in trace_analysis.get("confusion_pairs", []):
         if confusion["occurrences"] >= 2:
             recommendations.append({
-                "id": _next_id(),
                 "type": "rewrite_description",
                 "impact": "HIGH",
                 "source_tools": [confusion["confused_tool"], confusion["correct_tool"]],
@@ -862,7 +838,6 @@ def generate_recommendations(
     for tool_error in error_cost.get("by_tool", []):
         if tool_error.get("error_count", 0) >= 3:
             recommendations.append({
-                "id": _next_id(),
                 "type": "rewrite_description",
                 "impact": "MEDIUM",
                 "source_tools": [tool_error["tool"]],

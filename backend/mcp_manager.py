@@ -9,14 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
 from mcp.types import Tool
 from backend.mcp_optimizer.inventory import analyze_inventory, analysis_to_dict
 from backend.mcp_optimizer.proxy_runtime import StaticHeaderAuth
-from backend.mcp_optimizer.token_store import FileKeyValueStore
+from backend.mcp_optimizer.token_store import TOKEN_DIR, FileKeyValueStore
 
 from backend.auth.client_credentials import ClientCredentialsAuth
 from backend.auth.oauth import WebOAuth
@@ -24,8 +23,6 @@ from backend.state import session
 from backend.models import AuthConfig
 
 logger = logging.getLogger(__name__)
-
-TOKEN_DIR = Path.home() / ".mcperiscope" / "tokens"
 
 # Global state
 _client: Client | None = None
@@ -162,7 +159,7 @@ async def connect(
 
     _client = _build_client(url, _auth, auth_config, protocol)
 
-    # Try connecting — if OAuth is needed, HeadlessOAuth captures the auth URL
+    # Try connecting — if OAuth is needed, WebOAuth captures the auth URL
     connect_task = asyncio.create_task(_do_connect(_client))
     connect_task.add_done_callback(_log_connect_failure)
     _connect_task = connect_task
@@ -319,11 +316,6 @@ def is_oauth_pending() -> bool:
     return _auth is not None and _auth.pending_auth_url is not None and not is_connected()
 
 
-def get_oauth_url() -> str | None:
-    """Get the pending OAuth authorization URL."""
-    return _auth.pending_auth_url if _auth else None
-
-
 def server_info() -> dict | None:
     if not is_connected():
         return None
@@ -342,12 +334,6 @@ async def list_resources() -> list:
         raise RuntimeError("Not connected")
     result = await _client.list_resources()
     return result if isinstance(result, list) else list(getattr(result, "resources", []))
-
-
-async def list_resource_templates():
-    if not _client:
-        raise RuntimeError("Not connected")
-    return await _client.list_resource_templates()
 
 
 async def read_resource(uri: str):
@@ -373,10 +359,11 @@ def extract_resource_text(result) -> str:
     )
 
 
-async def list_prompts():
+async def list_prompts() -> list:
     if not _client:
         raise RuntimeError("Not connected")
-    return await _client.list_prompts()
+    result = await _client.list_prompts()
+    return result if isinstance(result, list) else list(getattr(result, "prompts", []))
 
 
 async def get_prompt(name: str, arguments: dict[str, str] | None = None):

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from backend.mcp_optimizer.connections import HeadlessOAuth
+from backend.mcp_optimizer.headless_oauth import HeadlessOAuth
 
 logger = logging.getLogger(__name__)
 

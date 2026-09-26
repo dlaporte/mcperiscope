@@ -61,15 +61,11 @@ class UpstreamClient:
                 client_auth=self._auth_config.get("client_auth") or "post",
             )
         # oauth (default): reuse existing OAuth tokens from the token store
-        from backend.mcp_optimizer.token_store import FileKeyValueStore
+        from backend.mcp_optimizer.token_store import TOKEN_DIR, FileKeyValueStore
         from fastmcp.client.auth import OAuth
         from pathlib import Path
 
-        token_dir = (
-            Path(self._token_dir)
-            if self._token_dir
-            else Path.home() / ".mcperiscope" / "tokens"
-        )
+        token_dir = Path(self._token_dir) if self._token_dir else TOKEN_DIR
         store = FileKeyValueStore(token_dir)
         return OAuth(client_name=self._client_name, token_storage=store)
 

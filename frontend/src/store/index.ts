@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "../api/client";
+import { api, postSSE, requestText } from "../api/client";
 import type { AuthConfig } from "../api/client";
 import { KNOWN_MODELS, MODEL_CONTEXT } from "../config/models";
 import { estimateTokens } from "../utils/tokens";
@@ -11,7 +11,7 @@ export function generateId(): string {
 
 type ItemType = "tool" | "resource" | "prompt";
 type AuthMethod = "none" | "bearer" | "header" | "oauth" | "oauth_client_creds";
-export type MCPProtocol = "auto" | "http" | "sse";
+type MCPProtocol = "auto" | "http" | "sse";
 
 interface Selection {
   type: ItemType;
@@ -130,7 +130,6 @@ interface AppState {
   removeLLMConfig: (id: string) => void;
   setPrimaryLLM: (id: string) => void;
   setAnalystLLM: (id: string) => void;
-  getAnalystConfig: () => LLMConfig | null;
 
   // MCP server configurations
   mcpConfigs: MCPServerConfig[];
@@ -283,7 +282,9 @@ function loadAliases(): Record<string, string> {
 }
 
 function saveAliases(aliases: Record<string, string>) {
-  localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases));
+  try {
+    localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases));
+  } catch { /* ignore */ }
 }
 
 function loadRemovedAliases(): Set<string> {
@@ -295,7 +296,9 @@ function loadRemovedAliases(): Set<string> {
 }
 
 function saveRemovedAliases(removed: Set<string>) {
-  localStorage.setItem(REMOVED_ALIASES_KEY, JSON.stringify([...removed]));
+  try {
+    localStorage.setItem(REMOVED_ALIASES_KEY, JSON.stringify([...removed]));
+  } catch { /* ignore */ }
 }
 
 function loadParamStore(): Record<string, ParamEntry[]> {
@@ -349,11 +352,7 @@ function harvestResultInto(store: Record<string, ParamEntry[]>, result: any, sou
   const contents = result.content ?? result.contents;
   if (Array.isArray(contents)) {
     for (const block of contents) {
-      if (block.type === "text" && typeof block.text === "string") {
-        textBlocks.push(block.text);
-      } else if (typeof block.text === "string") {
-        textBlocks.push(block.text);
-      }
+      if (typeof block.text === "string") textBlocks.push(block.text);
     }
   }
   if (result.messages && Array.isArray(result.messages)) {
@@ -443,6 +442,11 @@ export function selectPrimaryLLM(state: Pick<AppState, "llmConfigs" | "primaryLL
   return state.llmConfigs.find((c) => c.id === state.primaryLLM);
 }
 
+// The analyst LLM config; undefined means "-- Same as Agent --"
+export function selectAnalystLLM(state: Pick<AppState, "llmConfigs" | "analystLLM">): LLMConfig | undefined {
+  return state.analystLLM ? state.llmConfigs.find((c) => c.id === state.analystLLM) : undefined;
+}
+
 // Context window for gauges: the current primary LLM's, else its known model size,
 // else the one reported at connect time, else the 128k fallback the backend also uses.
 export function selectContextWindow(state: Pick<AppState, "inventory" | "llmConfigs" | "primaryLLM">): number {
@@ -465,6 +469,20 @@ export function llmRequestFields(config: LLMConfig | null | undefined) {
       : undefined,
     custom_context_window: config?.contextWindow || undefined,
   };
+}
+
+// Token cost of the resources loaded into the evaluation context
+export function selectLoadedResourceTokens(state: Pick<AppState, "loadedResources">): number {
+  return state.loadedResources.reduce((sum, r) => sum + r.tokens, 0);
+}
+
+// API-reported peak context of the most recent eval that has usage data, else 0
+export function selectLatestPeakContext(state: Pick<AppState, "evalResults">): number {
+  for (let i = state.evalResults.length - 1; i >= 0; i--) {
+    const peak = state.evalResults[i]?.usage?.peak_context_tokens;
+    if (peak) return peak;
+  }
+  return 0;
 }
 
 // Backend session indices of the evals checked for optimization. Evals that never
@@ -625,6 +643,21 @@ async function readSSE(
   }
 }
 
+// If the backend reports a live connection, adopt it; returns whether it did
+async function adoptBackendConnection(set: SetState): Promise<boolean> {
+  const status = await api.status();
+  if (!status.connected) return false;
+  set({
+    connected: true,
+    connecting: false,
+    serverInfo: status.serverInfo,
+    connectProgress: null,
+    oauthPending: false,
+  });
+  await fetchCapabilities(set);
+  return true;
+}
+
 async function consumeConnectSSE(
   response: Response,
   set: SetState,
@@ -633,9 +666,6 @@ async function consumeConnectSSE(
   await readSSE(response, async (event, data) => {
     if (event === "progress") {
       set({ connectProgress: data.message });
-    } else if (event === "oauth_redirect") {
-      set({ connecting: false, oauthPending: true, connectProgress: null });
-      window.location.href = data.authorizationUrl;
     } else if (event === "done") {
       set({
         connected: true,
@@ -902,8 +932,7 @@ export const useStore = create<AppState>((set, get) => ({
         planMarkdown: "",
       });
       // Each run has its own plan; the global plan is only the latest run's
-      fetch(`/api/results/runs/${encodeURIComponent(runId)}/plan`)
-        .then((r) => (r.ok ? r.text() : ""))
+      requestText(`/results/runs/${encodeURIComponent(runId)}/plan`)
         .then((text) => {
           if (get().selectedRunId === runId) set({ planMarkdown: text });
         })
@@ -932,41 +961,25 @@ export const useStore = create<AppState>((set, get) => ({
     const stream = beginStream();
     try {
       const state = get();
-      const analystConfig = state.getAnalystConfig();
+      const analystConfig = selectAnalystLLM(state);
       const analyst = llmRequestFields(analystConfig);
-      const included = includedBackendIndices(state);
-      const response = await fetch("/api/optimize/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          included_indices: included,
-          enabled_rec_ids: [...state.enabledRecIds],
-          ...llmRequestFields(selectPrimaryLLM(state)),
-          // "-- Same as Agent --": the backend drops any analyst settings it holds
-          ...(analystConfig
-            ? {
-                analyst_model: analyst.model,
-                analyst_provider: analyst.provider,
-                analyst_api_key: analyst.api_key,
-                analyst_endpoint: analyst.custom_endpoint,
-              }
-            : { analyst_inherit: true }),
-          disabled_tools: [...state.disabledTools],
-          disabled_resources: [...state.disabledResources],
-          disabled_prompts: [...state.disabledPrompts],
-        }),
-        signal: stream.signal,
-      });
-
-      if (!response.ok) {
-        let detail = response.statusText;
-        try {
-          const body = await response.text();
-          const parsed = JSON.parse(body);
-          detail = parsed.detail || detail;
-        } catch { /* use statusText */ }
-        throw new Error(detail);
-      }
+      const response = await postSSE("/optimize/run", {
+        included_indices: includedBackendIndices(state),
+        enabled_rec_ids: [...state.enabledRecIds],
+        ...llmRequestFields(selectPrimaryLLM(state)),
+        // "-- Same as Agent --": the backend drops any analyst settings it holds
+        ...(analystConfig
+          ? {
+              analyst_model: analyst.model,
+              analyst_provider: analyst.provider,
+              analyst_api_key: analyst.api_key,
+              analyst_endpoint: analyst.custom_endpoint,
+            }
+          : { analyst_inherit: true }),
+        disabled_tools: [...state.disabledTools],
+        disabled_resources: [...state.disabledResources],
+        disabled_prompts: [...state.disabledPrompts],
+      }, stream.signal);
 
       await readSSE(response, async (event, data) => {
         if (!stream.isCurrent()) return;
@@ -1113,11 +1126,6 @@ export const useStore = create<AppState>((set, get) => ({
     set({ mcpConfigs: configs });
   },
 
-  getAnalystConfig: () => {
-    const { analystLLM, llmConfigs } = get();
-    return llmConfigs.find((c) => c.id === analystLLM) || null;
-  },
-
   setMaxToolRounds: (n) => {
     lsSet("maxToolRounds", String(n));
     set({ maxToolRounds: n });
@@ -1134,16 +1142,12 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const state = get();
       const authConfig = buildAuthConfig(config);
-      const llm = llmRequestFields(selectPrimaryLLM(state));
-      const res = await api.connect(
-        config.url, authConfig,
-        llm.model,
-        llm.provider,
-        llm.api_key,
-        llm.custom_endpoint,
-        llm.custom_context_window,
-        config.protocol,
-      );
+      const res = await api.connect({
+        url: config.url,
+        auth: authConfig,
+        protocol: config.protocol,
+        ...llmRequestFields(selectPrimaryLLM(state)),
+      });
 
       if (res.status === "oauth_redirect" && res.authorizationUrl) {
         set({ connecting: false, oauthPending: true });
@@ -1163,36 +1167,13 @@ export const useStore = create<AppState>((set, get) => ({
   completeOAuth: async (callbackUrl: string) => {
     set({ connecting: true, error: null, connectProgress: "Starting authentication..." });
     try {
-      const response = await fetch("/api/auth/callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          callback_url: callbackUrl,
-          ...llmRequestFields(selectPrimaryLLM(get())),
-        }),
+      const response = await postSSE("/auth/callback", {
+        callback_url: callbackUrl,
+        ...llmRequestFields(selectPrimaryLLM(get())),
       });
-
-      if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
-        const err = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(err.detail || response.statusText);
-      }
-
       await consumeConnectSSE(response, set, get);
-
-      // Fallback: if SSE completed but we're still not connected, poll status
-      if (!get().connected) {
-        const statusRes = await api.status();
-        if (statusRes.connected) {
-          set({
-            connected: true,
-            connecting: false,
-            serverInfo: statusRes.serverInfo,
-            connectProgress: null,
-            oauthPending: false,
-          });
-          await fetchCapabilities(set);
-        }
-      }
+      // Fallback: the stream ended without "done", but the backend may have connected
+      if (!get().connected) await adoptBackendConnection(set);
       if (!get().connected) {
         saveConnectedConfigId(null);
         set({ connectedConfigId: null });
@@ -1201,18 +1182,7 @@ export const useStore = create<AppState>((set, get) => ({
       const message = err instanceof Error ? err.message : String(err);
       // Check if backend actually connected despite the error
       try {
-        const statusRes = await api.status();
-        if (statusRes.connected) {
-          set({
-            connected: true,
-            connecting: false,
-            serverInfo: statusRes.serverInfo,
-            connectProgress: null,
-            oauthPending: false,
-          });
-          await fetchCapabilities(set);
-          return;
-        }
+        if (await adoptBackendConnection(set)) return;
       } catch { /* ignore */ }
       saveConnectedConfigId(null);
       set({ connecting: false, oauthPending: false, error: message, connectProgress: null, connectedConfigId: null });
@@ -1405,22 +1375,12 @@ export const useStore = create<AppState>((set, get) => ({
     const stream = beginStream();
     try {
       const state = get();
-      const response = await fetch("/api/optimize/evaluate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          ...llmRequestFields(selectPrimaryLLM(state)),
-          max_tool_rounds: state.maxToolRounds || undefined,
-          max_tokens: state.maxTokensPerResponse || undefined,
-        }),
-        signal: stream.signal,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(err.detail || response.statusText);
-      }
+      const response = await postSSE("/optimize/evaluate", {
+        prompt,
+        ...llmRequestFields(selectPrimaryLLM(state)),
+        max_tool_rounds: state.maxToolRounds || undefined,
+        max_tokens: state.maxTokensPerResponse || undefined,
+      }, stream.signal);
 
       await readSSE(response, (event, data) => {
         if (!stream.isCurrent()) return;

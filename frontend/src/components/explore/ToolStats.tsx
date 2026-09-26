@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { api } from "../../api/client";
 
 interface ToolAnalysis {
   name: string;
@@ -27,15 +28,8 @@ export function ToolStats({ toolName }: Props) {
     setError(null);
     setStats(null);
 
-    fetch(`/api/analysis/tool/${encodeURIComponent(toolName)}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || body.detail || `HTTP ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data) => {
+    api.getToolAnalysis(toolName)
+      .then((data: ToolAnalysis) => {
         if (!cancelled) setStats(data);
       })
       .catch((err) => {

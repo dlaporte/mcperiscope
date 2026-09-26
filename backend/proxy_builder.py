@@ -580,7 +580,7 @@ def build_proxy(
     # Single namespace for all generated module-level identifiers, seeded with
     # names already used by the header (UPSTREAM_URL, TOKEN_DIR, upstream, lifespan, mcp).
     used_idents: set[str] = {
-        "UPSTREAM_URL", "TOKEN_DIR", "AUTH_CONFIG", "upstream", "lifespan", "mcp", "LOOKUP_TOOLS",
+        "UPSTREAM_URL", "TOKEN_DIR", "AUTH_CONFIG", "upstream", "lifespan", "mcp",
         "argparse", "json", "asynccontextmanager", "FastMCP", "UpstreamClient",
     }
 

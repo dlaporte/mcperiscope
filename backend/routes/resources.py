@@ -4,11 +4,11 @@ import logging
 import os
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from backend.models import ResourceReadRequest
 from backend import mcp_manager
 from backend.mcp_optimizer.inventory import estimate_tokens
+from backend.routes._common import _require_connected
 from backend.state import session
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,7 @@ def _max_total_loaded_bytes() -> int:
 
 @router.get("/resources")
 async def list_resources():
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     try:
         resources = []
         for r in await mcp_manager.list_resources():
@@ -66,8 +65,7 @@ def _guard_size(text: str | None, label: str) -> None:
 
 @router.post("/resources/read")
 async def read_resource(req: ResourceReadRequest):
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     try:
         result = await mcp_manager.read_resource(req.uri)
         contents = []
@@ -91,52 +89,19 @@ async def read_resource(req: ResourceReadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/resource-templates")
-async def list_resource_templates():
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
-    try:
-        items = await mcp_manager.list_resource_templates()
-        if not isinstance(items, list):
-            items = getattr(items, "resource_templates", [items])
-        templates = []
-        for t in items:
-            templates.append({
-                "uriTemplate": str(getattr(t, "uriTemplate", "")),
-                "name": getattr(t, "name", None),
-                "description": getattr(t, "description", None),
-            })
-        return {"resourceTemplates": templates}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-class LoadResourceRequest(BaseModel):
-    uri: str
-
-
 @router.post("/resources/load")
-async def load_resource(req: LoadResourceRequest):
+async def load_resource(req: ResourceReadRequest):
     """Load a resource into the evaluation context.
 
     Enforces caps so a malicious / verbose MCP server can't blow up the
     process memory or the LLM context budget.
     """
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
-    per_cap = _max_per_resource_bytes()
+    _require_connected()
     total_cap = _max_total_loaded_bytes()
     try:
         result = await mcp_manager.read_resource(req.uri)
         text = mcp_manager.extract_resource_text(result)
-        if len(text.encode("utf-8", errors="ignore")) > per_cap:
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    f"Resource {req.uri} exceeds the per-resource limit "
-                    f"({per_cap} bytes). Override with MCPERISCOPE_MAX_RESOURCE_BYTES."
-                ),
-            )
+        _guard_size(text, f"Resource {req.uri}")
         already_loaded = sum(
             len(r.get("content", "").encode("utf-8", errors="ignore"))
             for uri, r in session.loaded_resources.items()
@@ -176,18 +141,7 @@ async def load_resource(req: LoadResourceRequest):
 
 
 @router.post("/resources/unload")
-async def unload_resource(req: LoadResourceRequest):
+async def unload_resource(req: ResourceReadRequest):
     """Remove a resource from the evaluation context."""
     session.loaded_resources.pop(req.uri, None)
     return {"loaded": False, "uri": req.uri}
-
-
-@router.get("/resources/loaded")
-async def get_loaded_resources():
-    """Get all currently loaded resources."""
-    return {
-        "resources": [
-            {"uri": uri, "name": r["name"], "tokens": r["tokens"]}
-            for uri, r in session.loaded_resources.items()
-        ]
-    }

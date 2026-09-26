@@ -824,6 +824,9 @@ function ClearCredentialsSection() {
     const SENSITIVE = [
       `${LS_PREFIX}llmConfigs`,
       `${LS_PREFIX}mcpConfigs`,
+      // IDs of the deleted LLM configs; left behind they'd point at nothing
+      `${LS_PREFIX}primaryLLM`,
+      `${LS_PREFIX}analystLLM`,
       `${LS_PREFIX}apiKey`,
       `${LS_PREFIX}authToken`,
       `${LS_PREFIX}headerName`,

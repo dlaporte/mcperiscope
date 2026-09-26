@@ -22,6 +22,9 @@ from anyio import Path as AsyncPath
 
 logger = logging.getLogger(__name__)
 
+# Where OAuth tokens are stored (the backend, and generated proxies by default)
+TOKEN_DIR = Path.home() / ".mcperiscope" / "tokens"
+
 
 def _safe_filename(key: str) -> str:
     """Derive a filesystem-safe filename from an arbitrary key string."""
@@ -42,7 +45,7 @@ class FileKeyValueStore:
     DEFAULT_COLLECTION = "__default__"
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = base_dir or (Path.home() / ".mcperiscope" / "tokens")
+        self._base_dir = base_dir or TOKEN_DIR
 
     # ------------------------------------------------------------------
     # Helpers

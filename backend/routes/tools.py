@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.models import ToolCallRequest
 from backend import mcp_manager
-from backend.routes._common import _make_trace_event
+from backend.routes._common import _make_trace_event, _require_connected
 from backend.state import session
 
 router = APIRouter()
@@ -14,8 +14,7 @@ router = APIRouter()
 
 @router.get("/tools")
 async def list_tools():
-    if not session.tools:
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     tools = []
     for t in session.tools:
         tools.append({
@@ -28,8 +27,7 @@ async def list_tools():
 
 @router.post("/tools/call")
 async def call_tool(req: ToolCallRequest):
-    if not mcp_manager.is_connected():
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
     try:
         start = time.time()
         result = await mcp_manager.call_tool(req.name, req.arguments)
@@ -50,8 +48,10 @@ async def call_tool(req: ToolCallRequest):
         result_text = "\n".join(c["text"] for c in content if c["type"] == "text")
         is_error = bool(getattr(result, "isError", False))
         error = (result_text or "Tool returned an error") if is_error else None
+        # Manual calls number their steps from 1, like each agent loop does.
+        manual_step = 1 + sum(1 for t in session.traces if t.get("prompt_index") is None)
         session.traces.append(_make_trace_event(
-            len(session.traces), start, req.name, req.arguments, result_text, duration, error,
+            manual_step, start, req.name, req.arguments, result_text, duration, error,
         ))
 
         return {"content": content, "isError": is_error}

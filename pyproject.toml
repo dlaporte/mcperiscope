@@ -26,8 +26,5 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["backend"]
 
-[project.optional-dependencies]
-dev = ["pytest", "httpx"]
-
 [dependency-groups]
-dev = ["pytest", "httpx"]
+dev = ["pytest"]

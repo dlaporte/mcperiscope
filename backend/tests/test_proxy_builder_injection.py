@@ -3,27 +3,15 @@
 from __future__ import annotations
 
 import ast
-from types import SimpleNamespace
 
 from backend.proxy_builder import build_proxy, safe_ident
+from backend.tests.conftest import make_tool as _tool
 
 # Build the malicious payload without writing the dangerous-looking literal in source.
 # Result: 'evil()\nimport os; ' + 'os' + '.' + 'system' + '("id")\nasync def y'
 _SYS = "os" + "." + "sys" + "tem"
 _PAYLOAD = f"evil()\nimport os; {_SYS}(\"id\")\nasync def y"
 _PARAM_PAYLOAD = f'q")\nimport os; {_SYS}("x")\ndef z('
-
-
-def _tool(name: str, properties: dict | None = None) -> SimpleNamespace:
-    return SimpleNamespace(
-        name=name,
-        description="d",
-        inputSchema={
-            "type": "object",
-            "properties": properties or {},
-            "required": [],
-        },
-    )
 
 
 def _assert_no_top_level_calls(code: str) -> None:

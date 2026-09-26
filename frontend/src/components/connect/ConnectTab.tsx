@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { useStore, PENDING_OAUTH_KEY } from "../../store";
+import { useStore, PENDING_OAUTH_KEY, selectPrimaryLLM, selectAnalystLLM } from "../../store";
 
 function LLMDisplay() {
-  const { llmConfigs, primaryLLM, analystLLM, setActiveTab } = useStore();
-  const agentConfig = llmConfigs.find((c) => c.id === primaryLLM);
-  const analystConfig = analystLLM ? llmConfigs.find((c) => c.id === analystLLM) : agentConfig;
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  const agentConfig = useStore(selectPrimaryLLM);
+  // No analyst config means "-- Same as Agent --"
+  const analystConfig = useStore(selectAnalystLLM) ?? agentConfig;
 
   return (
     <div>

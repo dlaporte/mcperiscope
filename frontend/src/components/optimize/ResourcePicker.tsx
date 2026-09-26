@@ -1,21 +1,20 @@
 import { useState, useMemo } from "react";
-import { useStore } from "../../store";
+import { useStore, selectLoadedResourceTokens } from "../../store";
 import { estimateResourceTokens } from "../../utils/tokens";
 
 type SortMode = "name" | "tokens";
-
 
 export function ResourcePicker() {
   const resources = useStore((s) => s.resources);
   const loadedResources = useStore((s) => s.loadedResources);
   const toggleResource = useStore((s) => s.toggleResource);
+  const totalTokens = useStore(selectLoadedResourceTokens);
   const [open, setOpen] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("name");
 
   const loadedUris = new Set(loadedResources.map((r) => r.uri));
   const loadedCount = loadedResources.length;
-  const totalTokens = loadedResources.reduce((sum, r) => sum + r.tokens, 0);
 
   const sortedResources = useMemo(() => {
     const loadedTokens = new Map(loadedResources.map((lr) => [lr.uri, lr.tokens]));

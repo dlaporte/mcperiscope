@@ -39,6 +39,7 @@ def test_manual_tool_error_is_recorded(monkeypatch):
     resp = asyncio.run(tools.call_tool(ToolCallRequest(name="t", arguments={})))
     assert resp["isError"] is True
     trace = session.traces[0]
+    assert trace["step"] == 1  # manual calls count from 1, like agent loops
     assert trace["error_category"] == "bad input"
     assert trace["prompt_index"] is None
 
@@ -53,18 +54,16 @@ def test_analyze_rejects_manual_traces_only(monkeypatch):
     assert excinfo.value.status_code == 400
 
 
-def test_run_optimize_analyst_inherit_clears_analyst_fields(monkeypatch):
+def test_run_optimize_analyst_inherit_clears_analyst_fields(monkeypatch, clean_session):
     from backend.routes import optimize
 
     monkeypatch.setattr(mcp_manager, "is_connected", lambda: True)
     for k, v in {
-        "api_key": "k", "api_key_provider": "anthropic", "api_key_endpoint": "", "provider": "anthropic",
-        "custom_endpoint": "", "analyst_model": "m", "analyst_provider": "custom",
+        "api_key": "k", "api_key_provider": "anthropic", "analyst_model": "m", "analyst_provider": "custom",
         "analyst_endpoint": "https://llm.example/v1", "analyst_api_key": "ak",
         "analyst_api_key_provider": "custom", "analyst_api_key_endpoint": "https://llm.example/v1",
-        "eval_results": [], "custom_context_window": 128_000,
     }.items():
-        monkeypatch.setattr(session, k, v)
+        setattr(session, k, v)
     req = optimize.OptimizeRunRequest(analyst_inherit=True, analyst_api_key="ignored", custom_context_window=64_000)
     with pytest.raises(HTTPException) as excinfo:  # no evals: rejected after binding
         asyncio.run(optimize.run_optimize(req))

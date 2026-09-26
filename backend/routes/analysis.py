@@ -6,18 +6,27 @@ from fastapi import APIRouter, HTTPException
 
 from backend import mcp_manager
 from backend.mcp_optimizer.inventory import (
-    SIMILAR_NAME_MAX_DISTANCE,
+    OVERSIZED_TOOL_TOKENS,
+    TRIMMED_TOOL_TOKENS,
     estimate_tokens,
     find_name_clusters,
-    levenshtein,
+    similar_name_distance,
     tool_token_budget,
 )
 from backend.proxy_builder import mark_plan_only
+from backend.routes._common import _require_connected
 from backend.state import context_window_for, session
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Estimated menu tokens of the single lookup(table) tool that replaces them
+LOOKUP_TOOL_TOKENS = 50
+# Markdown resources above this many tokens are worth condensing
+CONDENSE_MIN_TOKENS = 500
+# Condensing is expected to save about 1/N of a large resource's tokens
+CONDENSE_SAVINGS_DIVISOR = 3
 
 
 def generate_quick_wins(
@@ -38,14 +47,14 @@ def generate_quick_wins(
     # 1. Trim verbose descriptions — tools with oversized token footprints
     #    Action: use analyst LLM to rewrite descriptions more concisely
     budgets = [(t, tool_token_budget(t)) for t in tools]
-    oversized = [(t.name, b.total_tokens, b.description_tokens) for t, b in budgets if b.total_tokens > 300]
+    oversized = [(t.name, b.total_tokens, b.description_tokens) for t, b in budgets if b.total_tokens > OVERSIZED_TOOL_TOKENS]
     if oversized:
-        total_excess = sum(tokens - 100 for _, tokens, _ in oversized)
+        total_excess = sum(tokens - TRIMMED_TOOL_TOKENS for _, tokens, _ in oversized)
         detail_lines = [f"  {name}: {tokens} tokens ({desc_tokens} description)" for name, tokens, desc_tokens in sorted(oversized, key=lambda x: -x[1])[:10]]
         wins.append({
             "type": "trim_descriptions",
             "description": (
-                f"{len(oversized)} tools have token footprints over 300 tokens each. "
+                f"{len(oversized)} tools have token footprints over {OVERSIZED_TOOL_TOKENS} tokens each. "
                 f"The analyst LLM will rewrite their descriptions to be more concise "
                 f"while preserving tool selection accuracy.\n\n"
                 + "\n".join(detail_lines)
@@ -91,10 +100,10 @@ def generate_quick_wins(
             "type": "consolidate_lookups",
             "description": (
                 f"{len(no_param)} tools take no parameters (reference data lookups). "
-                f"Consolidate into a single lookup(table) tool to save ~{no_param_tokens - 50:,} menu tokens."
+                f"Consolidate into a single lookup(table) tool to save ~{no_param_tokens - LOOKUP_TOOL_TOKENS:,} menu tokens."
             ),
             "tools": no_param,
-            "estimated_savings": max(0, no_param_tokens - 50),
+            "estimated_savings": max(0, no_param_tokens - LOOKUP_TOOL_TOKENS),
         })
 
     # 4. Condense resources — markdown resources loaded into context
@@ -103,15 +112,15 @@ def generate_quick_wins(
         md_resources = [r for r in resources if r.get("mime_type") == "text/markdown"]
         total_resource_tokens = sum(r.get("tokens", 0) for r in md_resources)
 
-        if md_resources and total_resource_tokens > 500:
+        if md_resources and total_resource_tokens > CONDENSE_MIN_TOKENS:
             resource_pct = total_resource_tokens / ctx_window * 100 if ctx_window else 0
             large = sorted(
-                [r for r in md_resources if r.get("tokens", 0) > 500],
+                [r for r in md_resources if r.get("tokens", 0) > CONDENSE_MIN_TOKENS],
                 key=lambda x: x.get("tokens", 0),
                 reverse=True,
             )
             detail_lines = [f"  {r['name']}: ~{r['tokens']:,} tokens" for r in large[:5]]
-            estimated_savings = sum(r["tokens"] // 3 for r in large) if large else None
+            estimated_savings = sum(r["tokens"] // CONDENSE_SAVINGS_DIVISOR for r in large) if large else None
 
             description = (
                 f"{len(md_resources)} markdown resources consume ~{total_resource_tokens:,} tokens "
@@ -170,9 +179,7 @@ async def _scan_prompts() -> int:
     """Return the prompt definition tokens."""
     prompt_tokens = 0
     try:
-        prompts = await mcp_manager.list_prompts()
-        items = prompts if isinstance(prompts, list) else getattr(prompts, "prompts", [])
-        for p in items:
+        for p in await mcp_manager.list_prompts():
             name = getattr(p, "name", "") or ""
             desc = getattr(p, "description", "") or ""
             args = getattr(p, "arguments", []) or []
@@ -204,8 +211,9 @@ async def refresh_quick_wins() -> None:
 
 @router.get("/analysis/inventory")
 async def get_inventory():
+    _require_connected()
     if not session.inventory:
-        raise HTTPException(status_code=400, detail="Not connected or no inventory")
+        raise HTTPException(status_code=400, detail="No inventory")
 
     ctx_window = context_window_for(session.model)
     tool_budget = session.inventory.get("total_budget_tokens", 0)
@@ -241,8 +249,7 @@ async def get_inventory():
 
 @router.get("/analysis/tool/{name}")
 async def get_tool_stats(name: str):
-    if not session.tools:
-        raise HTTPException(status_code=400, detail="Not connected")
+    _require_connected()
 
     tool = next((t for t in session.tools if t.name == name), None)
     if not tool:
@@ -253,10 +260,9 @@ async def get_tool_stats(name: str):
     # Similar tools (small Levenshtein distance)
     similar = []
     for t in session.tools:
-        if t.name != name:
-            dist = levenshtein(t.name, name)
-            if dist <= SIMILAR_NAME_MAX_DISTANCE:
-                similar.append({"name": t.name, "distance": dist})
+        dist = similar_name_distance(t.name, name)
+        if dist is not None:
+            similar.append({"name": t.name, "distance": dist})
     similar.sort(key=lambda x: x["distance"])
 
     # Cluster membership

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useStore, selectContextWindow } from "../../store";
+import { useStore, selectContextWindow, selectLoadedResourceTokens, selectLatestPeakContext } from "../../store";
 import { ContextGauge } from "../explore/ContextGauge";
 import { UsageBar } from "../shared/UsageBar";
 import { menuTokens } from "../../utils/tokens";
@@ -15,7 +15,8 @@ export function OptimizeTab() {
   const contextWindow = useStore(selectContextWindow);
   const evalLoading = useStore((s) => s.evalLoading);
   const liveContextTokens = useStore((s) => s.liveContextTokens);
-  const loadedResources = useStore((s) => s.loadedResources);
+  const loadedResourceTokens = useStore(selectLoadedResourceTokens);
+  const latestPeakContext = useStore(selectLatestPeakContext);
 
   const [showContext, setShowContext] = useState(false);
 
@@ -28,12 +29,6 @@ export function OptimizeTab() {
     return null;
   }, [evalResults]);
 
-  // Token cost of loaded resources
-  const loadedResourceTokens = useMemo(
-    () => loadedResources.reduce((sum, r) => sum + r.tokens, 0),
-    [loadedResources]
-  );
-
   // Compute context window usage — live estimate while loading, API-reported when done
   const tokenUsage = useMemo(() => {
     // While eval is in progress, use the live streaming estimate
@@ -41,22 +36,12 @@ export function OptimizeTab() {
       return { total: liveContextTokens };
     }
 
-    // Find the most recent eval with API usage data
-    let peakContext = 0;
-    for (let i = evalResults.length - 1; i >= 0; i--) {
-      const usage = evalResults[i]?.usage;
-      if (usage?.peak_context_tokens) {
-        peakContext = usage.peak_context_tokens;
-        break;
-      }
-    }
-
-    if (peakContext > 0) {
-      return { total: peakContext };
+    if (latestPeakContext > 0) {
+      return { total: latestPeakContext };
     }
 
     return { total: menuTokens(inventory) + loadedResourceTokens };
-  }, [evalResults, inventory, evalLoading, liveContextTokens, loadedResourceTokens]);
+  }, [latestPeakContext, inventory, evalLoading, liveContextTokens, loadedResourceTokens]);
 
   return (
     <div className="h-full flex flex-col relative">

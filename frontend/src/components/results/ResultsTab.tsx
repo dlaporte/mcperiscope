@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../../api/client";
-import { useStore, includedBackendIndices, selectContextWindow } from "../../store";
+import { useStore, includedBackendIndices, selectContextWindow, selectLoadedResourceTokens } from "../../store";
 import { ComparisonTable } from "./ComparisonTable";
 import { AnalystResults } from "./AnalystResults";
 import { RecommendationsPanel } from "./RecommendationsPanel";
@@ -114,7 +114,7 @@ export function ResultsTab() {
   // Joined so the selector result is stable between renders
   const includedKey = useStore((s) => includedBackendIndices(s).join(","));
   // Baseline total context includes the loaded resources
-  const loadedResourceTokens = useStore((s) => s.loadedResources.reduce((sum, r) => sum + r.tokens, 0));
+  const loadedResourceTokens = useStore(selectLoadedResourceTokens);
   const contextWindow = useStore(selectContextWindow);
 
   const [showResponses, setShowResponses] = useState(false);
@@ -272,7 +272,7 @@ export function ResultsTab() {
             </CollapsibleSection>
           )}
 
-          {selectedRun && <ExportPanel runId={selectedRunId} />}
+          {selectedRun && <ExportPanel runId={selectedRun.id} />}
         </div>
         </div>
       </div>

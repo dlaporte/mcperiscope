@@ -1,7 +1,7 @@
 """Headless OAuth provider for FastMCP's Client.
 
 Provides ``HeadlessOAuth``: if no browser is available, the authorization URL
-is captured and the auth code can be supplied manually.
+is captured and the redirect (callback) URL can be supplied programmatically.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ class HeadlessOAuth(OAuth):
     """OAuth provider that supports headless environments.
 
     Instead of opening a browser and running a localhost callback server,
-    it captures the authorization URL and waits for the auth code to be
-    supplied programmatically via ``supply_auth_code()``.
+    it captures the authorization URL and waits for the callback URL (with
+    the auth code and state) to be supplied via ``supply_callback_url()``.
     """
 
     def __init__(self, **kwargs: Any) -> None:

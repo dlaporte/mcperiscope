@@ -1,9 +1,8 @@
 """Report generation for MCP Optimizer.
 
-Produces three output types:
+Produces two output types:
 1. Optimization plan (Markdown) - actionable changes for real MCP code
-2. Analysis report (Markdown) - detailed findings
-3. Analysis report (HTML) - self-contained interactive web report
+2. Analysis report (HTML) - self-contained interactive web report
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ def _rec_savings(rec: dict) -> int:
     return rec.get("estimated_token_savings") or rec.get("estimated_savings") or 0
 
 
-# (label, key, format) rows of the before/after comparison (session.comparison)
+# (label, key, format) rows of a run's before/after comparison
 _COMPARISON_METRICS = [
     ("Tool Count", "tool_count", "number"),
     ("Menu Tokens", "menu_tokens", "number"),
@@ -75,7 +74,7 @@ _VERDICT_BADGES = {
 
 
 def _delta_value(delta: Any) -> Any:
-    """session.comparison stores deltas as {"value", "pct"}; reports show the value."""
+    """Comparisons store deltas as {"value", "pct"}; reports show the value."""
     return delta.get("value") if isinstance(delta, dict) else delta
 
 
@@ -200,164 +199,6 @@ def generate_plan_md(
         for j, prompt in enumerate(live_prompts, 1):
             lines.append(f"{j}. {prompt}")
         lines.append("")
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Analysis report (Markdown)
-# ---------------------------------------------------------------------------
-
-
-def generate_report_md(data: dict) -> str:
-    """Generate a full analysis report as Markdown."""
-    url = data.get("url", "unknown")
-    inventory = data.get("inventory", {})
-    analysis = data.get("analysis", {})
-    recommendations = data.get("recommendations", [])
-    prompts = data.get("prompts", [])
-    traces = data.get("traces", [])
-    comp = data.get("comparison")
-    analyst = _analyst_by_index(data.get("analyst_results", []), prompts)
-
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines: list[str] = []
-
-    lines.append("# MCP Optimizer Analysis Report")
-    lines.append("")
-    lines.append(f"**Target:** `{url}`  ")
-    lines.append(f"**Generated:** {now}")
-    lines.append("")
-
-    # ---- 1. Executive Summary ----
-    lines.append("## 1. Executive Summary")
-    lines.append("")
-
-    tool_count = inventory.get("tool_count", 0)
-    budget = inventory.get("total_budget_tokens", 0)
-    total_savings = sum(_rec_savings(r) for r in recommendations)
-    high_impact = [r for r in recommendations if r.get("impact") == "HIGH"]
-    med_impact = [r for r in recommendations if r.get("impact") == "MEDIUM"]
-
-    lines.append(f"- **{tool_count}** tools consuming **{budget:,}** menu tokens")
-    lines.append(f"- **{len(recommendations)}** optimization recommendations "
-                 f"({len(high_impact)} high, {len(med_impact)} medium impact)")
-    lines.append(f"- **{total_savings:,}** estimated token savings")
-
-    accuracy = _comparison_accuracy(comp)
-    if accuracy is not None:
-        lines.append(f"- **Accuracy:** {accuracy * 100:.0f}% of proxy answers equivalent to baseline")
-
-    lines.append(f"- **Assessment:** {inventory.get('budget_assessment', 'N/A')}")
-    lines.append("")
-
-    # ---- 2. Tool Inventory ----
-    lines.append("## 2. Tool Inventory")
-    lines.append("")
-
-    budgets = inventory.get("tool_budgets", [])
-    if budgets:
-        lines.append("| Tool | Desc Tokens | Schema Tokens | Total | Description Quality |")
-        lines.append("|------|------------|---------------|-------|-------------------|")
-
-        # Build description scores map
-        desc_scores = {}
-        static = analysis.get("static_analysis", {})
-        for d in static.get("descriptions", []):
-            desc_scores[d["name"]] = d.get("overall_score", "?")
-
-        for b in budgets:
-            name = b.get("name", b) if isinstance(b, dict) else b
-            desc_tok = b.get("description_tokens", 0) if isinstance(b, dict) else 0
-            schema_tok = b.get("schema_tokens", 0) if isinstance(b, dict) else 0
-            total_tok = b.get("total_tokens", 0) if isinstance(b, dict) else 0
-            quality = desc_scores.get(name, "N/A")
-            lines.append(f"| `{name}` | {desc_tok} | {schema_tok} | {total_tok} | {quality}/10 |")
-        lines.append("")
-    else:
-        lines.append("_No tool inventory data available._")
-        lines.append("")
-
-    # ---- 3. Optimization Recommendations ----
-    lines.append("## 3. Optimization Recommendations")
-    lines.append("")
-
-    if not recommendations:
-        lines.append("_No recommendations._")
-    else:
-        # Group by impact
-        for impact_level in ("HIGH", "MEDIUM", "LOW"):
-            group = [r for r in recommendations if r.get("impact") == impact_level]
-            if not group:
-                continue
-            lines.append(f"### {impact_level} Impact")
-            lines.append("")
-            for rec in group:
-                lines.append(f"**{rec.get('id', '?')}** — {rec.get('description', '')}")
-                lines.append("")
-                lines.append(f"- Type: `{rec.get('type', '?')}`")
-                lines.append(f"- Risk: {rec.get('risk', '?')}")
-                source_tools = _rec_tools(rec)
-                if source_tools:
-                    lines.append(f"- Source: {', '.join(f'`{t}`' for t in source_tools)}")
-                savings = _rec_savings(rec)
-                if savings:
-                    lines.append(f"- Savings: ~{savings:,} tokens")
-                evidence = rec.get("evidence", "")
-                if evidence:
-                    lines.append(f"- Evidence: {evidence}")
-                lines.append("")
-
-    # ---- 4. Evaluation Results ----
-    lines.append("## 4. Evaluation Results")
-    lines.append("")
-
-    # Positional by eval index; trace groups and analyst results share it.
-    trace_groups = group_traces_by_prompt(traces)
-    live = [(i, p) for i, p in enumerate(prompts) if p is not None]
-    if not live:
-        lines.append("_No evaluation results available._")
-    else:
-        for i, prompt_text in live:
-            result = analyst.get(i)
-            label = _VERDICT_BADGES.get(result.get("verdict"), ("NOT COMPARED", ""))[0] if result else "NOT COMPARED"
-            lines.append(f"### Prompt {i + 1}: {label}")
-            lines.append("")
-            lines.append(f"> {prompt_text}")
-            lines.append("")
-            calls = [t.get("tool_name", "?") for t in trace_groups.get(i, [])]
-            lines.append(f"- **Tool calls:** {' → '.join(f'`{c}`' for c in calls) if calls else 'none'}")
-            if result and result.get("explanation"):
-                lines.append(f"- **Analyst:** {result['explanation']}")
-            lines.append("")
-    lines.append("")
-
-    # ---- 5. Before/After Comparison ----
-    if isinstance(comp, dict) and "baseline" in comp and "proxy" in comp:
-        lines.append("## 5. Before / After Comparison")
-        lines.append("")
-        bl = comp["baseline"]
-        px = comp["proxy"]
-        dl = comp.get("delta", {})
-        lines.append("| Metric | Baseline | Proxy | Delta |")
-        lines.append("|--------|----------|-------|-------|")
-        for label, key, fmt in _COMPARISON_METRICS:
-            bv = _fmt_value(bl.get(key), fmt)
-            pv = _fmt_value(px.get(key), fmt)
-            dv = _delta_value(dl.get(key))
-            if isinstance(dv, (int, float)) and fmt == "percent":
-                dv = f"{dv:+.2%}"
-            elif isinstance(dv, (int, float)):
-                dv = f"{dv:+}" if dv != 0 else "0"
-            else:
-                dv = "N/A"
-            lines.append(f"| {label} | {bv} | {pv} | {dv} |")
-        lines.append("")
-
-        warning = comp.get("accuracy_warning")
-        if warning:
-            lines.append(f"> **Warning:** {warning}")
-            lines.append("")
 
     return "\n".join(lines)
 

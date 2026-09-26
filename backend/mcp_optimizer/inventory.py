@@ -55,6 +55,13 @@ def estimate_tokens(text: str) -> int:
 # Per-tool budget
 # ---------------------------------------------------------------------------
 
+# A tool definition over this many menu tokens is oversized: the
+# trim_descriptions quick win rewrites its description...
+OVERSIZED_TOOL_TOKENS = 300
+# ...down to about this many tokens (the rewrite prompt asks for under 100).
+TRIMMED_TOOL_TOKENS = 100
+
+
 
 def tool_token_budget(tool: Tool) -> ToolBudgetEntry:
     """Calculate token cost of a single tool definition."""
@@ -106,6 +113,14 @@ def levenshtein(a: str, b: str) -> int:
         prev, curr = curr, prev
 
     return prev[len_b]
+
+
+def similar_name_distance(a: str, b: str) -> int | None:
+    """Edit distance of two different but similar names, else None."""
+    if a == b or abs(len(a) - len(b)) > SIMILAR_NAME_MAX_DISTANCE:
+        return None
+    dist = levenshtein(a, b)
+    return dist if dist <= SIMILAR_NAME_MAX_DISTANCE else None
 
 
 # ---------------------------------------------------------------------------

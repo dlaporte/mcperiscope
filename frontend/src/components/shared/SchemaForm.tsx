@@ -42,7 +42,6 @@ function ValuePicker({
     <div ref={ref} className="relative inline-block">
       <button
         type="button"
-        onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setOpen(!open)}
         className="text-[10px] ml-1.5 tabular-nums"
         style={{ color: 'var(--sub-brass)' }}
@@ -75,7 +74,6 @@ function ValuePicker({
                   backgroundColor: isSelected ? 'rgba(196,154,42,0.15)' : 'transparent',
                   borderBottom: '1px solid rgba(74,78,80,0.5)',
                 }}
-                onMouseDown={(e) => e.stopPropagation()}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--sub-panel-light)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = isSelected ? 'rgba(196,154,42,0.15)' : 'transparent')}
                 onClick={() => {
@@ -279,7 +277,7 @@ export function SchemaForm({ schema, onSubmit, submitLabel, loading, initialValu
   const isAutoFilled = (key: string) => autoFilledKeys.has(key) && !editedKeys.has(key);
 
   const handleChange = (key: string, value: any) => {
-    setValues({ ...values, [key]: value });
+    setValues((prev) => ({ ...prev, [key]: value }));
     setEditedKeys((prev) => new Set(prev).add(key));
   };
 

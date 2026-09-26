@@ -56,14 +56,8 @@ async def _fake_call_tool(name, arguments):
 
 
 @pytest.fixture
-def fake_session(monkeypatch):
-    for attr, value in {
-        "tools": [TOOL], "eval_results": [], "traces": [], "prompts": [],
-        "loaded_resources": {}, "api_key": "", "api_key_provider": "",
-        "api_key_endpoint": "", "provider": "anthropic", "custom_endpoint": "",
-        "model": "claude-sonnet-4-6",
-    }.items():
-        monkeypatch.setattr(session, attr, value)
+def fake_session(monkeypatch, clean_session):
+    clean_session.tools = [TOOL]
     monkeypatch.setattr(mcp_manager, "is_connected", lambda: True)
     monkeypatch.setattr(mcp_manager, "call_tool", _fake_call_tool)
     llm = _FakeLLM()
@@ -113,6 +107,8 @@ def test_evaluate_event_sequence(fake_session):
     assert data[7] == {"context_tokens": 150, "source": "api"}
 
     done = data[8]
+    # The frontend reads exactly these keys; contextWindow is fetched separately.
+    assert set(done) == {"prompt", "answer", "toolChain", "traceEvents", "usage", "index", "error", "stopped"}
     assert done["prompt"] == "find x"
     assert done["answer"] == "Done"
     assert done["index"] == 0
